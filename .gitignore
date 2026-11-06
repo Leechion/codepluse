@@ -1,0 +1,13 @@
+.data/
+node_modules/
+workspace/
+.worktrees/
+dist/
+.next/
+codeg-ui/out/
+
+.next/
+.codeg-src/
+*.exe
+.workbuddy/
+*.log
