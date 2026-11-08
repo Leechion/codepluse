@@ -1,0 +1,134 @@
+//go:build windows
+
+// codepluse uses the Codeg web UI inside a native Windows WebView2 window.
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+	"unsafe"
+
+	webview2 "github.com/jchv/go-webview2"
+)
+
+func main() {
+	// Let Windows render the webview at the display's native DPI instead of
+	// bitmap-scaling a DPI-unaware window, which blurs text at 125% and above.
+	syscall.NewLazyDLL("user32.dll").NewProc("SetProcessDPIAware").Call()
+	exe, _ := os.Executable()
+	root := flag.String("root", "", "workspace installation directory")
+	port := flag.Int("port", 8840, "local Go backend port")
+	page := flag.String("page", "/workspace", "local application page")
+	flag.Parse()
+	if *root == "" {
+		*root = filepath.Dir(exe)
+		// Builds live in dist/codepluse; resources point back to this checkout.
+		var config struct {
+			Root string `json:"root"`
+		}
+		if b, err := os.ReadFile(filepath.Join(*root, "workspace.json")); err == nil && json.Unmarshal(b, &config) == nil && config.Root != "" {
+			*root = config.Root
+		}
+	}
+	base := "http://127.0.0.1:" + strconv.Itoa(*port)
+	if err := ensureBackend(*root, base, *port); err != nil {
+		fail(err)
+		return
+	}
+	data := filepath.Join(*root, ".data", "webview2")
+	w := webview2.NewWithOptions(webview2.WebViewOptions{AutoFocus: true, DataPath: data, WindowOptions: webview2.WindowOptions{Title: "codepluse", Width: 1440, Height: 940, Center: true}})
+	if w == nil {
+		fail(fmt.Errorf("无法创建 WebView2 窗口，请安装 Microsoft Edge WebView2 Runtime"))
+		return
+	}
+	defer w.Destroy()
+	w.SetSize(900, 640, webview2.HintMin)
+	_ = w.Bind("__codegGoOpenWindow", func(path string) error {
+		if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || strings.ContainsAny(path, "\\\r\n") {
+			return fmt.Errorf("只能打开本地应用页面")
+		}
+		program := filepath.Join(filepath.Dir(exe), "codepluse.exe")
+		cmd := exec.Command(program, "--root", *root, "--port", strconv.Itoa(*port), "--page", path)
+		cmd.Dir = *root
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		go func() { _ = cmd.Wait() }()
+		return nil
+	})
+	_ = w.Bind("__codegGoCloseWindow", func() { w.Terminate() })
+	if !strings.HasPrefix(*page, "/") || strings.HasPrefix(*page, "//") || strings.ContainsAny(*page, "\\\r\n") {
+		fail(fmt.Errorf("应用页面路径无效"))
+		return
+	}
+	w.Navigate(base + *page)
+	w.Run()
+}
+
+func ensureBackend(root, base string, port int) error {
+	client := &http.Client{Timeout: 750 * time.Millisecond}
+	probe := func() (bool, error) {
+		r, err := client.Get(base + "/api/health")
+		if err != nil {
+			return false, nil
+		}
+		defer r.Body.Close()
+		var body struct {
+			Backend string `json:"backend"`
+			Version string `json:"codeg_version"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.Backend != "go" || body.Version == "" {
+			return false, fmt.Errorf("端口 %d 已由其他服务占用", port)
+		}
+		return true, nil
+	}
+	if ok, err := probe(); ok || err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(root, "codeg-ui", "out", "workspace.html")); err != nil {
+		return fmt.Errorf("界面尚未构建，请在项目中执行 npm run codeg:build：%w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".data"), 0755); err != nil {
+		return err
+	}
+	log, err := os.OpenFile(filepath.Join(root, ".data", "codeg-desktop-backend.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer log.Close()
+	backend := filepath.Join(root, "server-go", "serve-codepluse.exe")
+	if _, err := os.Stat(backend); os.IsNotExist(err) {
+		backend = filepath.Join(root, "server-go", "serve-codeg.exe")
+	}
+	cmd := exec.Command(backend)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "HARNESS_HUB_CODEG=1", "PORT="+strconv.Itoa(port), "HOST=127.0.0.1")
+	cmd.Stdout, cmd.Stderr = log, log
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); {
+		if ok, err := probe(); ok || err != nil {
+			return err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return fmt.Errorf("Go 服务未在 30 秒内就绪，请查看 .data/codeg-desktop-backend.log")
+}
+
+func fail(err error) {
+	text, _ := syscall.UTF16PtrFromString(err.Error())
+	title, _ := syscall.UTF16PtrFromString("codepluse 启动失败")
+	syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW").Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), 0x10)
+}

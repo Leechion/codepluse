@@ -1,0 +1,49 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noImplicitAny": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "incremental": true,
+    "esModuleInterop": true,
+    "allowJs": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@zcode/shared": ["./src/zcode/shared/index.ts"],
+      "@zcode/shared/*": ["./src/zcode/shared/*"],
+      "@zcode/services": ["./src/zcode/services/index.ts"],
+      "@zcode/provider": ["./src/zcode/provider/index.ts"],
+      "@zcode/rpc": ["./src/zcode/rpc/index.ts"],
+      "@zcode/model-option-map": ["./src/zcode/model-option-map/index.ts"],
+      "@zcode/zcode-cua/broker/ports": ["./src/zcode/zcode-cua/broker-ports.js"],
+      "@zcode/zcode-cua/pip-session": ["./src/zcode/zcode-cua/pip-session.d.ts"],
+      "@zcode/zcode-cua": ["./src/zcode/zcode-cua/index.d.ts"],
+      "@zcode/zcode-cua/*": ["./src/zcode/zcode-cua/*"]
+    },
+    "types": ["vitest/globals", "@testing-library/jest-dom"]
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": ["node_modules", "src-tauri", "browser-agent", "src/zcode"]
+}

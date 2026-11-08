@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harness Hub · 多智能体协调中枢</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#5b54d6">
+<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="chat-mode">
+
+<!-- ================================================================
+     界面 A · 对话式主界面（默认）
+     顶栏 / 左：对话与团队 / 中：对话流 / 右：执行面板 / 底：状态条
+     ================================================================ -->
+<div id="chatApp" class="chat-app">
+  <header class="app-topbar">
+    <div class="at-brand"><span class="at-mark">H</span><div class="at-brand-text"><strong>Harness Hub</strong><small>多智能体协调中枢</small></div></div>
+    <div class="at-title">
+      <span class="eyebrow">主要负责人 · 宰相</span>
+      <strong id="conversationTitle">新的对话</strong>
+    </div>
+    <div class="at-right">
+      <span id="conversationState" class="state-chip">自主分配</span>
+      <button id="openNativeSessions" class="btn btn-ghost btn-sm">原生会话</button>
+      <button id="openChatSettings" class="btn btn-ghost btn-sm">模型与分工</button>
+      <button id="openAutomations" class="btn btn-ghost btn-sm">定时任务</button>
+      <button id="openSystem" class="btn btn-ghost btn-sm">系统管理 ↗</button>
+    </div>
+  </header>
+
+  <div class="chat-body">
+    <aside class="team-sidebar">
+      <button class="new-conversation" id="newChat">＋ 新对话</button>
+      <div class="rail-label">对话</div>
+      <div id="chatHistory" class="chat-history"></div>
+      <div class="rail-label team-label">执行团队 <span id="teamCount" class="rail-count">0</span></div>
+      <div id="harnessTeam" class="harness-team"></div>
+      <div class="team-footer"><span id="chatConnection" class="connection-line">正在连接服务</span><button id="openAcpAgent" class="btn btn-ghost btn-sm">＋ 接入 ACP Harness</button></div>
+    </aside>
+
+    <main class="conversation-main">
+      <div id="conversationMessages" class="conversation-messages" aria-live="polite"></div>
+      <div class="composer-area">
+        <div id="nativePermissions"></div>
+        <div id="chatActivity" class="chat-activity"></div>
+        <form id="chatComposer" class="chat-composer">
+          <textarea id="chatInput" aria-label="给宰相的消息" rows="2" placeholder="告诉宰相你的目标，输入 @ 可直接委派某个执行端…"></textarea>
+          <div id="mentionPopup" class="mention-popup" hidden></div>
+          <div class="composer-bottom">
+            <span id="composerContext">宰相会自主选择 Harness 并分配任务</span>
+            <button id="sendChat" type="submit" aria-label="发送消息">发送 ↑</button>
+          </div>
+        </form>
+        <div id="chatError" class="chat-error" role="status"></div>
+        <p class="composer-hint">Enter 发送 · Shift + Enter 换行 · 执行中可追加消息，调整在当前调用结束后生效</p>
+      </div>
+    </main>
+
+    <aside class="exec-panel" id="execPanel">
+      <div class="ep-head"><h3>本轮执行</h3><span id="execState" class="state-chip">待命</span></div>
+      <div id="execTasks" class="ep-tasks"></div>
+      <div id="execMetrics" class="ep-metrics"></div>
+    </aside>
+  </div>
+</div>
+
+<!-- ================================================================
+     界面 B · 系统管理控制台
+     顶栏（全局指标）/ 左：导航 / 中：工作区 / 右：常驻实时面板 / 底：状态条
+     ================================================================ -->
+<div class="app">
+  <header class="app-topbar">
+    <div class="at-brand"><span class="at-mark">H</span><div class="at-brand-text"><strong>Harness Hub</strong><small>控制台</small></div></div>
+    <div class="at-metrics" id="topMetrics"></div>
+    <div class="at-right">
+      <button id="backToChat" class="btn btn-ghost btn-sm">← 返回对话</button>
+      <div class="live-pill"><span class="pulse"></span> 实时</div>
+      <button class="btn btn-primary btn-sm" id="openRegisterBtn"><span class="ico-plus"></span> 接入新工具</button>
+    </div>
+  </header>
+
+  <div class="app-body">
+    <aside class="sidebar">
+      <nav class="nav" id="nav">
+        <button class="nav-item active" data-page="missions"><i class="ni ni-flow"></i><span>任务指挥台</span></button>
+        <button class="nav-item" data-page="overview"><i class="ni ni-grid"></i><span>总览</span></button>
+        <button class="nav-item" data-page="agents"><i class="ni ni-bot"></i><span>智能体</span><em id="navAgentCount">0</em></button>
+        <button class="nav-item" data-page="tasks"><i class="ni ni-flow"></i><span>任务流</span><em id="navTaskCount">0</em></button>
+        <button class="nav-item" data-page="context"><i class="ni ni-lock"></i><span>上下文与权限</span><em id="navApprovalCount" class="em-warn">0</em></button>
+        <button class="nav-item" data-page="messages"><i class="ni ni-msg"></i><span>协作消息</span></button>
+        <button class="nav-item" data-page="audit"><i class="ni ni-shield"></i><span>访问审计</span></button>
+        <button class="nav-item" data-page="integrate"><i class="ni ni-plug"></i><span>接入与扩展</span></button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="engine-state">
+          <span class="dot dot-ok" id="engineDot"></span>
+          <div><strong id="engineLabel">引擎运行中</strong><small id="engineTick">tick 0</small></div>
+        </div>
+        <div class="side-meta">协议 v1.0 · 审计链 <span id="chainMini">有效</span></div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <div class="page-head">
+        <h1 id="pageTitle">任务指挥台</h1>
+        <span id="pageSub">下达目标 → 宰相拆解 → Harness 协作执行 → 汇总汇报</span>
+      </div>
+
+      <div class="content">
+
+        <!-- ---------- 任务指挥台 ---------- -->
+        <section class="page active" id="page-missions">
+          <div class="card mission-command">
+            <div class="card-head"><div><h3>下达任务</h3><p>你给出目标，宰相负责拆解、召集执行 Harness 并向你汇报。每一步都会调用真实执行端。</p></div></div>
+            <form id="missionForm">
+              <label class="form-field">任务目标<textarea class="input" id="missionObjective" rows="4" required placeholder="例如：分析当前项目，分别检查架构和关键缺陷，互相核对结论，最后给我一份有文件依据的报告。"></textarea></label>
+              <div class="form-grid">
+                <label class="form-field">宰相（负责规划和汇报）<select class="input" id="missionManager" required></select></label>
+                <label class="form-field">执行权限<select class="input" id="missionPermission"><option value="readonly">只读分析</option><option value="workspace">指定目录内读写</option><option value="shell">只读并允许命令</option></select></label>
+                <label class="form-field full">工作目录<input class="input" id="missionWorkdir" placeholder="留空使用服务端配置的目录"></label>
+                <div class="form-field full">执行 Harness（可多选）<div id="missionWorkers" class="check-grid"></div></div>
+              </div>
+              <p class="toolbar-note">不同 Harness 会收到同一份分工表和各自消息；写入任务顺序执行。真实调用会消耗所选工具的模型额度。</p>
+              <button class="btn btn-primary" id="missionSubmit" type="submit">交给宰相办理</button>
+              <span id="missionError" role="status"></span>
+            </form>
+          </div>
+          <div id="missionList" aria-live="polite"></div>
+        </section>
+
+        <!-- ---------- 总览 ---------- -->
+        <section class="page" id="page-overview">
+          <div class="kpi-grid" id="kpiGrid"></div>
+          <div id="realBanner"></div>
+          <div class="grid-2 grid-2-wide">
+            <div class="card">
+              <div class="card-head">
+                <div><h3>协作拓扑</h3><p>节点 = Harness 实例，连线 = 实时消息</p></div>
+                <span class="tag tag-soft" id="topoMsgCount">0 条消息</span>
+              </div>
+              <div class="topology" id="topology"></div>
+              <div class="topo-legend" id="topoLegend"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><div><h3>进行中的任务</h3><p>进度、执行方与协作方</p></div><button class="link-btn" data-goto="tasks">查看全部 →</button></div>
+              <div class="mini-tasks" id="overviewTasks"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------- 智能体 ---------- -->
+        <section class="page" id="page-agents">
+          <div class="toolbar">
+            <input class="input search" id="agentSearch" placeholder="搜索名称、类型或能力…">
+            <div class="seg" id="agentFilter">
+              <button class="on" data-status="all">全部</button>
+              <button data-status="online">在线</button>
+              <button data-status="busy">忙碌</button>
+              <button data-status="offline">离线</button>
+            </div>
+            <div class="spacer"></div>
+            <span class="toolbar-note" id="agentSummary"></span>
+          </div>
+          <div class="agent-grid" id="agentGrid"></div>
+        </section>
+
+        <!-- ---------- 任务流 ---------- -->
+        <section class="page" id="page-tasks">
+          <div class="toolbar">
+            <button class="btn btn-primary" id="openTaskBtn"><span class="ico-plus"></span> 派发任务</button>
+            <div class="seg" id="taskFilter">
+              <button class="on" data-filter="all">全部</button>
+              <button data-filter="active">进行中</button>
+              <button data-filter="problem">异常</button>
+              <button data-filter="real">真实执行</button>
+              <button data-filter="done">已结束</button>
+            </div>
+            <div class="spacer"></div>
+            <span class="toolbar-note" id="taskSummary"></span>
+          </div>
+          <div class="board" id="taskBoard"></div>
+        </section>
+
+        <!-- ---------- 上下文与权限 ---------- -->
+        <section class="page" id="page-context">
+          <div class="notice-card" id="approvalCard">
+            <div class="notice-icon">!</div>
+            <div class="notice-body">
+              <strong>待审批的上下文访问申请</strong>
+              <p>外部 Harness 请求访问会话上下文，需由你逐项授权。默认拒绝所有未授权访问。</p>
+              <div class="approval-list" id="approvalList"></div>
+            </div>
+          </div>
+
+          <div class="grid-2 grid-2-uneven">
+            <div class="card">
+              <div class="card-head"><div><h3>会话上下文</h3><p>按密级隔离，读取自动脱敏</p></div><span class="tag tag-soft" id="sessionCount"></span></div>
+              <div class="session-list" id="sessionList"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><div><h3>会话详情</h3><p id="sessionDetailSub">选择一个会话查看条目与版本</p></div></div>
+              <div id="sessionDetail" class="session-detail empty-state">← 从左侧选择会话</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div><h3>授权矩阵</h3><p>点击空格新增授权、点击已授权单元格撤销；绝密会话不接受通配授权，必须显式单列授予</p></div>
+              <button class="btn btn-ghost btn-sm" id="openGrantBtn"><span class="ico-plus"></span> 新增授权</button>
+            </div>
+            <div class="table-wrap"><table class="table matrix" id="grantMatrix"></table></div>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-head"><div><h3>生效中的授权</h3><p>可随时撤销，撤销立即生效</p></div></div>
+              <div class="grant-list" id="grantList"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><div><h3>全局安全策略</h3><p>用户可控的隔离与通信边界</p></div></div>
+              <div class="policy-list" id="policyPanel"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------- 协作消息 ---------- -->
+        <section class="page" id="page-messages">
+          <div class="card compose-card">
+            <div class="card-head"><div><h3>发送标准信封消息</h3><p>所有跨工具通信都经消息总线鉴权并写入审计链</p></div></div>
+            <div class="compose-row">
+              <label>发送方<select id="msgFrom" class="input"></select></label>
+              <label>接收方<select id="msgTo" class="input"></select></label>
+              <label>类型<select id="msgKind" class="input"></select></label>
+              <label>密级<select id="msgSens" class="input"></select></label>
+              <label class="grow">内容<input id="msgText" class="input" placeholder="输入协作内容…"></label>
+              <button class="btn btn-primary" id="sendMsgBtn">发送</button>
+            </div>
+            <label class="toolbar-note"><input type="checkbox" id="msgDeliver" checked disabled> 消息直接投递到真实 Harness（CLI 使用只读权限）</label>
+          </div>
+          <div class="grid-2 grid-2-uneven">
+            <div class="card">
+              <div class="card-head">
+                <div><h3>协作记录</h3><p>按时间倒序，含被拦截的消息</p></div>
+                <div class="seg" id="msgFilter">
+                  <button class="on" data-filter="all">全部</button>
+                  <button data-filter="collab">协作</button>
+                  <button data-filter="task">任务</button>
+                  <button data-filter="denied">已拦截</button>
+                </div>
+              </div>
+              <div class="msg-feed" id="messageFeed"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><div><h3>信封原文</h3><p>标准化协议 v1.0</p></div></div>
+              <div class="envelope-view" id="envelopeView"><div class="empty-state">点击左侧任意消息查看完整信封与鉴权结果</div></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------- 审计 ---------- -->
+        <section class="page" id="page-audit">
+          <div class="chain-banner" id="chainBanner"></div>
+          <div class="card">
+            <div class="card-head">
+              <div><h3>访问审计日志</h3><p>哈希链防篡改，记录每一次上下文访问、授权与消息投递</p></div>
+              <div class="seg" id="auditFilter">
+                <button class="on" data-decision="all">全部</button>
+                <button data-decision="denied">仅拦截</button>
+                <button data-decision="pending">仅待审</button>
+              </div>
+            </div>
+            <input class="input search full" id="auditSearch" placeholder="搜索操作者、动作、对象或详情…">
+            <div class="table-wrap"><table class="table" id="auditTable"></table></div>
+          </div>
+        </section>
+
+        <!-- ---------- 接入与扩展 ---------- -->
+        <section class="page" id="page-integrate">
+          <div id="realSettings"></div>
+          <div class="card">
+            <div class="card-head"><div><h3>分层架构</h3><p>新增一个 Harness 只需实现适配器契约，无需改动调度、通信或界面</p></div></div>
+            <div class="arch-layers" id="archLayers"></div>
+          </div>
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-head"><div><h3>标准通信信封</h3><p>所有工具使用同一 schema，消息总线统一鉴权</p></div></div>
+              <pre class="code-block" id="envelopeSpec"></pre>
+            </div>
+            <div class="card">
+              <div class="card-head"><div><h3>适配器契约</h3><p>实现 4 个方法即可接入</p></div></div>
+              <pre class="code-block" id="adapterSpec"></pre>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h3>对外接口</h3><p>REST 用于集成，SSE 用于实时订阅</p></div><span class="tag tag-soft" id="endpointBase"></span></div>
+            <div class="api-grid" id="apiGrid"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h3>运行时接入新 Harness</h3><p>填写后立即注册，工具会出现在智能体列表并参与调度</p></div></div>
+            <div class="inline-register" id="inlineRegister"></div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+
+    <aside class="rail" id="railPanel">
+      <div class="rail-block grow">
+        <div class="rail-head">
+          <h3>实时事件流</h3>
+          <div class="seg" id="logFilter">
+            <button class="on" data-level="all">全部</button>
+            <button data-level="warn">告警</button>
+            <button data-level="error">错误</button>
+          </div>
+        </div>
+        <div class="log-stream rail-log" id="liveLog"></div>
+      </div>
+      <div class="rail-block">
+        <div class="rail-head"><h3>待审批</h3><span class="rail-count" id="railApprovalBadge">0</span></div>
+        <div class="rail-approvals" id="railApprovals"></div>
+      </div>
+      <div class="rail-block">
+        <div class="rail-head"><h3>系统负载</h3><span class="rail-count" id="railLoadNote"></span></div>
+        <div class="load-list rail-loads" id="loadBars"></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- 底部状态条（两套界面共用） -->
+<footer class="status-bar" id="statusBar"></footer>
+
+<!-- ================= 对话设置 / 任务分工 弹窗 ================= -->
+<dialog id="chatSettings" class="chat-dialog"><form id="chatSettingsForm"><div class="dialog-heading"><h2>模型与分工</h2><button type="button" data-close-dialog="chatSettings" aria-label="关闭设置">×</button></div><p>宰相自主分配任务。你可以限定团队、选择模型，或点击侧边栏任务调整具体分工。</p><div class="settings-grid"><label>宰相 Harness<select id="chatManager"></select></label><label>宰相模型<input id="chatManagerModel" placeholder="留空使用 Harness 默认模型"></label><label>执行权限<select id="chatPermission"><option value="readonly">只读分析</option><option value="workspace">指定目录内读写</option><option value="shell">只读并允许命令</option></select></label><label>工作目录<input id="chatWorkdir" placeholder="服务端默认目录"></label><label>执行隔离<select id="chatIsolate"><option value="shared">共享工作目录</option><option value="worktree">独立 git 工作树（可审查合并）</option></select></label></div><h3>允许宰相调用的团队</h3><div id="workerSettings"></div><p class="settings-note">模型名称必须由对应 Harness / 网关支持。设置用于后续新任务；进行中的任务请在侧边栏单独调整。</p><div id="settingsError" class="chat-error"></div><button class="primary-chat-button" type="submit">保存设置</button></form></dialog>
+<dialog id="taskSettings" class="chat-dialog"><form id="taskSettingsForm"><div class="dialog-heading"><h2 id="selectedTaskTitle">任务分工</h2><button type="button" data-close-dialog="taskSettings" aria-label="关闭任务">×</button></div><div id="selectedTaskInfo"></div><div class="settings-grid"><label>执行 Harness<select id="taskHarness"></select></label><label>使用模型<input id="taskModel" placeholder="留空使用该 Harness 默认模型"></label></div><label>具体要求<textarea id="taskInstructions" rows="5"></textarea></label><details><summary>已有成果与收件箱</summary><pre id="selectedTaskOutput"></pre></details><p class="settings-note">调整会发送给宰相；正在进行的调用先结束，下一次执行使用新分工。</p><div id="taskSettingsError" class="chat-error"></div><button class="primary-chat-button" id="applyTaskSettings" type="submit">请宰相调整此任务</button></form></dialog>
+
+<!-- ================= Modals ================= -->
+<div class="overlay" id="overlay" hidden>
+  <div class="modal" id="modal">
+    <div class="modal-head"><h2 id="modalTitle">标题</h2><button class="modal-close" id="modalClose">×</button></div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+<div class="toast-stack" id="toastStack"></div>
+
+<dialog id="nativeSessions" class="chat-dialog native-session-dialog"><div class="native-dialog-content"><div class="dialog-heading"><h2>Harness 原生会话</h2><button type="button" data-close-dialog="nativeSessions" aria-label="关闭原生会话">×</button></div><button id="openAcpFromSessions" class="btn btn-ghost btn-sm" type="button">＋ 接入新 Harness</button><select id="nativeSessionSelect" class="input" aria-label="选择原生会话"></select><div id="nativeSessionIdentity"></div><button id="cancelNativeTurn" class="btn btn-ghost btn-sm" type="button">停止本次调用</button><div id="nativeSessionActivity"></div><div id="nativeSessionError" class="chat-error"></div></div></dialog>
+<dialog id="acpAgentSettings" class="chat-dialog"><form id="acpAgentForm"><div class="dialog-heading"><h2>接入 ACP Harness</h2><button type="button" data-close-dialog="acpAgentSettings" aria-label="关闭 ACP 接入">×</button></div><p>接入本机已安装、支持 ACP stdio 的适配器。会启动真实进程，使用该工具自身的登录和配置。</p><div class="settings-grid"><label>名称<input id="acpAgentName" class="input" required placeholder="例如 Gemini CLI"></label><label>类型标识<input id="acpAgentType" class="input" required placeholder="gemini"></label></div><label>可执行文件<input id="acpAgentCommand" class="input" value="node" required></label><label>参数（JSON 字符串数组）<textarea id="acpAgentArgs" rows="3" required placeholder='["C:/tools/agent/dist/index.js", "--acp"]'></textarea></label><div class="settings-grid"><label>只读模式 ID<select id="acpReadMode" class="input"><option value="plan">plan</option><option value="read-only">read-only</option><option value="readonly">readonly</option></select></label><label>工作区模式 ID<input id="acpWriteMode" class="input" value="default"></label></div><div id="acpAgentError" class="chat-error"></div><button class="primary-chat-button" type="submit">接入真实执行端</button></form></dialog>
+<dialog id="automationsPanel" class="chat-dialog automation-dialog"><div class="automation-content"><div class="dialog-heading"><h2>定时任务</h2><button type="button" data-close-dialog="automationsPanel" aria-label="关闭定时任务">×</button></div><p class="automation-intro">到点自动向指定对话发送一条消息，与手动输入完全等价；宰相会照常决策、执行并汇报。</p><div id="automationList" class="automation-list"></div><form id="automationForm"><h3>新建定时任务</h3><div class="settings-grid"><label>目标对话<select id="automationChat" class="input"></select></label><label>执行计划（cron：分 时 日 月 周）<input id="automationCron" class="input" placeholder="0 9 * * 1-5 = 工作日 09:00" required></label></div><label>提示词<textarea id="automationPrompt" rows="3" required placeholder="例如：汇总昨天任务的进展，把未完成项整理成清单发给我。"></textarea></label><div id="automationError" class="chat-error"></div><button class="primary-chat-button" type="submit">创建定时任务</button></form></div></dialog>
+<div id="nativeModelLists"></div>
+<script>if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) { navigator.serviceWorker.register('/sw.js').catch(function () {}); }</script>
+<script src="../core/engine.js"></script>
+<script src="app.js"></script>
+<script src="missions.js"></script>
+<script src="chat.js"></script>
+</body>
+</html>

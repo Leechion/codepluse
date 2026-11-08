@@ -1,0 +1,19 @@
+allowBuilds:
+  '@parcel/watcher': true
+  '@swc/core': true
+  esbuild: true
+  msw: true
+  sharp: true
+  unrs-resolver: true
+overrides:
+  "@pierre/theming>shiki": 4.4.1
+  "@pierre/theming>@shikijs/themes": 4.4.1
+  "@pierre/diffs>shiki": 4.4.1
+  "@pierre/diffs>@shikijs/themes": 4.4.1
+ignoredBuiltDependencies:
+  - '@parcel/watcher'
+  - '@swc/core'
+  - esbuild
+  - msw
+  - sharp
+  - unrs-resolver
