@@ -21,6 +21,9 @@ import (
 )
 
 func main() {
+	// Let Windows render the webview at the display's native DPI instead of
+	// bitmap-scaling a DPI-unaware window, which blurs text at 125% and above.
+	syscall.NewLazyDLL("user32.dll").NewProc("SetProcessDPIAware").Call()
 	exe, _ := os.Executable()
 	root := flag.String("root", "", "workspace installation directory")
 	port := flag.Int("port", 8840, "local Go backend port")
@@ -41,9 +44,8 @@ func main() {
 		fail(err)
 		return
 	}
-	data, _ := os.UserCacheDir()
-	// Keep the existing profile location so renaming preserves local preferences.
-	w := webview2.NewWithOptions(webview2.WebViewOptions{AutoFocus: true, DataPath: filepath.Join(data, "Codeg Go", "WebView2"), WindowOptions: webview2.WindowOptions{Title: "codepluse", Width: 1440, Height: 940, Center: true}})
+	data := filepath.Join(*root, ".data", "webview2")
+	w := webview2.NewWithOptions(webview2.WebViewOptions{AutoFocus: true, DataPath: data, WindowOptions: webview2.WindowOptions{Title: "codepluse", Width: 1440, Height: 940, Center: true}})
 	if w == nil {
 		fail(fmt.Errorf("无法创建 WebView2 窗口，请安装 Microsoft Edge WebView2 Runtime"))
 		return

@@ -5,11 +5,59 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"harnesshub/internal/hub"
 )
+
+func TestNativeSteeringInjectsOnlyIntoRunningTurn(t *testing.T) {
+	r, agent, options := fixtureRuntime(t)
+	launch := r.LaunchFn
+	r.LaunchFn = func(a *hub.Agent, permission, cwd string) (*Launch, error) {
+		result, err := launch(a, permission, cwd)
+		if err == nil {
+			result.Args = append(result.Args, "--fork", "--steer")
+		}
+		return result, err
+	}
+	sid, err := r.Connect(agent, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.SupportsNativeSteering(sid) {
+		t.Fatal("steering capability not detected")
+	}
+	blocks := []map[string]any{{"type": "text", "text": "follow up"}}
+	if err := r.Steer(sid, blocks); err == nil || !strings.Contains(err.Error(), "no active turn") {
+		t.Fatalf("idle steer: %v", err)
+	}
+	done := make(chan Result, 1)
+	go func() { done <- r.Prompt(agent, "wait", options) }()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		err = r.Steer(sid, blocks)
+		if err == nil {
+			break
+		}
+		if !strings.Contains(err.Error(), "no active turn") || time.Now().After(deadline) {
+			t.Fatalf("steering failed: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	select {
+	case result := <-done:
+		if !result.OK || result.Output != "steered:follow up" {
+			t.Fatalf("wrong result: %#v", result)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("steered turn did not complete")
+	}
+	if err := r.Steer(sid, blocks); err == nil || !strings.Contains(err.Error(), "no active turn") {
+		t.Fatalf("idle steer started a detached turn: %v", err)
+	}
+}
 
 func fixtureRuntime(t *testing.T) (*Runtime, *hub.Agent, Options) {
 	t.Helper()
@@ -45,6 +93,118 @@ func TestPromptPreservesWireOrderAcrossTurns(t *testing.T) {
 	tools := r.Records("")[0].Turns[len(r.Records("")[0].Turns)-1].Tools
 	if len(tools) != 1 || tools[0]["status"] != "completed" {
 		t.Fatalf("tool updates out of order: %v", tools)
+	}
+}
+
+func TestForkCapabilityRequiresAnExplicitLiveAgentDeclaration(t *testing.T) {
+	r, agent, options := fixtureRuntime(t)
+	id, err := r.Connect(agent, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.SupportsFork(id) || r.SupportsFork("missing") {
+		t.Fatal("unadvertised fork was reported as supported")
+	}
+	r.mu.Lock()
+	d := r.bindings[id]
+	r.mu.Unlock()
+	d.mu.Lock()
+	caps := d.Info["agentCapabilities"].(map[string]any)
+	caps["sessionCapabilities"] = map[string]any{"fork": map[string]any{}}
+	d.mu.Unlock()
+	if !r.SupportsFork(id) {
+		t.Fatal("advertised fork capability was not detected")
+	}
+	if r.SupportsPointFork(id, agent) {
+		t.Fatal("an unverified adapter must not expose message-point forks")
+	}
+	d.mu.Lock()
+	d.Info["agentInfo"] = map[string]any{"name": "@agentclientprotocol/codex-acp", "version": "2.5.0"}
+	d.mu.Unlock()
+	if !r.SupportsPointFork(id, agent) {
+		t.Fatal("verified adapter did not expose message-point forks")
+	}
+	d.mu.Lock()
+	caps["sessionCapabilities"] = map[string]any{"fork": nil}
+	d.mu.Unlock()
+	if r.SupportsFork(id) {
+		t.Fatal("null fork capability was reported as supported")
+	}
+}
+
+func TestForkUsesNativeMessagePointAndKeepsSessionsIndependent(t *testing.T) {
+	r, agent, source := fixtureRuntime(t)
+	launch := r.LaunchFn
+	r.LaunchFn = func(a *hub.Agent, permission, cwd string) (*Launch, error) {
+		result, err := launch(a, permission, cwd)
+		if err == nil {
+			result.Args = append(result.Args, "--fork")
+		}
+		return result, err
+	}
+	if got := r.Prompt(agent, "remember original", source); !got.OK {
+		t.Fatal(got.Error)
+	}
+	if got := r.Prompt(agent, "remember later", source); !got.OK {
+		t.Fatal(got.Error)
+	}
+	sourceID := r.Records("")[0].ID
+	forkID, err := r.Fork(agent, sourceID, source, "new-branch", "fixture-message-1", nil)
+	if err != nil || forkID == sourceID {
+		t.Fatalf("fork: %s %v", forkID, err)
+	}
+	forkOptions := source
+	forkOptions.SessionKey = "new-branch"
+	if got := r.Prompt(agent, "recall", forkOptions); !got.OK || got.Output != "original" {
+		t.Fatalf("fork has wrong history: %+v", got)
+	}
+	if got := r.Prompt(agent, "recall", source); !got.OK || got.Output != "later" {
+		t.Fatalf("source history changed: %+v", got)
+	}
+	if _, err = r.Fork(agent, sourceID, source, "bad-branch", "missing-native-id", nil); err == nil {
+		t.Fatal("unknown fork point should fail rather than silently fork the tail")
+	}
+}
+
+func TestStreamingRenewsInactivityTimeout(t *testing.T) {
+	r, agent, options := fixtureRuntime(t)
+	options.TimeoutMs = 1000
+	res := r.Prompt(agent, "stream-slow", options)
+	if !res.OK || res.Output != "....." {
+		t.Fatalf("active stream was cancelled: %#v", res)
+	}
+}
+
+func TestIdlePromptStillTimesOut(t *testing.T) {
+	r, agent, options := fixtureRuntime(t)
+	options.TimeoutMs = 700
+	res := r.Prompt(agent, "wait", options)
+	if res.OK || res.Error != "ACP 会话超时" {
+		t.Fatalf("idle prompt did not time out: %#v", res)
+	}
+}
+
+func TestFullAccessModeSurvivesDriverRestart(t *testing.T) {
+	r, agent, options := fixtureRuntime(t)
+	options.Permission = "workspace"
+	options.Mode = "agent-full-access"
+	id, err := r.Connect(agent, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Records("")[0].Modes.CurrentModeID != "agent-full-access" {
+		t.Fatal("full access was downgraded")
+	}
+	if err = r.Configure(id, "mode", "read-only"); err != nil {
+		t.Fatal(err)
+	}
+	r.Shutdown()
+	if _, err = r.Connect(agent, options); err != nil {
+		t.Fatal(err)
+	}
+	rec := r.Records("")[0]
+	if rec.NativeMode != "read-only" || rec.Modes.CurrentModeID != "read-only" {
+		t.Fatal("latest user mode was not restored")
 	}
 }
 

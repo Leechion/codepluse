@@ -16,6 +16,7 @@
     "node_modules",
     "src-tauri",
     "browser-agent",
+    "src/zcode",
     "**/*.test.ts",
     "**/*.test.tsx"
   ]

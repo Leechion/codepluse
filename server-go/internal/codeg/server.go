@@ -11,6 +11,7 @@ import (
 
 	"harnesshub/internal/acp"
 	"harnesshub/internal/hub"
+	"harnesshub/internal/providers"
 )
 
 type Server struct {
@@ -28,6 +29,11 @@ type Server struct {
 	terminals   map[string]*TerminalSession
 	watchMu     sync.Mutex
 	watches     map[string]*WorkspaceWatch
+	auto        *autoStore
+	forge       *forgeStore
+	tasks2      *taskStore
+	browser     *browserManager
+	computer    *computerState
 }
 
 func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (string, error)) (*Server, error) {
@@ -36,6 +42,15 @@ func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (s
 		return nil, err
 	}
 	s := &Server{Runtime: rt, Hub: h, Root: root, Base: base, Resolve: resolve, store: st, connections: map[string]*Connection{}, subscribers: map[chan Row]bool{}, tasks: map[string]*Delegation{}, callers: map[string]*Caller{}, terminals: map[string]*TerminalSession{}}
+	s.auto = newAutoStore(root)
+	s.forge = newForgeStore(root)
+	s.tasks2 = newTaskStore(root)
+	s.tasks2.onChange = func(taskID int) { s.emit("task://changed", Row{"id": taskID}) }
+	s.browser = &browserManager{console: map[string][]Row{}}
+	s.computer = &computerState{}
+	if err := s.loadDelegations(); err != nil {
+		return nil, err
+	}
 	rt.OnUpdate = s.nativeUpdate
 	rt.ExtraMCP = s.extraMCP
 	rt.AllowInternalTool = s.allowInternalTool
@@ -135,6 +150,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, Row{"ok": true, "app": "codepluse", "data": Row{"status": "ok", "version": "2.0.0-go", "sessionRuntime": "acp-v1"}, "backend": "go", "codeg_version": "0.42.0"})
 		return
 	}
+	if r.URL.Path == "/api/upload_attachment" {
+		s.uploadAttachment(w, r)
+		return
+	}
 	if !strings.HasPrefix(r.URL.Path, "/api/") {
 		s.static(w, r)
 		return
@@ -183,6 +202,9 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, file)
 }
 func (s *Server) command(command string, a Row) (any, error) {
+	if command == "delete_conversation" {
+		return nil, s.deleteConversation(number(a["conversationId"]))
+	}
 	if command == "get_commit_message_settings" || command == "set_commit_message_settings" || command == "delete_commit_message_settings" {
 		return s.commitSettings(command, a)
 	}
@@ -198,22 +220,50 @@ func (s *Server) command(command string, a Row) (any, error) {
 	if strings.HasPrefix(command, "canvas_") {
 		return s.canvasCommand(command, a)
 	}
+	if strings.HasPrefix(command, "automation_") {
+		return s.automationCommand(command, a)
+	}
+	if strings.HasPrefix(command, "work_task_") {
+		return s.workTaskCommand(command, a)
+	}
+	if strings.HasPrefix(command, "officecli_") || strings.HasPrefix(command, "office_") ||
+		command == "start_office_watch" || command == "stop_office_watch" {
+		return s.officeCommand(command, a)
+	}
+	if strings.HasPrefix(command, "browser_") {
+		return s.browserCommand(command, a)
+	}
+	if strings.HasPrefix(command, "computer_") || command == "get_computer_tools_settings" ||
+		command == "set_computer_tools_enabled" || command == "set_computer_tools_preferences" {
+		return s.computerCommand(command, a)
+	}
+	if strings.HasPrefix(command, "app_update") || command == "check_app_update" ||
+		command == "perform_app_update" || command == "rollback_app" || command == "restart_app" {
+		return s.updaterCommand(command, a)
+	}
+	if strings.HasPrefix(command, "forge_") || command == "get_github_accounts" || command == "validate_github_token" || command == "update_github_accounts" || command == "folder_forge_remote" {
+		return s.forgeCommand(command, a)
+	}
 	if strings.HasPrefix(command, "git_") || command == "get_git_branch" {
 		return s.gitCommand(command, a)
 	}
 	switch command {
+	case "codepluse_providers_list":
+		return providers.Public(s.Root)
+	case "codepluse_provider_save":
+		return nil, providers.Save(s.Root, providers.Provider{ID: text(a["id"]), Name: text(a["name"]), Agent: text(a["agent"]), URL: text(a["url"]), Model: text(a["model"]), Key: text(a["key"])})
+	case "codepluse_provider_activate":
+		return nil, providers.Activate(s.Root, text(a["agent"]), text(a["id"]))
+	case "codepluse_provider_delete":
+		return nil, providers.Delete(s.Root, text(a["id"]))
 	case "acp_list_agents":
 		return s.agents(), nil
 	case "experts_list", "science_list", "experts_read_content", "science_read_content", "experts_list_all_install_statuses", "science_list_all_install_statuses", "officecli_skill_list_all_install_statuses", "acp_list_agent_runtime_skills", "acp_list_agent_skills":
 		return s.skills(command, a)
 	case "get_home_directory", "list_directory_entries", "list_directory_with_files", "get_file_tree", "list_workspace_files", "read_file_preview", "read_file_for_edit", "read_file_base64", "read_workspace_file_base64", "save_file_content", "save_file_copy", "get_git_head":
 		return s.files(command, a)
-	case "app_update_state":
-		return Row{"seq": 0, "status": "idle"}, nil
-	case "app_update_status", "check_app_update":
-		return Row{"currentVersion": "0.42.0-go", "update": nil, "selfUpdateSupported": false, "capability": "unsupported", "runtime": "standalone", "restartDelayMs": 0, "rollbackAvailable": false, "liveProgress": false}, nil
 	case "computer_available":
-		return false, nil
+		return s.computerAvailable(), nil
 	case "acp_get_agent_status":
 		for _, agent := range s.agents() {
 			if agent["agent_type"] == a["agentType"] {
@@ -235,6 +285,8 @@ func (s *Server) command(command string, a Row) (any, error) {
 		return Row{"state": "running", "listening": true, "socket_path": s.Base + "/api/codeg_mcp", "binary_path": exe, "tool_groups": []Row{{"key": "delegation", "enabled": true}, {"key": "feedback", "enabled": true}}, "companion_count": companions, "session_count": sessions, "active_delegations": active, "depth_limit": 4, "started_at": nil, "last_error": nil, "can_start": false}, nil
 	case "acp_connect":
 		return s.connect(a)
+	case "acp_fork":
+		return s.forkConversation(a)
 	case "acp_set_config_option":
 		s.mu.Lock()
 		c := s.connections[text(a["connectionId"])]
@@ -246,9 +298,13 @@ func (s *Server) command(command string, a Row) (any, error) {
 		if err := s.Runtime.Configure(c.RuntimeID, key, a["value"]); err != nil {
 			return nil, err
 		}
-		if key == "model" {
+		if key == "model" || key == "mode" {
 			s.mu.Lock()
-			c.Options.Model = text(a["value"])
+			if key == "model" {
+				c.Options.Model = text(a["value"])
+			} else {
+				c.Options.Mode = text(a["value"])
+			}
 			s.mu.Unlock()
 		}
 		s.publishSession(c.ID)
@@ -273,7 +329,7 @@ func (s *Server) command(command string, a Row) (any, error) {
 			return nil, err
 		}
 		v := s.runtimeView(rid)
-		return Row{"modes": modeWire(v["modes"]), "config_options": configWire(v), "available_commands": []Row{}, "unapplied_config_ids": []string{}, "prompt_capabilities": Row{"image": false, "audio": false, "embedded_context": false}}, nil
+		return Row{"modes": modeWire(v["modes"]), "config_options": configWire(v), "available_commands": []Row{}, "unapplied_config_ids": []string{}, "prompt_capabilities": s.Runtime.PromptCapabilities(rid)}, nil
 	case "acp_prompt":
 		return nil, s.prompt(a)
 	case "acp_cancel":
@@ -399,6 +455,12 @@ func (s *Server) command(command string, a Row) (any, error) {
 			turns = []Row{}
 		}
 		return Row{"summary": clone(row), "turns": clone(turns), "turns_offset": 0, "turns_total": len(turns)}, nil
+	case "get_folder_conversation_turns":
+		n := number(a["conversationId"])
+		if st.conversationLocked(n) == nil {
+			return nil, fmt.Errorf("会话不存在")
+		}
+		return st.conversationTurnsPageLocked(n, number(a["beforeIndex"]), number(a["limit"])), nil
 	case "create_conversation":
 		folder := number(a["folderId"])
 		if st.folderLocked(folder) == nil {

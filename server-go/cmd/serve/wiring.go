@@ -20,6 +20,7 @@ import (
 	"harnesshub/internal/hub"
 	"harnesshub/internal/mcpserver"
 	"harnesshub/internal/orch"
+	"harnesshub/internal/providers"
 )
 
 // ----------------------------- small helpers -----------------------------
@@ -95,7 +96,7 @@ func (s *server) realStatus() map[string]any {
 		warnings = append(warnings, "未找到 Codex CLI 可执行文件。")
 	}
 	if os.Getenv("HTTPS_PROXY") != "" || os.Getenv("https_proxy") != "" {
-		warnings = append(warnings, "检测到 HTTP 代理：Codex 已自动回退到本地网关（Responses API），首次调用约需 60s；如需直连官方后端可设置 HARNESS_HUB_CODEX_GATEWAY=0。")
+		warnings = append(warnings, "检测到 HTTP 代理；Codex 将使用自身的供应商配置。")
 	}
 	realTasks, realRunningTasks, realDone := 0, 0, 0
 	for _, t := range s.hub.Tasks {
@@ -233,7 +234,10 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 	if err != nil {
 		return nil, fmt.Errorf("未找到 node，无法启动 ACP 适配器")
 	}
-	env := buildEnv(tool)
+	env, err := buildEnv(tool)
+	if err != nil {
+		return nil, err
+	}
 	if tool == "codex" {
 		mode := "read-only"
 		if permission == "workspace" {
@@ -245,11 +249,43 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 		env = append(env, "CLAUDE_CODE_EXECUTABLE="+resolveBin("claude"))
 	}
 	args := []string{pkg}
+	if tool == "claude" {
+		provider, configured, err := providers.Active(ROOT, tool)
+		if err != nil {
+			return nil, fmt.Errorf("读取 API 供应商失败: %w", err)
+		}
+		if configured {
+			if provider.Source == "ccswitch" {
+				filtered := env[:0]
+				for _, item := range env {
+					if !strings.HasPrefix(strings.ToUpper(item), "ANTHROPIC_") && !strings.HasPrefix(strings.ToUpper(item), "CLAUDE_CODE_SUBAGENT_MODEL=") {
+						filtered = append(filtered, item)
+					}
+				}
+				env = filtered
+				for key, value := range provider.Env {
+					env = append(env, key+"="+value)
+				}
+				if provider.Model != "" && provider.Env["ANTHROPIC_MODEL"] == "" {
+					env = append(env, "ANTHROPIC_MODEL="+provider.Model)
+				}
+			} else {
+				env = append(env, "ANTHROPIC_BASE_URL="+provider.URL, "ANTHROPIC_AUTH_TOKEN="+provider.Key, "ANTHROPIC_API_KEY="+provider.Key, "ANTHROPIC_MODEL="+provider.Model)
+			}
+		}
+	}
 	if tool == "dsh" {
 		if permission != "workspace" {
 			return nil, fmt.Errorf("DSH 不提供只读会话模式，请使用其原生工作区策略")
 		}
 		args = append(args, "--profile", "acp")
+		patch, err := dshDesktopPatch()
+		if err != nil {
+			return nil, err
+		}
+		if patch != "" {
+			args = append(args, "--patch", patch)
+		}
 	}
 	if tool == "workbuddy" {
 		// The desktop lite bundle registers ACP through its server strategy.
@@ -396,6 +432,7 @@ func main() {
 		customAcp: map[string]map[string]any{}, agentLocks: map[string]*sync.Mutex{},
 		sseClients: map[chan []byte]bool{}}
 	rt.LaunchFn = srv.launchFn
+	rt.LaunchVersion = func(agent *hub.Agent) string { return providerVersion(agent.RealTool) }
 
 	logFn := func(level, source, text string) { h.Log(level, source, text) }
 	orchestrator := &orch.Orchestrator{Hub: h, Invoke: srv.invoke,
@@ -472,6 +509,10 @@ func main() {
 			func() {
 				defer func() { recover() }() // tick must never crash the server
 				srv.automations.Tick()
+				if srv.codeg != nil {
+					srv.codeg.TickAutomations()
+					srv.codeg.TickWorkTasks()
+				}
 			}()
 		}
 	}()

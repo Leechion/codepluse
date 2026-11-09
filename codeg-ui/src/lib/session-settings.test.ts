@@ -2,10 +2,32 @@ import { describe, expect, it } from "vitest"
 
 import {
   buildSessionSettings,
+  splitSessionSettings,
   type SessionChoiceSetting,
   type SessionSetting,
   type SessionSwitchSetting,
 } from "@/lib/session-settings"
+
+it("places permissions separately from model and reasoning settings", () => {
+  const options = [
+    select("model", "Model", "model", "gpt", ["gpt", "other"]),
+    select("reasoning_effort", "Reasoning", "thought_level", "high", ["low", "high"]),
+    select("mode", "Mode", "mode", "read-only", ["read-only", "workspace-write"]),
+  ]
+  const settings = buildSessionSettings({ configOptions: options, modes: [], currentModeId: null, modeTitle: "Mode" })
+  const groups = splitSessionSettings(settings, options)
+  expect(groups.permission.map((setting) => setting.key)).toEqual(["config:mode"])
+  expect(groups.model.map((setting) => setting.key)).toEqual(["config:model", "config:reasoning_effort"])
+  const legacy = buildSessionSettings({ configOptions: [], modes: [{ id: "plan", name: "Plan", description: null }, { id: "default", name: "Default", description: null }], currentModeId: "plan", modeTitle: "Mode" })
+  expect(splitSessionSettings(legacy, []).permission.map((setting) => setting.key)).toEqual(["mode"])
+})
+
+it("shows the DSH provider in the current model summary", () => {
+  const value = '["qwen-token-plan-cn","deepseek-flash"]'
+  const options = [select("model", "Model", "model", value, [{ value, name: "Flash", description: null }])]
+  const settings = buildSessionSettings({ configOptions: options, modes: [], currentModeId: null, modeTitle: "Mode" })
+  expect(settings[0].summary).toBe("qwen-token-plan-cn / Flash")
+})
 import type {
   SessionConfigOptionInfo,
   SessionConfigSelectOptionInfo,

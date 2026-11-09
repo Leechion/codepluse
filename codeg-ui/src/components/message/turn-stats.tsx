@@ -9,6 +9,8 @@ import {
   CopyIcon,
   ListTodo,
   Split,
+  ThumbsDown,
+  ThumbsUp,
 } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
 import {
@@ -36,6 +38,8 @@ interface TurnStatsProps {
   copyText?: string
   /** ISO timestamp marking when the assistant reply finished. */
   completedAt?: string | null
+  /** Timestamp of the assistant message, as recorded by the agent. */
+  createdAt?: string | null
   /** Fork the session at THIS reply. Undefined hides the affordance — the
    * session has no live connection, the agent has no `session/fork`, or this
    * surface doesn't own the conversation. */
@@ -53,6 +57,30 @@ interface TurnStatsProps {
 const iconButtonClass =
   "inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 
+export function formatMessageTime(
+  date: Date,
+  locale: string,
+  now = new Date()
+): string {
+  const time = new Intl.DateTimeFormat(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date)
+  const day = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+  const daysAgo = Math.round((day(now) - day(date)) / 86_400_000)
+  if (daysAgo === 0) return time
+  if (daysAgo === 1)
+    return `${new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(-1, "day")} ${time}`
+  const dayLabel = new Intl.DateTimeFormat(locale, {
+    ...(date.getFullYear() !== now.getFullYear()
+      ? { year: "numeric" as const }
+      : {}),
+    month: "short",
+    day: "numeric",
+  }).format(date)
+  return `${dayLabel} ${time}`
+}
+
 export function TurnStats({
   usage,
   duration_ms,
@@ -62,6 +90,7 @@ export function TurnStats({
   isResponseComplete = true,
   copyText = "",
   completedAt,
+  createdAt,
   onForkFromHere,
   forkDisabled = false,
   forkDisabledReason = "busy",
@@ -73,15 +102,8 @@ export function TurnStats({
   const chatAnimations = useChatAnimationsEnabled()
   const modelLabel = useModelLabel()
   const [isCopied, setIsCopied] = useState(false)
+  const [reaction, setReaction] = useState<"like" | "dislike" | null>(null)
   const timeoutRef = useRef<number>(0)
-  const shortTimeFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale, {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    [locale]
-  )
   const fullTimeFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat(locale, {
@@ -93,13 +115,14 @@ export function TurnStats({
 
   const completedAtDate = useMemo(() => {
     if (!isResponseComplete) return null
-    if (!completedAt) return null
-    const ms = new Date(completedAt).getTime()
-    if (Number.isNaN(ms)) return null
+    const value = createdAt ?? completedAt
+    if (!value) return null
+    const ms = new Date(value).getTime()
+    if (!Number.isFinite(ms) || ms <= 0) return null
     return new Date(ms)
-  }, [completedAt, isResponseComplete])
+  }, [createdAt, completedAt, isResponseComplete])
   const completedLabel = completedAtDate
-    ? shortTimeFormatter.format(completedAtDate)
+    ? formatMessageTime(completedAtDate, locale)
     : null
   const completedTooltip = completedAtDate
     ? fullTimeFormatter.format(completedAtDate)
@@ -208,6 +231,35 @@ export function TurnStats({
             </TooltipContent>
           </Tooltip>
         )}
+        {hasCopy &&
+          [
+            { value: "like" as const, Icon: ThumbsUp, label: t("likeReply") },
+            {
+              value: "dislike" as const,
+              Icon: ThumbsDown,
+              label: t("dislikeReply"),
+            },
+          ].map(({ value, Icon, label }) => (
+            <Tooltip key={value}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setReaction((current) => (current === value ? null : value))
+                  }
+                  className={cn(
+                    iconButtonClass,
+                    reaction === value && "bg-muted text-foreground"
+                  )}
+                  aria-label={label}
+                  aria-pressed={reaction === value}
+                >
+                  <Icon aria-hidden="true" className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{label}</TooltipContent>
+            </Tooltip>
+          ))}
         {hasCopy && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -346,7 +398,7 @@ export function TurnStats({
               <button
                 type="button"
                 className="inline-flex h-6 cursor-default items-center rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                aria-label={`${t("completedAt")}: ${completedTooltip}`}
+                aria-label={`${t(createdAt ? "messageCreatedAt" : "completedAt")}: ${completedTooltip}`}
               >
                 <span aria-hidden="true">{completedLabel}</span>
               </button>
@@ -354,7 +406,7 @@ export function TurnStats({
             <TooltipContent side="top">
               <div className="flex flex-col gap-0.5">
                 <span className="text-muted-foreground">
-                  {t("completedAt")}
+                  {t(createdAt ? "messageCreatedAt" : "completedAt")}
                 </span>
                 <span className="font-mono tabular-nums">
                   {completedTooltip}

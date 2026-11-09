@@ -1,5 +1,5 @@
 import { type ReactElement, type ReactNode } from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { describe, expect, it, vi } from "vitest"
 
@@ -73,6 +73,29 @@ const freshParts = (): AdaptedContentPart[] => [
 // a tool call renders through the FOLDABLE branch, not the plain early return,
 // so the split halves each need the answer independently.
 describe("CompletedTurnContent markdown mode", () => {
+  it("keeps an opened history open after metadata refresh and virtualization", () => {
+    const first = freshParts()
+    const refreshed = freshParts()
+    const view = renderWithIntl(
+      <CompletedTurnContent parts={first} completed durationMs={3_000} />
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Worked for/ }))
+    expect(screen.getByText(PROGRESS_TEXT)).toBeInTheDocument()
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <CompletedTurnContent parts={refreshed} completed durationMs={3_000} />
+      </NextIntlClientProvider>
+    )
+    view.unmount()
+    renderWithIntl(
+      <CompletedTurnContent parts={refreshed} completed durationMs={3_000} />
+    )
+    expect(screen.getByRole("button", { name: /Worked for/ })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    expect(screen.getByText(PROGRESS_TEXT)).toBeInTheDocument()
+  })
   it("keeps a live reply's prose in streaming mode on both sides of the fold", () => {
     renderWithIntl(
       <CompletedTurnContent parts={freshParts()} completed={false} />

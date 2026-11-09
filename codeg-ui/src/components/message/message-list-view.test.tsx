@@ -920,15 +920,7 @@ describe("currentNavTurnIdAt", () => {
   })
 })
 
-/**
- * The fork affordance sends a turn id to the backend, and the backend cannot
- * resolve an id this client minted for its own live stream — it tail-forks
- * instead of refusing. That is the right answer for the newest reply and a
- * silent wrong one for any earlier reply, which a steered turn creates: it
- * promotes as assistant / user message / assistant, so its first half sits
- * settled and non-tail with a fork button while the parser's name is still a
- * reparse away.
- */
+/** Only native message IDs can identify an exact fork point. */
 describe("isForkPointUnnamed", () => {
   function forkTurn(id: string, sourceTurnId?: string | null): MessageTurn {
     return {
@@ -944,17 +936,12 @@ describe("isForkPointUnnamed", () => {
     expect(isForkPointUnnamed(forkTurn("live-7-lm-1"), false)).toBe(true)
   })
 
-  it("allows one at the end of the thread — there the tail IS the fork point", () => {
-    expect(isForkPointUnnamed(forkTurn("live-7-lm-1"), true)).toBe(false)
+  it("withholds an unnamed reply even at the end of the thread", () => {
+    expect(isForkPointUnnamed(forkTurn("live-7-lm-1"), true)).toBe(true)
   })
 
   it("withholds the newest REPLY when a message follows it", () => {
-    // Steering at the very end of a turn promotes as assistant + user message
-    // with nothing after it: the reply is the newest one, and still not the
-    // tail. The backend's tail fork would land after the steered message, and
-    // a parse ending on a user turn never backfills a name to correct it — so
-    // "newest assistant run" is the wrong exception and `isThreadTail` is the
-    // right one.
+    // A following user message must never become part of an earlier fork.
     expect(isForkPointUnnamed(forkTurn("live-7-lm"), false)).toBe(true)
   })
 
@@ -964,10 +951,9 @@ describe("isForkPointUnnamed", () => {
     )
   })
 
-  it("leaves parser-named history alone", () => {
-    // Every historical turn arrives under a parser id and no `source_turn_id`;
-    // treating that as unnamed would grey out the whole thread.
-    expect(isForkPointUnnamed(forkTurn("turn-4"), false)).toBe(false)
+  it("withholds local history without a native message id", () => {
+    expect(isForkPointUnnamed(forkTurn("turn-4"), false)).toBe(true)
+    expect(isForkPointUnnamed(forkTurn("turn-4", "  "), true)).toBe(true)
   })
 
   it("says nothing about a group with no turns", () => {

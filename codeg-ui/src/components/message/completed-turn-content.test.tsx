@@ -43,6 +43,17 @@ const COMPLETED_PARTS: AdaptedContentPart[] = [
 // between tests. Render tests take a fresh copy.
 const freshCompletedParts = (): AdaptedContentPart[] => [...COMPLETED_PARTS]
 
+it("shows a plain completed answer without an execution header", () => {
+  const view = renderWithIntl(
+    <CompletedTurnContent
+      parts={[{ type: "text", text: "Plain answer." }]}
+      completed
+    />
+  )
+  expect(screen.getByText("Plain answer.")).toBeVisible()
+  expect(view.container.querySelector(".activity-capsule")).toBeNull()
+})
+
 /**
  * Prose the agent is still writing fades in a character at a time, each its
  * own span while it does: it is found by the element that holds all of it.

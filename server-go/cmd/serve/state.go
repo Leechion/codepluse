@@ -37,7 +37,7 @@ var realConfig = map[string]any{
 	"permission":    envStr("HARNESS_HUB_PERMISSION", "readonly"),
 	"workdir":       envStr("HARNESS_HUB_WORKDIR", ROOT),
 	"allowedRoot":   envStr("HARNESS_HUB_ALLOWED_ROOT", ROOT),
-	"timeoutMs":     envInt("HARNESS_HUB_TIMEOUT", 180000),
+	"timeoutMs":     envInt("HARNESS_HUB_TIMEOUT", 600000),
 	"maxConcurrent": envInt("HARNESS_HUB_CONCURRENCY", 2),
 	"defaultTool":   envStr("HARNESS_HUB_TOOL", "auto"),
 }

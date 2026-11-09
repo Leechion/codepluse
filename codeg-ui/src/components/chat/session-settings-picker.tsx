@@ -7,7 +7,17 @@ import {
   type FocusEvent,
   type KeyboardEvent,
 } from "react"
-import { Check, ChevronDown, Cog } from "lucide-react"
+import {
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Cog,
+  Hand,
+  Lightbulb,
+  ShieldAlert,
+  ShieldCheck,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 import { AgentIcon } from "@/components/agent-icon"
 import { Badge } from "@/components/ui/badge"
@@ -22,6 +32,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { ModelOptionList } from "@/components/chat/model-option-list"
 import { SelectorTooltip } from "@/components/chat/selector-tooltip"
+import { ComposerThoughtSlider } from "@/components/chat/composer/composer-thought-slider"
 import { useScrollbarSafeDismiss } from "@/hooks/use-scrollbar-safe-dismiss"
 import { flattenModelGroups } from "@/lib/model-config-groups"
 import type {
@@ -43,6 +54,8 @@ interface SessionSettingsPickerProps {
    *  the placeholder held in their place. `null` when nothing is loading. */
   loadingLabel: string | null
   onChange: OnChange
+  permission?: boolean
+  effortSlider?: boolean
 }
 
 /**
@@ -66,9 +79,12 @@ export function SessionSettingsPicker({
   settings,
   loadingLabel,
   onChange,
+  permission = false,
+  effortSlider = false,
 }: SessionSettingsPickerProps) {
   const t = useTranslations("Folder.chat.messageInput")
   const [open, setOpen] = useState(false)
+  const [providerMenuOpen, setProviderMenuOpen] = useState(false)
   // Keep the popover open while one of its scrollbars is dragged — see
   // `useScrollbarSafeDismiss`.
   const { contentRef, onPointerDownOutside, onFocusOutside } =
@@ -99,10 +115,28 @@ export function SessionSettingsPicker({
       return `${setting.title} ${value}`
     })
     .join(", ")}`
-  const parts = settings.filter((setting) => setting.summary)
+  const parts = permission
+    ? settings.map((setting) =>
+        setting.summary
+          ? setting
+          : {
+              ...setting,
+              summary:
+                setting.kind === "switch"
+                  ? setting.title
+                  : setting.currentLabel,
+            }
+      )
+    : settings.filter((setting) => setting.summary)
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) setProviderMenuOpen(false)
+      }}
+    >
       {/* Suppressed while the popover is open — it is non-modal, so the chip
           keeps taking hover underneath it (see SelectorTooltip). */}
       <SelectorTooltip label={t("agentSettings")} suppressed={open}>
@@ -111,6 +145,8 @@ export function SessionSettingsPicker({
             variant="ghost"
             size="xs"
             aria-label={label}
+            data-composer-collapse-priority={permission ? "1" : "3"}
+            data-composer-combined-model={permission ? undefined : "true"}
             // A pill tinted with the theme color chosen in Appearance
             // settings (`--primary`), translucent so it also sits over a
             // workspace background image. Hover and the open popover deepen
@@ -119,15 +155,24 @@ export function SessionSettingsPicker({
             // The agent's mark is one, so it would shrink inside its 14px
             // AgentIcon box, off the line the values are centered on. Hold
             // such SVGs at the box's size.
-            className="max-w-full min-w-0 shrink gap-1 bg-primary/10 px-2 text-muted-foreground hover:bg-primary/15 hover:text-foreground aria-expanded:bg-primary/15 aria-expanded:text-foreground dark:hover:bg-primary/15 [&_svg:not([class*='size-'])]:size-3.5"
+            className={cn(
+              "group/settings max-w-full min-w-0 shrink gap-1 px-2 text-muted-foreground hover:bg-primary/15 hover:text-foreground aria-expanded:bg-primary/15 aria-expanded:text-foreground data-[composer-compact=true]:px-1.5 group-data-[composer-model-icon=true]/toolbar:px-1.5 [&_svg:not([class*='size-'])]:size-3.5",
+              permission
+                ? "text-amber-700 dark:text-amber-400"
+                : "bg-primary/10"
+            )}
           >
-            <TriggerIcon agentType={agentType} />
+            {permission ? (
+              <ShieldCheck className="size-3.5" />
+            ) : (
+              <TriggerIcon agentType={agentType} />
+            )}
             {/* `overflow-hidden`: when even the shortest form of every value
                 does not fit, the last ones are cut at the chevron rather
                 than drawn underneath it. */}
             <span
               data-slot="settings-summary"
-              className="flex min-w-0 items-center overflow-hidden @max-[16rem]:hidden"
+              className="flex min-w-0 items-center overflow-hidden @max-[16rem]:hidden group-data-[composer-compact=true]/settings:hidden group-data-[composer-model-icon=true]/toolbar:hidden"
             >
               {parts.map((setting, index) => (
                 <Fragment key={setting.key}>
@@ -151,14 +196,14 @@ export function SessionSettingsPicker({
                 </Fragment>
               ))}
             </span>
-            <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+            <ChevronDown className="size-3 shrink-0 text-muted-foreground group-data-[composer-compact=true]/settings:hidden group-data-[composer-model-icon=true]/toolbar:hidden" />
           </Button>
         </PopoverTrigger>
       </SelectorTooltip>
       <PopoverContent
         ref={contentRef}
         side="top"
-        align="start"
+        align={permission ? "start" : "end"}
         aria-label={t("agentSettings")}
         tabIndex={-1}
         // Focus the panel itself rather than its first control: when that is
@@ -186,6 +231,11 @@ export function SessionSettingsPicker({
         <ScrollArea className="min-h-0 flex-1">
           <div className="flex flex-col gap-1 p-1.5">
             {settings.map((setting, index) => {
+              if (
+                providerMenuOpen &&
+                !(setting.kind !== "switch" && setting.isModel)
+              )
+                return null
               const previous = settings[index - 1]
               // A rule around each list (it scrolls on its own) and above the
               // switches, which read as a group of their own.
@@ -199,7 +249,33 @@ export function SessionSettingsPicker({
                   {separated ? (
                     <div aria-hidden className="mx-2 h-px shrink-0 bg-border" />
                   ) : null}
-                  {setting.kind === "switch" ? (
+                  {!permission &&
+                  effortSlider &&
+                  setting.kind !== "switch" &&
+                  setting.isModel &&
+                  setting.groups.some((group) => group.name !== null) ? (
+                    <ComposerProviderModelSetting
+                      setting={setting}
+                      onChange={onChange}
+                      providerMenuOpen={providerMenuOpen}
+                      onProviderMenuOpenChange={setProviderMenuOpen}
+                    />
+                  ) : permission && setting.kind !== "switch" ? (
+                    <PermissionList
+                      setting={setting}
+                      onChange={(target, value) => {
+                        onChange(target, value)
+                        setOpen(false)
+                      }}
+                    />
+                  ) : effortSlider &&
+                    setting.category === "thought_level" &&
+                    setting.kind !== "switch" ? (
+                    <ComposerThoughtSlider
+                      setting={setting}
+                      onChange={onChange}
+                    />
+                  ) : setting.kind === "switch" ? (
                     <SwitchSetting setting={setting} onChange={onChange} />
                   ) : setting.kind === "segmented" ? (
                     <SegmentedSetting setting={setting} onChange={onChange} />
@@ -351,6 +427,53 @@ function SettingHeader({
   )
 }
 
+function PermissionList({
+  setting,
+  onChange,
+}: {
+  setting: SessionChoiceSetting
+  onChange: OnChange
+}) {
+  const entries = setting.groups.flatMap((group) => group.options)
+  return (
+    <div role="group" aria-label={setting.title} className="flex flex-col p-1">
+      {entries.map((option) => {
+        const selected = option.value === setting.currentValue
+        const id = option.value.toLowerCase()
+        const Icon = id.includes("plan")
+          ? Lightbulb
+          : id.includes("full") || id.includes("yolo") || id.includes("danger")
+            ? ShieldAlert
+            : id.includes("ask") || id.includes("approval")
+              ? Hand
+              : ShieldCheck
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(setting.target, option.value)}
+            className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Icon className="mt-0.5 size-4 shrink-0" />
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium">{option.name}</span>
+              {option.description && (
+                <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">
+                  {option.description}
+                </span>
+              )}
+            </span>
+            {selected && (
+              <Check className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function SegmentedSetting({
   setting,
   onChange,
@@ -417,6 +540,97 @@ function SegmentedSetting({
           {setting.currentDescription}
         </p>
       ) : null}
+    </div>
+  )
+}
+
+/** Adapted from ZCode's ComposerProviderMenu and ComposerModelMenu. The
+ *  inline provider page shares the existing popover, so selecting a provider
+ *  never creates a nested dismissable layer. */
+function ComposerProviderModelSetting({
+  setting,
+  onChange,
+  providerMenuOpen,
+  onProviderMenuOpenChange,
+}: {
+  setting: SessionChoiceSetting
+  onChange: OnChange
+  providerMenuOpen: boolean
+  onProviderMenuOpenChange: (open: boolean) => void
+}) {
+  const t = useTranslations("Folder.chat.messageInput")
+  const selected = setting.groups.find((group) =>
+    group.options.some((option) => option.value === setting.currentValue)
+  )
+  // Only present the requested provider as active after the agent reports it.
+  const group = selected ?? setting.groups[0]
+  const label = (name: string | null) => name ?? t("otherModels")
+
+  if (providerMenuOpen) {
+    return (
+      <div className="flex min-h-0 flex-col">
+        <button
+          type="button"
+          className="flex min-h-8 items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => onProviderMenuOpenChange(false)}
+        >
+          <ChevronLeft className="size-4" />
+          {t("providerBack")}
+        </button>
+        <div className="mx-1 my-1 h-px bg-border" />
+        <div
+          role="group"
+          aria-label={t("providerLabel")}
+          className="max-h-60 overflow-y-auto"
+        >
+          {setting.groups.map((candidate) => (
+            <button
+              key={candidate.key}
+              type="button"
+              aria-pressed={candidate.key === group?.key}
+              disabled={candidate.options.length === 0}
+              className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+              onClick={() => {
+                const model =
+                  candidate.options.find(
+                    (option) => option.value === setting.currentValue
+                  ) ?? candidate.options[0]
+                if (model && model.value !== setting.currentValue)
+                  onChange(setting.target, model.value)
+                onProviderMenuOpenChange(false)
+              }}
+            >
+              <span className="min-w-0 flex-1 break-words">
+                {label(candidate.name)}
+              </span>
+              {candidate.key === group?.key ? (
+                <Check className="size-4 shrink-0" />
+              ) : null}
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const visibleSetting = group
+    ? { ...setting, groups: [{ ...group, name: null }] }
+    : setting
+  return (
+    <div className="flex min-h-0 flex-col">
+      <button
+        type="button"
+        aria-label={`${t("providerLabel")}: ${group ? label(group.name) : "—"}`}
+        className="flex min-h-8 items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => onProviderMenuOpenChange(true)}
+      >
+        <span className="min-w-0 flex-1 truncate">
+          {group ? label(group.name) : "—"}
+        </span>
+        <ChevronRight className="size-4 text-muted-foreground" />
+      </button>
+      <div className="mx-1 my-1 h-px bg-border" />
+      <ListSetting setting={visibleSetting} onChange={onChange} />
     </div>
   )
 }

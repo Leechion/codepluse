@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@xterm/xterm/css/xterm.css";
+@import "./zcode-composer-thought-slider.css";
 /* 自托管字体（@font-face 声明惰性，woff2 仅在被应用/预览时下载） */
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/geist";
@@ -4199,5 +4200,126 @@ div.monaco-diff-editor.side-by-side .editor.modified {
   }
   100% {
     opacity: 0;
+  }
+}
+
+/* Conversation layout reference: zai-org/ZCode V4 ConversationTurnGroup and
+   ConversationRowView. Keep Codeg's streaming, disclosure and tool behaviour. */
+.zcode-transcript {
+  font-family: var(--font-sans);
+}
+.zcode-turn {
+  --activity-gap: 1rem;
+  --activity-rail: transparent;
+  --activity-secondary: color-mix(in oklch, var(--foreground) 60%, transparent);
+}
+.zcode-turn .activity-capsule {
+  min-height: 1.5rem;
+  height: auto;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted-foreground);
+}
+.zcode-turn .activity-capsule:hover {
+  background: transparent;
+}
+.zcode-turn .activity-capsule > span > span > :first-child {
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.zcode-turn .activity-timeline[data-headed] {
+  padding-top: 1rem;
+}
+.zcode-turn :is(.activity-item, .activity-child, .activity-timeline)::before,
+.zcode-turn :is(.activity-item, .activity-child, .activity-timeline)::after {
+  display: none;
+}
+.zcode-turn .activity-item {
+  padding-inline-start: 1.75rem;
+}
+.zcode-turn .activity-item[data-marker="dot"] {
+  padding-inline-start: 0;
+}
+.zcode-turn .activity-item.zcode-thought-row {
+  padding-inline-start: 0;
+}
+/* ZCode's streaming thought label (packages/ui/src/styles.css). */
+.zcode-thought-row .animated-gradient-text {
+  display: inline-block;
+  background: linear-gradient(90deg, var(--foreground) 0%, var(--foreground) 34%, color-mix(in srgb, var(--foreground) 22%, transparent) 50%, var(--foreground) 66%, var(--foreground) 100%);
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: zcode-gradient-flow 4s linear infinite;
+}
+@keyframes zcode-gradient-flow {
+  0% { background-position: 100% 0; }
+  50%, 100% { background-position: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zcode-thought-row .animated-gradient-text {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+.zcode-turn .activity-item[data-marker="dot"] > .activity-marker {
+  display: none;
+}
+.zcode-turn .activity-line {
+  font-size: 0.875rem;
+  line-height: 1.5rem;
+  padding-block: 0;
+}
+.zcode-turn .activity-item[data-status="succeeded"] > .activity-marker [data-ring="quiet"],
+.zcode-turn .activity-child[data-status="succeeded"] > .activity-marker [data-ring="quiet"] {
+  border-color: transparent;
+}
+.zcode-turn .activity-item[data-status="succeeded"] > .activity-marker svg,
+.zcode-turn .activity-child[data-status="succeeded"] > .activity-marker svg {
+  transform: scale(1.2);
+}
+.zcode-turn .activity-detail {
+  margin-block: 0.5rem 0.25rem;
+}
+.zcode-turn .chat-markdown {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.zcode-turn .chat-markdown :is(p, ul, ol, blockquote) {
+  margin-block: 0.75rem;
+}
+.zcode-turn .chat-markdown :is(ul, ol) {
+  padding-inline-start: 1.5rem;
+  list-style-position: outside;
+}
+.zcode-turn .chat-markdown li {
+  padding-inline-start: 0.125rem;
+  margin-block: 0.25rem;
+}
+.zcode-turn .chat-markdown h1 {
+  font-size: 1.125rem;
+  line-height: 1.5;
+}
+.zcode-turn .chat-markdown h2 {
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.zcode-turn .chat-markdown :is(h3, h4, h5, h6) {
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.zcode-turn .chat-markdown :not(pre) > code {
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.35rem;
+  font-size: 0.85em;
+}
+@media (min-width: 768px) {
+  .zcode-transcript .chat-content-w {
+    padding-inline: 1.5rem;
   }
 }

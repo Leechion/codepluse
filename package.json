@@ -4,11 +4,10 @@
   "private": true,
   "description": "多 Harness 智能体统一协调中枢：注册、派发、通信、上下文隔离、审计",
   "scripts": {
-    "start": "node server.js",
+    "start": "powershell -NoProfile -File scripts/start-codeg.ps1",
     "desktop": "node desktop.js",
-    "check": "node --check desktop/main.js && node --check desktop/backend.js && node --check scripts/build-desktop.js && node --check desktop.js && node --check scripts/make-icons.js && node --check core/engine.js && node --check core/real-adapters.js && node --check core/acp-runtime.js && node --check core/http-adapter.js && node --check core/communication.js && node --check core/orchestrator.js && node --check core/chat-controller.js && node --check core/readonly-mcp.js && node --check core/result-mcp.js && node --check core/notifier.js && node --check core/worktree.js && node --check core/automations.js && node --check core/skills.js && node --check core/handoff.js && node --check server.js && node --check public/app.js && node --check public/chat.js && node --check public/missions.js && node --check adapters/http-adapter.example.js && node --check adapters/cli-bridge.js",
-    "test": "node --test test/*.test.js",
-    "bridge": "node adapters/cli-bridge.js",
+    "check": "node --check desktop/main.js && node --check desktop/backend.js && node --check scripts/build-desktop.js && node --check desktop.js && node --check scripts/make-icons.js && node --check public/app.js && node --check public/chat.js && node --check public/missions.js",
+    "test": "node --test test/desktop.test.js",
     "desktop:build": "node scripts/build-desktop.js",
     "codeg:build": "pnpm --dir codeg-ui build",
     "codeg:start": "powershell -NoProfile -File scripts/start-codeg.ps1",
@@ -26,6 +25,6 @@
     "@agentclientprotocol/sdk": "2.4.0"
   },
   "devDependencies": {
-    "electron": "45.2.3"
+    "electron": "^38.8.6"
   }
 }

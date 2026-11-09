@@ -70,6 +70,16 @@ describe("isModelConfigOption", () => {
 })
 
 describe("deriveModelGroups", () => {
+  it("groups DSH tuple model IDs by provider without changing their values", () => {
+    const a = '["deepseek-official","deepseek-flash"]'
+    const b = '["qwen-token-plan-cn","deepseek-flash"]'
+    const c = '["deepseek-official","deepseek-pro"]'
+    const groups = deriveModelGroups(modelOption([opt(a, "Flash"), opt(b, "Flash"), opt(c, "Pro")]))
+    expect(groups?.map((group) => group.name)).toEqual(["deepseek-official", "qwen-token-plan-cn"])
+    expect(groups?.[0].options.map((option) => option.value)).toEqual([a, c])
+    expect(groups?.[1].options[0].value).toBe(b)
+    expect(filterModelGroups(groups!, "qwen")[0].options[0].value).toBe(b)
+  })
   it("returns null for non-model options", () => {
     const mode = modelOption([opt("anthropic/opus")], {
       id: "mode",

@@ -6,6 +6,7 @@ import { isImeCompositionKey } from "@/lib/ime-composition"
 import { Button } from "@/components/ui/button"
 import {
   BookOpenText,
+  ArrowUp,
   Check,
   ChevronUp,
   ClipboardPaste,
@@ -78,6 +79,7 @@ import { ComposerConnectionStatus } from "@/components/chat/composer-connection-
 import { SessionSettingsPicker } from "@/components/chat/session-settings-picker"
 import {
   buildSessionSettings,
+  splitSessionSettings,
   type SessionSettingTarget,
 } from "@/lib/session-settings"
 import { useAgentSkills } from "@/hooks/use-agent-skills"
@@ -109,6 +111,7 @@ import {
   restampSkillPrefixes,
 } from "@/components/chat/composer/composer-commands"
 import { useComposerChromeFocus } from "@/components/chat/composer/use-composer-chrome-focus"
+import { useComposerToolbarFit } from "@/components/chat/composer/use-composer-toolbar-fit"
 import {
   composerBoxMinHeight,
   composerEditableMinHeight,
@@ -372,6 +375,7 @@ export function MessageInput({
   getSentHistory,
   tall = false,
 }: MessageInputProps) {
+  const toolbarRef = useComposerToolbarFit()
   const t = useTranslations("Folder.chat.messageInput")
   const tQueue = useTranslations("Folder.chat.messageQueue")
   // Kept as a separate binding from `t` so its call sites — exclusively
@@ -1881,6 +1885,10 @@ export function MessageInput({
     },
     [handleModeSelect, onConfigOptionChange]
   )
+  const splitSettings = useMemo(
+    () => splitSessionSettings(sessionSettings, availableConfigOptions),
+    [sessionSettings, availableConfigOptions]
+  )
 
   const actionButtons = isEditingQueueItem ? (
     <div className="flex items-center gap-1">
@@ -1981,10 +1989,10 @@ export function MessageInput({
       onClick={handleSend}
       disabled={disabled || !hasSendableContent}
       size="icon"
-      className="h-8 w-8"
+      className="h-8 w-8 rounded-full"
       title={t("send")}
     >
-      <Send className="size-4" />
+      <ArrowUp className="size-4" />
     </Button>
   )
 
@@ -2091,7 +2099,7 @@ export function MessageInput({
         className={cn(
           "block",
           folderBranchPickerAttached &&
-            "overflow-hidden rounded-xl transition-colors",
+            "overflow-hidden rounded-2xl transition-colors",
           folderBranchPickerAttached &&
             showDragActive &&
             "ring-1 ring-primary/40"
@@ -2105,31 +2113,17 @@ export function MessageInput({
             <div
               {...chromeFocus}
               onContextMenuCapture={handleComposerContextMenu}
+              data-composer-layout="stacked"
               className={cn(
                 // `codeg-composer-chrome` paints the text I-beam across the box's
                 // blank areas (padding, the dead space below a short message, the
                 // action-bar gaps) so the whole input reads as clickable-to-type;
                 // interactive controls re-assert their own cursor (see globals.css).
-                // Resting border uses `border-foreground/20` (a touch darker than
-                // the default `border-input`, which is near-invisible at rest and
-                // vanishes over a workspace background image); it adapts per theme
-                // (dark ink in light mode, light ink in dark) and stays legible.
-                // Focus still swaps to `border-ring` below.
-                "codeg-composer-chrome @container relative flex flex-col rounded-xl border border-foreground/20 bg-transparent transition-colors",
+                // ZCode's composer keeps a fine outline and soft shadow while
+                // focused; the whole surface still acts as a text target.
+                "codeg-composer-chrome @container relative flex flex-col rounded-2xl border border-border bg-background shadow-sm transition-colors focus-within:border-foreground/35",
                 boxMinHeight,
-                // Standard focus ring — always shown when the composer is
-                // focused (the plain default input style). `bg-background
-                // ws-transparent-bg`: opaque surface normally, but with a
-                // workspace-bg image the composer goes transparent to reveal the
-                // real image like the rest of the canvas (no frosted treatment) —
-                // the border stays. Off (no image) it's the plain background,
-                // unchanged. When the folder/branch row is attached below, the
-                // solid surface + an INSET focus ring live here so the shared
-                // rounded box (clipped by the wrapper) reads as one control and
-                // the ring isn't clipped away.
-                folderBranchPickerAttached
-                  ? "bg-background ws-transparent-bg focus-within:border-ring focus-within:ring-[3px] focus-within:ring-inset focus-within:ring-ring/50"
-                  : "focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
+                folderBranchPickerAttached && "ws-transparent-bg",
                 // Active session, tiled across multiple sessions: a gradient
                 // flows around the border to mark which tile is active — but ONLY
                 // while the composer itself is not focused. Focusing it hides the
@@ -2187,20 +2181,46 @@ export function MessageInput({
                 // (see above); RichComposer explains the basis.
                 className={cn("grow", editableMinHeight)}
               />
-              <div className="flex shrink-0 items-end justify-between gap-1 px-2 pb-2">
-                <div className="flex min-w-0 items-end gap-1">
-                  <ComposerAddMenu
-                    disabled={disabled}
-                    attachments={attach}
-                    shortcuts={menuShortcuts}
-                    slashCommands={slashCommands}
-                    onAddFeedback={onAddFeedback}
-                    feedbackAddDisabled={feedbackAddDisabled}
-                  />
+              <div
+                ref={toolbarRef}
+                className="group/toolbar flex shrink-0 items-end gap-3 px-3 pb-3"
+              >
+                <div
+                  className="flex min-w-0 flex-1 items-center"
+                  data-composer-leading-actions
+                >
+                  <div
+                    className="flex shrink-0 items-center gap-1"
+                    data-composer-leading-content
+                  >
+                    <ComposerAddMenu
+                      disabled={disabled}
+                      attachments={attach}
+                      shortcuts={menuShortcuts}
+                      slashCommands={slashCommands}
+                      onAddFeedback={onAddFeedback}
+                      feedbackAddDisabled={feedbackAddDisabled}
+                    />
+                    {splitSettings.permission.length > 0 && (
+                      <SessionSettingsPicker
+                        agentType={agentType ?? null}
+                        settings={splitSettings.permission}
+                        loadingLabel={null}
+                        permission
+                        onChange={handleSessionSettingChange}
+                      />
+                    )}
+                  </div>
+                </div>
+                <div
+                  className="ml-auto flex shrink-0 items-center justify-end gap-1.5"
+                  data-composer-trailing-actions
+                >
                   {hasAnySelector && (
                     <SessionSettingsPicker
                       agentType={agentType ?? null}
-                      settings={sessionSettings}
+                      settings={splitSettings.model}
+                      effortSlider
                       loadingLabel={
                         showSelectorsLoading
                           ? showConfigLoading
@@ -2211,8 +2231,8 @@ export function MessageInput({
                       onChange={handleSessionSettingChange}
                     />
                   )}
+                  <div className="shrink-0">{actionButtons}</div>
                 </div>
-                <div className="shrink-0">{actionButtons}</div>
               </div>
               {showDragActive && (
                 <div className="pointer-events-none absolute inset-1 z-20 flex items-center justify-center rounded-md border border-dashed border-primary/50 bg-background/80 text-xs text-muted-foreground">

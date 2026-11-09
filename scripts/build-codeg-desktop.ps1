@@ -28,12 +28,14 @@ $workspaceConfig = @{ root = $workspaceRoot } | ConvertTo-Json
 [System.IO.File]::WriteAllText((Join-Path $bundleRoot 'workspace.json'), $workspaceConfig, (New-Object System.Text.UTF8Encoding($false)))
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'THIRD_PARTY_NOTICES.md') -Destination $bundleRoot
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'codeg-ui\LICENSE') -Destination (Join-Path $bundleRoot 'licenses\codeg-Apache-2.0.txt')
+Copy-Item -LiteralPath (Join-Path $workspaceRoot 'public\codepluse.ico') -Destination (Join-Path $bundleRoot 'codepluse.ico')
 if ($InstallShortcut) {
     $shortcutShell = New-Object -ComObject WScript.Shell
     $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'codepluse.lnk'
     $shortcut = $shortcutShell.CreateShortcut($shortcutPath)
     $shortcut.TargetPath = Join-Path $bundleRoot 'codepluse.exe'
     $shortcut.WorkingDirectory = $workspaceRoot
+    $shortcut.IconLocation = (Join-Path $bundleRoot 'codepluse.ico') + ',0'
     $shortcut.Description = 'codepluse · 多 Harness 工作台'
     $shortcut.Save()
     Write-Output $shortcutPath

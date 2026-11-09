@@ -18,17 +18,21 @@ type Caller struct {
 	Depth                       int
 }
 type Delegation struct {
-	ID                                                        string `json:"task_id"`
-	Parent, Root, AgentType, Task, Workdir, Model, Permission string
-	Status                                                    string `json:"status"`
-	Result                                                    string `json:"result,omitempty"`
-	Error                                                     string `json:"error,omitempty"`
-	ConnectionID                                              string `json:"child_connection_id,omitempty"`
-	ConversationID                                            int    `json:"child_conversation_id,omitempty"`
-	Depth                                                     int
-	ParentToolUseID                                           string        `json:"parent_tool_use_id"`
-	Updated                                                   chan struct{} `json:"-"`
-	Inbox                                                     []Row         `json:"-"`
+	ID                                                              string `json:"task_id"`
+	Parent, Root, AgentType, Task, Workdir, Model, Permission, Mode string
+	Status                                                          string `json:"status"`
+	Result                                                          string `json:"result,omitempty"`
+	Error                                                           string `json:"error,omitempty"`
+	ConnectionID                                                    string `json:"child_connection_id,omitempty"`
+	ConversationID                                                  int    `json:"child_conversation_id,omitempty"`
+	ParentConversationID                                            int    `json:"parent_conversation_id,omitempty"`
+	NativeSessionID                                                 string `json:"native_session_id,omitempty"`
+	NextPrompt                                                      string `json:"next_prompt,omitempty"`
+	Executing                                                       bool   `json:"-"`
+	Depth                                                           int
+	ParentToolUseID                                                 string        `json:"parent_tool_use_id"`
+	Updated                                                         chan struct{} `json:"-"`
+	Inbox                                                           []Row         `json:"inbox,omitempty"`
 }
 
 func (s *Server) extraMCP(agent *hub.Agent, o acp.Options, runtimeID string) []map[string]any {
@@ -97,6 +101,8 @@ func (s *Server) tool(ctx context.Context, caller *Caller, name string, a Row) (
 	switch name {
 	case "list_agents":
 		return Row{"agents": s.agents()}, nil
+	case "resume_delegation":
+		return s.resumeDelegation(caller, text(a["task_id"]), text(a["task"]))
 	case "delegate_to_agent":
 		if caller.Depth >= 4 {
 			return nil, fmt.Errorf("委派深度达到 4 层上限")
@@ -115,7 +121,22 @@ func (s *Server) tool(ctx context.Context, caller *Caller, name string, a Row) (
 			return nil, fmt.Errorf("父会话已断开")
 		}
 		cwd, permission := parent.Options.Workdir, parent.Options.Permission
+		level := acp.ModeLevel(parent.Options.Mode)
+		runtimeID := parent.RuntimeID
+		if level == "" {
+			level = permission
+		}
 		s.mu.Unlock()
+		if current := text(s.runtimeView(runtimeID)["nativeMode"]); current != "" {
+			if actual := acp.ModeLevel(current); actual != "" {
+				level = actual
+			}
+		}
+		if level == "full" || level == "workspace" {
+			permission = "workspace"
+		} else if level == "readonly" {
+			permission = "readonly"
+		}
 		if s.pick(agentType).RealTool == "dsh" && permission != "workspace" {
 			return nil, fmt.Errorf("DSH 不支持继承只读权限，请先将负责人切换到工作区模式再委派")
 		}
@@ -126,8 +147,46 @@ func (s *Server) tool(ctx context.Context, caller *Caller, name string, a Row) (
 				return nil, err
 			}
 		}
-		d := &Delegation{ID: id(), Parent: caller.ConnectionID, Root: caller.RootID, AgentType: agentType, Task: task, Workdir: cwd, Model: text(a["model"]), Permission: permission, Status: "running", Depth: caller.Depth + 1, Updated: make(chan struct{}), Inbox: []Row{}}
+		if taskID := text(a["task_id"]); taskID != "" {
+			return s.resumeDelegation(caller, taskID, task)
+		}
 		s.mu.Lock()
+		candidates := []string{}
+		if a["new_task"] != true {
+			for _, old := range s.tasks {
+				if old.Root != caller.RootID || old.AgentType != agentType || old.Workdir != cwd || (old.ParentConversationID != parent.ConversationID && old.Parent != caller.ConnectionID) {
+					continue
+				}
+				if old.Status == "running" && (old.Task == task || old.NextPrompt == task) {
+					out := taskReport(old)
+					s.mu.Unlock()
+					return out, nil
+				}
+				if old.Status == "interrupted" || old.Status == "failed" || old.Status == "canceled" {
+					candidates = append(candidates, old.ID)
+				}
+			}
+		}
+		s.mu.Unlock()
+		if len(candidates) == 1 {
+			return s.resumeDelegation(caller, candidates[0], task)
+		}
+		if len(candidates) > 1 {
+			return nil, fmt.Errorf("存在多个未完成的原子任务 %v，请用 resume_delegation 指定 task_id 继续；确需新任务时传 new_task=true", candidates)
+		}
+		d := &Delegation{ID: id(), Parent: caller.ConnectionID, Root: caller.RootID, AgentType: agentType, Task: task, Workdir: cwd, Model: text(a["model"]), Permission: permission, Status: "running", Depth: caller.Depth + 1, Updated: make(chan struct{}), Inbox: []Row{}, ParentConversationID: parent.ConversationID}
+		d.Mode = acp.DelegatedMode(s.pick(agentType), level)
+		d.Executing = true
+		s.mu.Lock()
+		if a["new_task"] != true {
+			for _, old := range s.tasks {
+				if old.Root == caller.RootID && old.Parent == caller.ConnectionID && old.AgentType == agentType && old.Workdir == cwd && old.Status == "running" && (old.Task == task || old.NextPrompt == task) {
+					out := taskReport(old)
+					s.mu.Unlock()
+					return out, nil
+				}
+			}
+		}
 		d.ParentToolUseID = d.ID
 		if parent := s.connections[caller.ConnectionID]; parent != nil {
 			if parent.ToolClaims == nil {
@@ -147,6 +206,11 @@ func (s *Server) tool(ctx context.Context, caller *Caller, name string, a Row) (
 			}
 		}
 		s.tasks[d.ID] = d
+		if err := s.saveDelegationsLocked(); err != nil {
+			delete(s.tasks, d.ID)
+			s.mu.Unlock()
+			return nil, err
+		}
 		s.mu.Unlock()
 		go s.runDelegation(d)
 		return Row{"task_id": d.ID, "status": "running"}, nil
@@ -204,6 +268,7 @@ func (s *Server) tool(ctx context.Context, caller *Caller, name string, a Row) (
 			return out, nil
 		}
 		d.Status = "canceled"
+		_ = s.saveDelegationsLocked()
 		s.mu.Unlock()
 		if cid != "" {
 			_ = s.cancel(cid)
@@ -233,6 +298,7 @@ func (s *Server) tool(ctx context.Context, caller *Caller, name string, a Row) (
 			return nil, fmt.Errorf("目标任务不存在或不属于当前协作")
 		}
 		d.Inbox = append(d.Inbox, Row{"id": id(), "from": caller.ConnectionID, "text": body, "at": timestamp()})
+		_ = s.saveDelegationsLocked()
 		s.mu.Unlock()
 		return Row{"delivered": true, "task_id": tid}, nil
 	}
@@ -273,6 +339,10 @@ func (s *Server) taskStatus(caller *Caller, ids []string) ([]Row, bool) {
 // belong to the broker and should not appear in model context or tool cards.
 func taskReport(d *Delegation) Row {
 	row := Row{"task_id": d.ID, "status": d.Status, "agent_type": d.AgentType, "task_preview": d.Task}
+	if d.Status == "interrupted" {
+		row["status"] = "failed"
+		row["error_code"] = "interrupted"
+	}
 	if d.ConversationID != 0 {
 		row["child_conversation_id"] = d.ConversationID
 	}
@@ -281,7 +351,9 @@ func taskReport(d *Delegation) Row {
 	}
 	if d.Error != "" {
 		row["message"] = d.Error
-		row["error_code"] = "subagent_error"
+		if d.Status != "interrupted" {
+			row["error_code"] = "subagent_error"
+		}
 	}
 	if d.Status == "canceled" {
 		row["error_code"] = "canceled"
@@ -289,16 +361,31 @@ func taskReport(d *Delegation) Row {
 	return row
 }
 func (s *Server) runDelegation(d *Delegation) {
-	cid, err := s.connect(Row{"agentType": d.AgentType, "workingDir": d.Workdir, "_depth": d.Depth, "_root": d.Root, "preferredModeId": map[bool]string{true: "workspace-write", false: "plan"}[d.Permission == "workspace"], "preferredConfigValues": Row{"model": d.Model}})
+	defer func() { s.mu.Lock(); d.Executing = false; s.mu.Unlock() }()
+	mode := d.Mode
+	if mode == "" {
+		mode = map[bool]string{true: "workspace-write", false: "plan"}[d.Permission == "workspace"]
+	}
+	args := Row{"agentType": d.AgentType, "workingDir": d.Workdir, "_depth": d.Depth, "_root": d.Root, "preferredModeId": mode, "preferredConfigValues": Row{"model": d.Model}}
+	if d.NativeSessionID != "" {
+		args["sessionId"] = d.NativeSessionID
+	}
+	cid, err := s.connect(args)
 	if err != nil {
 		s.mu.Lock()
 		d.Status = "failed"
 		d.Error = err.Error()
+		_ = s.saveDelegationsLocked()
 		s.mu.Unlock()
 		return
 	}
 	s.mu.Lock()
 	c := s.connections[cid]
+	if s.tasks[d.ID] != d {
+		s.mu.Unlock()
+		_ = s.disconnect(cid)
+		return
+	}
 	parent := s.connections[d.Parent]
 	d.ConnectionID = cid
 	c.Depth = d.Depth
@@ -314,11 +401,36 @@ func (s *Server) runDelegation(d *Delegation) {
 	if parent != nil {
 		parentConv = parent.ConversationID
 	}
-	row := st.createConversationLocked(number(f["id"]), d.AgentType, d.Task, parentConv)
+	if d.ParentConversationID > 0 && st.conversationLocked(d.ParentConversationID) == nil {
+		st.mu.Unlock()
+		return
+	}
+	row := st.conversationLocked(d.ConversationID)
+	if row == nil && d.ConversationID != 0 {
+		st.mu.Unlock()
+		s.mu.Lock()
+		d.Status = "failed"
+		d.Error = "原子对话已删除，不能自动另建"
+		_ = s.saveDelegationsLocked()
+		s.mu.Unlock()
+		return
+	}
+	if row == nil {
+		row = st.createConversationLocked(number(f["id"]), d.AgentType, d.Task, parentConv)
+	}
 	row["delegation_call_id"] = d.ID
 	row["parent_tool_use_id"] = d.ParentToolUseID
 	row["status"] = "in_progress"
-	st.appendTurnLocked(number(row["id"]), "user", d.Task)
+	input := d.Task
+	if d.ConversationID != 0 {
+		input = "继续此前未完成的任务，沿用当前会话上下文与已有成果。"
+		if d.NextPrompt != "" {
+			input += "\n" + d.NextPrompt
+		}
+	}
+	view := s.runtimeView(c.RuntimeID)
+	row["external_id"] = text(view["nativeSessionId"])
+	st.appendTurnLocked(number(row["id"]), "user", input)
 	_ = st.saveLocked()
 	s.changed(row)
 	if parentRow := st.conversationLocked(parentConv); parentRow != nil {
@@ -332,10 +444,14 @@ func (s *Server) runDelegation(d *Delegation) {
 	c.Busy = true
 	c.Status = "prompting"
 	d.ConversationID = conv
+	d.NativeSessionID = text(view["nativeSessionId"])
+	d.ParentConversationID = parentConv
+	_ = s.saveDelegationsLocked()
 	s.mu.Unlock()
+	s.bindConversation(c, conv)
 	s.event(d.Parent, Row{"type": "delegation_started", "parent_connection_id": d.Parent, "parent_tool_use_id": d.ParentToolUseID, "child_connection_id": cid, "child_conversation_id": conv, "agent_type": d.AgentType, "task_id": d.ID, "task_preview": d.Task})
 	s.event(cid, Row{"type": "status_changed", "status": "prompting"})
-	res := s.run(c, d.Task)
+	res := s.run(c, input)
 	s.mu.Lock()
 	if d.Status != "canceled" {
 		if res.OK {
@@ -347,6 +463,7 @@ func (s *Server) runDelegation(d *Delegation) {
 		}
 	}
 	status := d.Status
+	_ = s.saveDelegationsLocked()
 	s.mu.Unlock()
 	summary := Row{"kind": "ok", "duration_ms": res.Meta["durationMs"], "text_preview": res.Output}
 	if status != "completed" {

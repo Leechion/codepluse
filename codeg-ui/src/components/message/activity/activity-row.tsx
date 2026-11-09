@@ -13,6 +13,7 @@ import { ApprovalChip, showsApproval } from "./approval-chip"
 import { useFoldRow } from "./fold-back"
 import { TimelineFoot } from "./timeline-foot"
 import { useRailGrowth } from "./use-rail-growth"
+import { ToolSummaryRow } from "../zcode/tool-summary-row"
 
 const MARKER_POSITION = {
   main: {
@@ -146,7 +147,6 @@ export function ActivityRow({
     <>
       <span className="flex min-w-0 items-start gap-1">
         <span className="min-w-0">{children}</span>
-        {expandable ? <RowChevron open={open} /> : null}
       </span>
       {trailing || chip ? (
         <RowFigure>
@@ -161,7 +161,7 @@ export function ActivityRow({
   // `leading-*` that a later `text-*` follows, and the rail's markers and the
   // chevron are placed for a 1.5rem line.
   const headerClass = cn(
-    "group/row flex w-full min-w-0 items-start py-0.5 text-start",
+    "activity-line group/row flex w-full min-w-0 items-start py-0.5 text-start",
     variant === "main" ? "text-sm leading-6" : "text-[0.8125rem] leading-6",
     headerClassName
   )
@@ -193,32 +193,30 @@ export function ActivityRow({
       >
         {marker}
       </span>
-      {expandable ? (
-        <button
-          type="button"
-          className={cn(
-            headerClass,
-            // Pointed at or focused, its words darken as the foot's do
-            // (`.activity-row-toggle` in globals.css).
-            "activity-row-toggle cursor-pointer rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          )}
-          aria-expanded={open}
-          aria-controls={open ? detailId : undefined}
-          title={title}
-          onClick={() => onExpandedChange?.(!open)}
-          data-motion-key={headerMotionKey}
-        >
-          {header}
-        </button>
-      ) : (
-        <div
-          className={headerClass}
-          title={title}
-          data-motion-key={headerMotionKey}
-        >
-          {header}
-        </div>
-      )}
+      <ToolSummaryRow
+        toolId={stepKey}
+        icon={null}
+        showIcon={false}
+        kindLabel={
+          <span className="flex min-w-0 w-full items-start">{header}</span>
+        }
+        kindLabelClassName="min-w-0 flex-1"
+        primaryText={null}
+        contentKey={stepKey}
+        animateContent={false}
+        disableContentAnimation={false}
+        canToggle={expandable}
+        isExpanded={open}
+        forceOpen={false}
+        title={title}
+        controls={open ? detailId : undefined}
+        onToggle={() => onExpandedChange?.(!open)}
+        motionKey={headerMotionKey}
+        className={cn(
+          headerClass,
+          expandable && "activity-row-toggle rounded-sm"
+        )}
+      />
       {addon}
       {panel ? (
         <div

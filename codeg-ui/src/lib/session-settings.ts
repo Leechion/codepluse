@@ -2,6 +2,7 @@ import {
   isModelConfigOption,
   MODEL_CONFIG_OPTION_ID,
   modelListGroups,
+  modelTupleProvider,
   type ModelOptionGroup,
 } from "@/lib/model-config-groups"
 import type { SessionConfigOptionInfo, SessionModeInfo } from "@/lib/types"
@@ -27,6 +28,7 @@ export type SessionSettingTarget =
 interface SessionSettingBase {
   /** Stable React key, unique across the list. */
   key: string
+  category: string | null
   target: SessionSettingTarget
   title: string
   description: string | null
@@ -69,6 +71,18 @@ export interface SessionSwitchSetting extends SessionSettingBase {
 }
 
 export type SessionSetting = SessionChoiceSetting | SessionSwitchSetting
+
+/** Split permissions from the remaining agent settings for the composer. */
+export function splitSessionSettings(settings: SessionSetting[], options: SessionConfigOptionInfo[]) {
+  const modeIds = new Set(options.filter((option) => option.category === "mode").map((option) => option.id))
+  const permission: SessionSetting[] = []
+  const model: SessionSetting[] = []
+  for (const setting of settings) {
+    const isMode = setting.target.type === "mode" || (setting.target.type === "config" && modeIds.has(setting.target.configId))
+    ;(isMode ? permission : model).push(setting)
+  }
+  return { permission, model }
+}
 
 const ON_OFF_PAIRS = [
   ["on", "off"],
@@ -121,6 +135,7 @@ function configOptionSetting(
 ): SessionSetting | null {
   const base = {
     key: `config:${option.id}`,
+    category: option.category ?? null,
     target: { type: "config", configId: option.id } as const,
     title: option.name,
     description: option.description ?? null,
@@ -156,6 +171,7 @@ function configOptionSetting(
     .flatMap((group) => group.options)
     .find((item) => item.value === currentValue)
   const currentLabel = current?.name ?? currentValue
+  const provider = isModelConfigOption(option) ? modelTupleProvider(currentValue) : null
   const optionCount = option.kind.options.length
   const isModel = option.id === MODEL_CONFIG_OPTION_ID
   const isList = isModel || optionCount > SESSION_SETTING_SEGMENTED_MAX
@@ -171,7 +187,7 @@ function configOptionSetting(
     searchable: isList && optionCount > SESSION_SETTING_SEARCH_THRESHOLD,
     summary:
       isModelConfigOption(option) || !isDefaultValue(currentValue)
-        ? currentLabel
+        ? provider ? `${provider} / ${currentLabel}` : currentLabel
         : null,
   }
 }
@@ -191,6 +207,7 @@ function legacyModeSetting(
   const isList = options.length > SESSION_SETTING_SEGMENTED_MAX
   return {
     key: "mode",
+    category: "mode",
     target: { type: "mode" },
     title,
     description: null,

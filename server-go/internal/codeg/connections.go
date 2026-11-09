@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"harnesshub/internal/acp"
@@ -27,6 +28,7 @@ type Connection struct {
 	RootID                   string
 	Feedback                 []Row
 	ToolClaims               map[string]bool
+	completionMu             sync.Mutex
 }
 
 func (s *Server) connect(a Row) (string, error) {
@@ -46,7 +48,10 @@ func (s *Server) connect(a Row) (string, error) {
 		permission = "workspace"
 	}
 	mode := text(a["preferredModeId"])
-	if mode == "workspace-write" || mode == "default" {
+	if config, ok := a["preferredConfigValues"].(map[string]any); ok && text(config["mode"]) != "" {
+		mode = text(config["mode"])
+	}
+	if level := acp.ModeLevel(mode); level == "workspace" || level == "full" {
 		permission = "workspace"
 	}
 	key := "codeg:" + id()
@@ -54,7 +59,10 @@ func (s *Server) connect(a Row) (string, error) {
 	if config, ok := a["preferredConfigValues"].(map[string]any); ok {
 		model = text(config["model"])
 	}
-	c := &Connection{ID: id(), Agent: agent, AgentType: wireAgent(agent), Status: "connecting", Options: acp.Options{SessionKey: key, Permission: permission, Workdir: cwd, Model: model, Structured: false, Role: "manager"}, Events: []Row{}, Tools: []Row{}, SeenPermissions: map[string]string{}}
+	if agent.RealTool == "dsh" {
+		mode = ""
+	}
+	c := &Connection{ID: id(), Agent: agent, AgentType: wireAgent(agent), Status: "connecting", Options: acp.Options{SessionKey: key, Permission: permission, Workdir: cwd, Model: model, Mode: mode, Structured: false, Role: "manager"}, Events: []Row{}, Tools: []Row{}, SeenPermissions: map[string]string{}}
 	c.Depth = number(a["_depth"])
 	c.RootID = text(a["_root"])
 	c.Feedback = []Row{}
@@ -70,6 +78,12 @@ func (s *Server) connect(a Row) (string, error) {
 		found := false
 		for _, view := range views {
 			if text(view["nativeSessionId"]) == previous && text(view["agentId"]) == agent.ID {
+				// Keep the record's identity after an in-session mode change.
+				permission = text(view["permission"])
+				c.Options.Permission = permission
+				if savedMode := text(view["nativeMode"]); savedMode != "" {
+					c.Options.Mode = savedMode
+				}
 				// One native stream has one owner. Reconnecting another window
 				// must not create two wrappers that receive updates at random.
 				s.mu.Lock()
@@ -99,6 +113,16 @@ func (s *Server) connect(a Row) (string, error) {
 		if !found {
 			return "", fmt.Errorf("未导入此原生会话，不能无上下文恢复")
 		}
+		s.store.mu.Lock()
+		conv := 0
+		for _, row := range s.store.Conversations {
+			if text(row["external_id"]) == previous && text(row["agent_type"]) == c.AgentType {
+				conv = number(row["id"])
+				break
+			}
+		}
+		s.store.mu.Unlock()
+		s.bindConversation(c, conv)
 	}
 	s.mu.Lock()
 	s.connections[c.ID] = c
@@ -134,9 +158,32 @@ func (s *Server) event(connectionID string, e Row) {
 	switch text(e["type"]) {
 	case "content_delta":
 		ensureLive()
+		parent := text(e["parent_tool_use_id"])
+		// ACP message IDs are optional. Only retain the last non-empty text
+		// chunk's ID; an unidentifiable later chunk must not inherit an older ID.
+		if text(e["text"]) != "" && parent == "" {
+			if text(c.Live["created_at"]) == "" {
+				c.Live["created_at"] = timestamp()
+			}
+			if nativeID := text(e["source_message_id"]); nativeID != "" {
+				c.Live["source_turn_id"] = nativeID
+			} else {
+				delete(c.Live, "source_turn_id")
+			}
+		}
+		delete(e, "source_message_id")
 		blocks, _ := c.Live["content"].([]Row)
-		if len(blocks) == 0 || blocks[len(blocks)-1]["kind"] != "text" {
-			blocks = append(blocks, Row{"kind": "text", "text": ""})
+		if len(blocks) == 0 || blocks[len(blocks)-1]["kind"] != "text" || text(blocks[len(blocks)-1]["parent_tool_use_id"]) != parent {
+			blocks = append(blocks, Row{"kind": "text", "text": "", "parent_tool_use_id": parent})
+		}
+		blocks[len(blocks)-1]["text"] = text(blocks[len(blocks)-1]["text"]) + text(e["text"])
+		c.Live["content"] = blocks
+	case "thinking":
+		ensureLive()
+		parent := text(e["parent_tool_use_id"])
+		blocks, _ := c.Live["content"].([]Row)
+		if len(blocks) == 0 || blocks[len(blocks)-1]["kind"] != "thinking" || text(blocks[len(blocks)-1]["parent_tool_use_id"]) != parent {
+			blocks = append(blocks, Row{"kind": "thinking", "text": "", "parent_tool_use_id": parent})
 		}
 		blocks[len(blocks)-1]["text"] = text(blocks[len(blocks)-1]["text"]) + text(e["text"])
 		c.Live["content"] = blocks
@@ -188,10 +235,16 @@ func (s *Server) nativeUpdate(runtimeID string, u map[string]any) {
 	if cid == "" {
 		return
 	}
+	meta, _ := u["_meta"].(map[string]any)
+	claude, _ := meta["claudeCode"].(map[string]any)
+	parent := text(claude["parentToolUseId"])
 	switch text(u["sessionUpdate"]) {
 	case "agent_message_chunk":
 		content, _ := u["content"].(map[string]any)
-		s.event(cid, Row{"type": "content_delta", "text": text(content["text"])})
+		s.event(cid, Row{"type": "content_delta", "text": text(content["text"]), "source_message_id": u["messageId"], "parent_tool_use_id": parent})
+	case "agent_thought_chunk":
+		content, _ := u["content"].(map[string]any)
+		s.event(cid, Row{"type": "thinking", "text": text(content["text"]), "parent_tool_use_id": parent})
 	case "tool_call", "tool_call_update":
 		event := Row{"type": text(u["sessionUpdate"]), "tool_call_id": u["toolCallId"], "title": u["title"], "kind": u["kind"], "status": u["status"], "locations": u["locations"], "raw_input": nil, "raw_output": nil, "content": nil, "meta": u["_meta"]}
 		for _, key := range []string{"rawInput", "rawOutput", "content"} {
@@ -244,18 +297,59 @@ func (s *Server) prompt(a Row) error {
 	}()
 	blocks, _ := a["blocks"].([]any)
 	var prompt strings.Builder
+	var wireContent []map[string]any
+	attachmentCount := 0
+	var userBlocks []Row
 	for _, raw := range blocks {
 		b, _ := raw.(map[string]any)
-		if text(b["type"]) != "text" {
+		switch text(b["type"]) {
+		case "text":
+			prompt.WriteString(text(b["text"]))
+			wireContent = append(wireContent, map[string]any{"type": "text", "text": text(b["text"])})
+			userBlocks = append(userBlocks, Row{"type": "text", "text": text(b["text"])})
+		case "image":
+			if !s.Runtime.PromptCapabilities(c.RuntimeID)["image"] {
+				return fmt.Errorf("当前执行端不支持图片输入")
+			}
+			mime := text(b["mime_type"])
+			if !strings.HasPrefix(mime, "image/") {
+				return fmt.Errorf("图片类型无效")
+			}
+			data, err := s.imageData(b)
+			if err != nil {
+				return err
+			}
+			wireContent = append(wireContent, map[string]any{"type": "image", "data": data, "mimeType": mime})
+			attachmentCount++
+			userBlocks = append(userBlocks, Row{"type": "image", "data": data, "mime_type": mime, "uri": b["uri"]})
+		case "resource_link":
+			wire, display, err := resourceLink(b)
+			if err != nil {
+				return err
+			}
+			wireContent = append(wireContent, wire)
+			userBlocks = append(userBlocks, display)
+			attachmentCount++
+		case "resource":
+			if !s.Runtime.PromptCapabilities(c.RuntimeID)["embedded_context"] {
+				return fmt.Errorf("当前执行端不支持嵌入资源")
+			}
+			wire, display, err := s.embeddedResource(b)
+			if err != nil {
+				return err
+			}
+			wireContent = append(wireContent, wire)
+			userBlocks = append(userBlocks, display)
+			attachmentCount++
+		default:
 			s.mu.Lock()
 			c.Busy = false
 			c.Status = "connected"
 			s.mu.Unlock()
-			return fmt.Errorf("Go 移植尚未接通图片或资源输入，请使用文本")
+			return fmt.Errorf("不支持的消息内容类型")
 		}
-		prompt.WriteString(text(b["text"]))
 	}
-	if strings.TrimSpace(prompt.String()) == "" {
+	if strings.TrimSpace(prompt.String()) == "" && attachmentCount == 0 {
 		s.mu.Lock()
 		c.Busy = false
 		c.Status = "connected"
@@ -282,7 +376,10 @@ func (s *Server) prompt(a Row) error {
 		return fmt.Errorf("会话不存在")
 	}
 	st.appendTurnLocked(convID, "user", prompt.String())
+	turns := st.Turns[fmt.Sprint(convID)]
+	turns[len(turns)-1]["blocks"] = userBlocks
 	row["status"] = "in_progress"
+	row["external_id"] = text(s.runtimeView(c.RuntimeID)["nativeSessionId"])
 	s.changed(row)
 	err := st.saveLocked()
 	st.mu.Unlock()
@@ -293,21 +390,37 @@ func (s *Server) prompt(a Row) error {
 	c.ConversationID = convID
 	c.FolderID = folderID
 	s.mu.Unlock()
+	s.bindConversation(c, convID)
 	s.event(cid, Row{"type": "conversation_linked", "conversation_id": convID, "folder_id": folderID})
 	s.event(cid, Row{"type": "conversation_status_changed", "conversation_id": convID, "status": "in_progress"})
 	s.event(cid, Row{"type": "status_changed", "status": "prompting"})
 	accepted = true
-	go s.run(c, prompt.String())
+	go s.runWithContent(c, prompt.String(), wireContent)
 	return nil
 }
 func (s *Server) run(c *Connection, prompt string) acp.Result {
+	return s.runWithContent(c, prompt, nil)
+}
+func (s *Server) runWithContent(c *Connection, prompt string, content []map[string]any) acp.Result {
 	opts := c.Options
 	// This is a native dialogue. The model chooses tools and sub-agents itself,
 	// rather than being required to output an externally planned task JSON.
-	prompt = "本工作台支持 codeg-mcp 协作工具。需要其他执行端时使用 delegate_to_agent 自主分工，并用 get_delegation_status 收集真实结果后汇报；用户点名执行端时遵从其选择。子任务必须自包含并继承当前权限边界。\n\n" + prompt
-	result := s.Runtime.Prompt(c.Agent, prompt, opts)
+	prefix := "本工作台支持 codeg-mcp 协作工具。需要其他执行端时使用 delegate_to_agent 自主分工，并用 get_delegation_status 收集真实结果后汇报；用户点名执行端时遵从其选择。子任务必须自包含并继承当前权限边界。\n\n" + s.delegationContext(c)
+	wireBlocks := content
+	if len(wireBlocks) == 0 {
+		wireBlocks = []map[string]any{{"type": "text", "text": prefix + prompt}}
+	} else if text(wireBlocks[0]["type"]) == "text" {
+		wireBlocks[0]["text"] = prefix + text(wireBlocks[0]["text"])
+	} else {
+		wireBlocks = append([]map[string]any{{"type": "text", "text": prefix}}, wireBlocks...)
+	}
+	result := s.Runtime.PromptBlocks(c.Agent, wireBlocks, opts)
+	c.completionMu.Lock()
+	defer c.completionMu.Unlock()
 	s.mu.Lock()
 	blocks := persistedBlocks(c.Live, c.Tools, result.Output)
+	sourceTurnID := text(c.Live["source_turn_id"])
+	createdAt := text(c.Live["created_at"])
 	s.mu.Unlock()
 	st := s.store
 	st.mu.Lock()
@@ -317,6 +430,12 @@ func (s *Server) run(c *Connection, prompt string) acp.Result {
 			st.appendTurnLocked(c.ConversationID, "assistant", result.Output)
 			turns := st.Turns[fmt.Sprint(c.ConversationID)]
 			turns[len(turns)-1]["blocks"] = blocks
+			if createdAt != "" {
+				turns[len(turns)-1]["timestamp"] = createdAt
+			}
+			if sourceTurnID != "" {
+				turns[len(turns)-1]["source_turn_id"] = sourceTurnID
+			}
 			row["status"] = "pending_review"
 		} else {
 			row["status"] = "cancelled"
@@ -391,13 +510,23 @@ func (s *Server) runtimeView(runtimeID string) Row {
 func (s *Server) publishSession(cid string) {
 	s.mu.Lock()
 	c := s.connections[cid]
+	if c == nil {
+		s.mu.Unlock()
+		return
+	}
+	rid, agent := c.RuntimeID, c.Agent
 	s.mu.Unlock()
-	v := s.runtimeView(c.RuntimeID)
+	v := s.runtimeView(rid)
 	s.event(cid, Row{"type": "session_started", "session_id": v["nativeSessionId"]})
+	s.event(cid, Row{"type": "fork_supported", "supported": s.forkSupported(agent, rid)})
+	s.event(cid, Row{"type": "prompt_capabilities", "prompt_capabilities": s.Runtime.PromptCapabilities(rid)})
 	if modes := v["modes"]; modes != nil {
 		s.event(cid, Row{"type": "session_modes", "modes": modeWire(modes)})
 	}
 	s.event(cid, Row{"type": "session_config_options", "config_options": configWire(v)})
+}
+func (s *Server) forkSupported(agent *hub.Agent, runtimeID string) bool {
+	return s.Runtime.SupportsPointFork(runtimeID, agent)
 }
 func (s *Server) snapshot(cid string) Row {
 	s.mu.Lock()
@@ -414,9 +543,12 @@ func (s *Server) snapshot(cid string) Row {
 		}
 	}
 	out["active_delegations"] = active
-	rid := c.RuntimeID
+	rid, agent := c.RuntimeID, c.Agent
 	s.mu.Unlock()
 	v := s.runtimeView(rid)
+	out["fork_supported"] = s.forkSupported(agent, rid)
+	out["prompt_capabilities"] = s.Runtime.PromptCapabilities(rid)
+	out["native_steering_available"] = s.Runtime.SupportsNativeSteering(rid)
 	out["external_id"] = v["nativeSessionId"]
 	out["modes"] = modeWire(v["modes"])
 	out["config_options"] = configWire(v)

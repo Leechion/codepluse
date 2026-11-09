@@ -11,7 +11,6 @@ import {
   type ComponentProps,
 } from "react"
 import {
-  isLiveTurnId,
   selectTimelineTurns,
   useConversationRuntimeActions,
   useConversationRuntimeStore,
@@ -126,6 +125,7 @@ import { useModelLabels } from "@/hooks/use-model-labels"
 import { useChatAnimationsEnabled } from "@/hooks/use-appearance"
 import { usePageHandoffName } from "@/lib/browser/use-page-handoff-name"
 import { unescapeComposerText } from "@/lib/composer-copy-text"
+import { resolveAssistantCopyText } from "./zcode/assistant-copy"
 import { useStickToBottomContext } from "use-stick-to-bottom"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { MarkdownImageProvider } from "@/components/ai-elements/markdown-local-image"
@@ -230,6 +230,7 @@ export interface ResolvedMessageGroup {
   duration_ms?: number | null
   model?: string | null
   models?: string[]
+  timestamp?: string | null
   /**
    * Wall-clock completion time supplied by the Rust parser. For merged
    * sub-turns this is the latest non-null completion across the run — the
@@ -1184,31 +1185,12 @@ export function markThreadTail(items: ThreadRenderItem[]): void {
   }
 }
 
-/**
- * Whether forking at this reply would land somewhere other than where the user
- * pointed — so the affordance greys out until it wouldn't.
- *
- * A turn this session streamed carries a `live-…` id until the post-turn
- * reparse backfills the parser's name (`source_turn_id`). The backend cannot
- * resolve such an id and deliberately degrades to a TAIL fork rather than
- * refusing the click. That is exactly right at the END of the thread — the tail
- * IS the fork point — and a silent lie anywhere before it.
- *
- * Anywhere before it is reachable: a reply the user steered mid-turn promotes
- * as assistant / user message / assistant, so its first half is a settled
- * group carrying a fork button while the backfill is a second and a half away.
- * The exception is therefore the thread TAIL, not the newest assistant reply:
- * steer at the very end of a turn and the promotion is assistant + user message
- * with nothing after it, which leaves the newest reply one message short of the
- * tail — and the parse ending on a user turn means `source_turn_id` never
- * arrives to correct it (see `computeTurnMetadataPatches`). Exported for tests.
- */
+/** Only a native message ID identifies a reliable point in the agent history. */
 export function isForkPointUnnamed(
   forkPoint: MessageTurn | null,
-  isThreadTail: boolean
+  _isThreadTail: boolean
 ): boolean {
-  if (forkPoint === null || isThreadTail) return false
-  return forkPoint.source_turn_id == null && isLiveTurnId(forkPoint.id)
+  return forkPoint !== null && !forkPoint.source_turn_id?.trim()
 }
 
 const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
@@ -1314,23 +1296,19 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
           models={group.models}
           previousUserIndex={previousUserIndex}
           isResponseComplete={isResponseComplete}
-          copyText={extractTextFromParts(group.parts)}
-          completedAt={group.completed_at}
+          copyText={resolveAssistantCopyText(group.parts)}
+          createdAt={group.timestamp}
           forkDisabled={forkDisabled || forkPointUnnamed}
           forkDisabledReason={forkPointUnnamed ? "unnamed" : "busy"}
           onForkFromHere={
             // Gated on a settled turn — forking mid-stream would name a message
             // the agent is still writing.
             //
-            // `source_turn_id` first: a turn produced in THIS session is named
-            // `live-…`, which the backend cannot resolve against its own parse
-            // — sending it forked at the tail and produced a copy of the parent.
-            // The post-turn reparse backfills the parser's name; `id` is the
-            // right answer only for turns that came from the parser already,
-            // and for the newest reply, where the tail IS the fork point.
+            // Local turn IDs do not identify an ACP history position. The
+            // disabled state above keeps unnamed historical replies safe.
             onForkFromTurn && isResponseComplete && forkPoint
               ? () => {
-                  onForkFromTurn(forkPoint.source_turn_id ?? forkPoint.id)
+                  onForkFromTurn(forkPoint.source_turn_id!)
                 }
               : undefined
           }
@@ -1572,6 +1550,7 @@ export function MessageListView({
           usage: msg.usage,
           duration_ms: msg.duration_ms,
           model: msg.model,
+          timestamp: msg.timestamp,
           completed_at: msg.completed_at,
         }
         groupCache.set(msg, group)
@@ -2152,7 +2131,7 @@ export function MessageListView({
     <SessionViewerHost>
       <div
         ref={selectionBoxRef}
-        className="chat-motion-scope relative flex h-full min-h-0 flex-col"
+        className="zcode-transcript chat-motion-scope relative flex h-full min-h-0 flex-col"
       >
         <MessageThread
           className="flex-1 min-h-0"

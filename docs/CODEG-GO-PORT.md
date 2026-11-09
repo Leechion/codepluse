@@ -21,7 +21,7 @@ powershell -NoProfile -File scripts/build-codeg-desktop.ps1 -InstallShortcut
 & '.\dist\codepluse\codepluse.exe'
 ```
 
-桌面程序复用已有 codepluse 后台，未运行时自动启动。关闭窗口后后台继续运行。当前是依赖本机项目目录的构建，`dist/codepluse/workspace.json` 记录项目路径；移动项目后重新构建。WebView2 用户资料独立保存在系统缓存目录的 `Codeg Go/WebView2`（保留旧路径以延续已有偏好设置）。
+桌面程序复用已有 codepluse 后台，未运行时自动启动。关闭窗口后后台继续运行。当前是依赖本机项目目录的构建，`dist/codepluse/workspace.json` 记录项目路径；移动项目后重新构建。WebView2 用户资料保存在项目的 `.data/webview2` 目录。
 
 ## 已迁移的核心
 
@@ -52,9 +52,24 @@ WorkBuddy 使用桌面安装包内置的 CodeBuddy 执行内核，界面显示 W
 
 ## 当前边界
 
-这是一份可运行的移植，尚未完成 Codeg 全功能等价。自动化、待办、远端仓库的 Issue / PR 工作台、Office CLI、浏览器 / 电脑操作、上游更新器等仍需迁移。本地 Git 的自定义凭据账户、自动生成提交说明、部分 worktree / 分支更新组合操作还未接通；网络操作使用系统 Git 凭据。保留原 UI 入口，调用未实现接口会明确报错。终端当前面向 Windows；对话输入仅支持文本；原生历史导入和任意消息分叉尚未实现。
+## ZCode 对话页移植（2026-11-07）
 
-工作台数据保存在 `.data/codeg-workspace.json`，原生 ACP 会话元数据保存在 `.data/codeg-sessions.json`，与旧工作台数据分开。委派任务的运行状态、待收消息仍保存在当前服务进程中；重启后可查看已保存的父子会话历史，但不能继续等待重启前的委派 ID。
+/workspace 已替换为 ZCode 原版对话页（消息流/输入框/工具卡/权限卡全套组件自 zcode-reference 移植，vendor 于 codeg-ui/src/zcode，镜像 ZCode ui/src 布局；接入层 goTransport/goConversationTransport.ts 把 Go 契约合成 v4 协议帧）。旧版对话页保留在 /workspace-classic 可回退。后端新增 get_folder_conversation_turns 分页契约。已接通：流式 assistantText/reasoning、toolCall 卡片、权限审批、模型/模式切换、重命名/删除、停止；v1 明确未接通：附件上传、fork/文件回退/队列/workflow（UI 已隐藏）、新建会话（只能打开已有会话）、草稿跨会话持久化、深色主题跟随。
+
+
+本轮（见 `internal/codeg/` 的 automations / worktask / forge / office / updater / browser / computer 模块）已补齐大部分缺口：
+
+- **自动化**：`automation_*` 全命令 + 运行历史 + 每 30 秒调度（cron 复用 `internal/orch`，按服务器本地时区求值）；worktree 隔离的定时任务暂不支持。
+- **无人值守任务**：`work_task_*` 全命令 + `todo→queued→preparing→running→awaiting_input→review→merging→done` 状态机，隔离于 `.worktrees/task-<id>`（复用 `internal/extra` worktree），支持重试/反馈/取消/计划开始/模板/每文件夹设置/合并队列（squash 与 merge 两种策略）。
+- **Forge 工作台**：仅 GitHub（REST v3）；账户 token 只存内存，重启需重新录入；`forge_settings_*` 与自动处理为最小实现。
+- **Office 工具**：技能扫描（`codeg-assets/`）与检测为真实现；OfficeCLI 二进制本仓库不分发，install/render/关联执行端会明确报错。
+- **更新器**：`check_app_update` 读 `HARNESS_HUB_UPDATE_MANIFEST`（未配置即报告最新）；perform/rollback/restart 明确报错。
+- **浏览器操作**：CDP 驱动（gorilla/websocket），自动探测本机 Chrome/Edge，标签页/导航/截图/隔离世界注入 browser-agent bundle（`codeg-ui/browser-agent/agent.bundle.js` 由 esbuild 构建）实现 agent snapshot/act。仍在收敛中的命令：窗口尺寸、元素拾取、文档查看器、授权级别等返回明确报错。
+- **电脑操作**：窗口枚举与 PrintWindow 截图为真实现；合成输入驱动层未实现，整屏/应用共享需要桌面助手。
+
+仍待迁移：本地 Git 的自定义凭据账户、自动生成提交说明、部分 worktree / 分支更新组合操作（网络操作使用系统 Git 凭据）；原生历史导入和任意消息分叉；对话输入仅支持文本；终端面向 Windows。
+
+工作台数据保存在 `.data/codeg-workspace.json`，原生 ACP 会话元数据保存在 `.data/codeg-sessions.json`，与旧工作台数据分开。委派任务及待收消息保存在 `.data/codeg-delegations.json`。后台重启后，运行中的任务标记为中断；主会话可用 `resume_delegation` 按原 task_id 在原子对话与原生会话中继续。重复委派同一执行端的未完成任务会优先恢复，明确创建不同任务时使用 `new_task: true`。
 
 ## 验证
 
@@ -63,7 +78,7 @@ Set-Location server-go
 go test ./...
 go vet ./...
 Set-Location ..
-npm test
+npm test  # 旧版 Electron 桌面壳测试
 ```
 
 协议测试使用独立 ACP fixture 进程，覆盖真实进程通信和事件顺序；fixture 不代表模型验收。另已使用本机配置实际连接 Claude Code，模型经 MCP 委派 Codex 计算 19+23，取得子任务 `completed` 和结果 42，再由主会话汇报。所用模型为本机网关提供的 `qwen3.8-flash`；Harness 与模型名称是两件事。

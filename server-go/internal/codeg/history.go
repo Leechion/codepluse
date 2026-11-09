@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Codeg reconstructs historical delegation bindings from persisted child rows,
@@ -61,6 +62,7 @@ func persistedBlocks(live Row, tools []Row, fallback string) []Row {
 	blocks := []Row{}
 	content, _ := live["content"].([]Row)
 	for _, block := range content {
+		if text(block["parent_tool_use_id"]) != "" { continue }
 		switch block["kind"] {
 		case "text", "thinking":
 			blocks = append(blocks, Row{"type": block["kind"], "text": block["text"]})
@@ -154,4 +156,123 @@ func (s *Store) statsLocked() Row {
 		byAgent = append(byAgent, Row{"agent_type": agent, "conversation_count": count})
 	}
 	return Row{"total_conversations": len(s.Conversations), "total_messages": messages, "by_agent": byAgent}
+}
+
+// ── turn-window pagination (get_folder_conversation_turns) ──
+//
+// The frontend page (codeg-ui ConversationTurnsPage) expects one page of older
+// history ending just before `beforeIndex`: full[turns_offset .. turns_offset +
+// len(turns)), plus the structural prefix fingerprint of full[0..turns_offset)
+// and of the page's end boundary, so the client can verify the join.
+
+const fnvSeed uint64 = 0xcbf29ce484222325
+const fnvPrime uint64 = 0x100000001b3
+
+// prefixFingerprintLocked mirrors the client's extendPrefixFingerprint
+// (src/lib/turn-window.ts) and the Rust turn_window::prefix_fingerprint:
+// FNV-1a 64 over, per turn, the role tag byte (user=0, assistant=1, system=2)
+// then the timestamp epoch-millis as 8 little-endian bytes. Id-free.
+func prefixFingerprint(turns []Row, seed uint64) string {
+	hash := seed
+	for _, turn := range turns {
+		var tag byte
+		switch text(turn["role"]) {
+		case "user":
+			tag = 0
+		case "assistant":
+			tag = 1
+		case "system":
+			tag = 2
+		default:
+			tag = 3
+		}
+		hash ^= uint64(tag)
+		hash *= fnvPrime
+		millis := int64(0)
+		if ts, err := time.Parse(time.RFC3339Nano, text(turn["timestamp"])); err == nil {
+			millis = ts.UnixMilli()
+		}
+		v := uint64(millis)
+		for i := 0; i < 8; i++ {
+			hash ^= v & 0xff
+			hash *= fnvPrime
+			v >>= 8
+		}
+	}
+	return fmt.Sprintf("%016x", hash)
+}
+
+// uncoveredPrefixMaxTsLocked returns the max RFC3339 timestamp in
+// turns[0..end), or nil when the prefix is empty.
+func uncoveredPrefixMaxTs(turns []Row) any {
+	var maxTs time.Time
+	found := false
+	for _, turn := range turns {
+		ts, err := time.Parse(time.RFC3339Nano, text(turn["timestamp"]))
+		if err != nil {
+			continue
+		}
+		if !found || ts.After(maxTs) {
+			maxTs = ts
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return maxTs.UTC().Format(time.RFC3339Nano)
+}
+
+// conversationTurnsPageLocked builds one page of older history for
+// get_folder_conversation_turns. The page ends just before `beforeIndex`
+// (clamped to [0, total]) and holds at most `limit` turns.
+func (s *Store) conversationTurnsPageLocked(conversation int, beforeIndex, limit int) Row {
+	all := s.Turns[fmt.Sprint(conversation)]
+	if all == nil {
+		all = []Row{}
+	}
+	total := len(all)
+	end := beforeIndex
+	if end < 0 {
+		end = 0
+	}
+	if end > total {
+		end = total
+	}
+	start := end - limit
+	if start < 0 {
+		start = 0
+	}
+	page := []Row{}
+	for _, turn := range all[start:end] {
+		page = append(page, clone(turn))
+	}
+	prefix := all[:start]
+	assistantBefore := 0
+	userBefore := 0
+	for _, turn := range prefix {
+		switch text(turn["role"]) {
+		case "assistant":
+			assistantBefore++
+		case "user":
+			userBefore++
+		}
+	}
+	boundary := beforeIndex
+	if boundary < 0 {
+		boundary = 0
+	}
+	if boundary > total {
+		boundary = total
+	}
+	return Row{
+		"turns":                        page,
+		"turns_offset":                 start,
+		"turns_total":                  total,
+		"assistant_turns_before_offset": assistantBefore,
+		"user_turns_before_offset":      userBefore,
+		"prefix_hash":                  prefixFingerprint(prefix, fnvSeed),
+		"prefix_hash_before_index":      prefixFingerprint(all[:boundary], fnvSeed),
+		"uncovered_prefix_max_ts":       uncoveredPrefixMaxTs(prefix),
+	}
 }

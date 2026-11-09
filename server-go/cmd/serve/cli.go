@@ -1,12 +1,37 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"harnesshub/internal/providers"
 )
+
+func providerVersion(tool string) string {
+	if tool == "dsh" {
+		return dshModelVersion()
+	}
+	if tool != "claude" {
+		return "default"
+	}
+	p, ok, err := providers.Active(ROOT, tool)
+	if err != nil {
+		return "error"
+	}
+	if !ok {
+		return "default"
+	}
+	b, _ := json.Marshal(struct {
+		Provider providers.Provider
+		Env      map[string]string
+	}{p, p.Env})
+	return fmt.Sprintf("%x", sha256.Sum256(b))
+}
 
 // ----------------------------- CLI locating -----------------------------
 
@@ -159,54 +184,29 @@ var permissions = []map[string]any{
 	{"id": "shell", "label": "只读 + 允许 shell", "desc": "允许执行命令，但不授予写权限", "allowWrites": false, "allowShell": true},
 }
 
-// gatewayConfig reuses a configured Claude gateway for Codex (Responses API).
-func gatewayConfig() map[string]string {
-	data, err := os.ReadFile(filepath.Join(home(), ".claude", "settings.json"))
-	if err != nil {
-		return nil
+// codexHome uses Codex's own settings and credentials in a writable workspace copy.
+func codexHome() (string, error) {
+	dir := filepath.Join(ROOT, ".data", "codex-native-home")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", fmt.Errorf("无法创建 Codex 配置目录: %w", err)
 	}
-	var s struct {
-		Env map[string]string `json:"env"`
-	}
-	if json.Unmarshal(data, &s) != nil {
-		return nil
-	}
-	base, token := s.Env["ANTHROPIC_BASE_URL"], s.Env["ANTHROPIC_AUTH_TOKEN"]
-	if base == "" || token == "" {
-		return nil
-	}
-	model := os.Getenv("HARNESS_HUB_CODEX_MODEL")
-	if model == "" {
-		model = s.Env["ANTHROPIC_MODEL"]
-	}
-	if model == "" {
-		model = "qwen3.8-flash"
-	}
-	return map[string]string{"baseUrl": strings.TrimRight(base, "/"), "token": token, "model": model}
-}
-
-// codexHome builds an isolated CODEX_HOME carrying only auth.json (+ gateway).
-func codexHome() string {
-	dir := filepath.Join(os.TempDir(), "harness-hub-codex-home")
-	_ = os.MkdirAll(dir, 0o755)
-	src := filepath.Join(home(), ".codex", "auth.json")
-	if data, err := os.ReadFile(src); err == nil {
-		_ = os.WriteFile(filepath.Join(dir, "auth.json"), data, 0o600)
-	}
-	if os.Getenv("HARNESS_HUB_CODEX_GATEWAY") != "0" {
-		if gw := gatewayConfig(); gw != nil {
-			toml := "model = \"" + strings.ReplaceAll(gw["model"], "\"", "\\\"") + "\"\n" +
-				"model_provider = \"gateway\"\nmodel_reasoning_effort = \"low\"\n\n" +
-				"[model_providers.gateway]\nname = \"Local Gateway\"\n" +
-				"base_url = \"" + gw["baseUrl"] + "/v1\"\nwire_api = \"responses\"\n" +
-				"env_key = \"HH_GATEWAY_KEY\"\nrequires_openai_auth = false\n"
-			_ = os.WriteFile(filepath.Join(dir, "config.toml"), []byte(toml), 0o600)
+	for _, name := range []string{"auth.json", "config.toml"} {
+		src := filepath.Join(home(), ".codex", name)
+		data, err := os.ReadFile(src)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("读取 Codex %s 失败: %w", name, err)
+		}
+		if err = os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
+			return "", fmt.Errorf("写入 Codex %s 失败: %w", name, err)
 		}
 	}
-	return dir
+	return dir, nil
 }
 
-func buildEnv(tool string) []string {
+func buildEnv(tool string) ([]string, error) {
 	env := os.Environ()
 	set := func(k, v string) { env = append(env, k+"="+v) }
 	drop := func(k string) {
@@ -221,6 +221,12 @@ func buildEnv(tool string) []string {
 	drop("NODE_EXTRA_CA_CERTS")
 	set("NO_COLOR", "1")
 	set("CI", "1")
+	if tool == "dsh" && os.Getenv("DSH_HOME") == "" {
+		localHome := filepath.Join(ROOT, ".data", "dsh-home")
+		if info, err := os.Stat(localHome); err == nil && info.IsDir() {
+			set("DSH_HOME", localHome)
+		}
+	}
 	if tool == "workbuddy" {
 		set("CODEBUDDY_FORCE_LITE_WB_BUNDLE", "1")
 		if os.Getenv("CODEBUDDY_CONFIG_DIR") == "" {
@@ -243,18 +249,12 @@ func buildEnv(tool string) []string {
 		set("CLAUDE_CODE_EXECUTABLE", resolveBin("claude"))
 	}
 	if tool == "codex" && os.Getenv("HARNESS_HUB_CODEX_ISOLATE") != "0" {
-		set("CODEX_HOME", codexHome())
-		if os.Getenv("HARNESS_HUB_CODEX_GATEWAY") != "0" {
-			if gw := gatewayConfig(); gw != nil {
-				set("HH_GATEWAY_KEY", gw["token"])
-				if os.Getenv("ALL_PROXY") == "" && os.Getenv("HTTPS_PROXY") != "" {
-					set("ALL_PROXY", os.Getenv("HTTPS_PROXY"))
-				}
-				if os.Getenv("all_proxy") == "" && os.Getenv("https_proxy") != "" {
-					set("all_proxy", os.Getenv("https_proxy"))
-				}
-			}
+		dir, err := codexHome()
+		if err != nil {
+			return nil, err
 		}
+		set("CODEX_HOME", dir)
+
 	}
-	return env
+	return env, nil
 }

@@ -1509,12 +1509,10 @@ describe("MessageInput settings popover", () => {
     )
 
     const popover = await openSettings(user)
-    // One header per provider namespace…
-    expect(within(popover).getByText("anthropic")).toBeInTheDocument()
-    expect(within(popover).getByText("openai")).toBeInTheDocument()
-    // …and the option label drops the redundant `openai/` prefix, while the
-    // committed value stays the full id.
-    await user.click(within(popover).getByRole("button", { name: /gpt-4o/ }))
+    // The provider submenu switches the provider and its initial model using
+    // the original value, without mixing models from different providers.
+    await user.click(within(popover).getByRole("button", { name: "Provider: anthropic" }))
+    await user.click(within(popover).getByRole("button", { name: "openai" }))
     expect(onConfigOptionChange).toHaveBeenCalledWith("model", "openai/gpt-4o")
   })
 
@@ -1577,7 +1575,7 @@ describe("MessageInput settings popover", () => {
       "Plan"
     )
     const popover = await openSettings(user)
-    await user.click(within(popover).getByRole("button", { name: "Act" }))
+    await user.click(within(popover).getByRole("button", { name: /^Act\b/ }))
     expect(onModeChange).toHaveBeenCalledWith("act")
   })
 })

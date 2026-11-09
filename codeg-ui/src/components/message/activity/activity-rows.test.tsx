@@ -102,7 +102,11 @@ function renderUi(
   awaitingToolCallId: string | null = null,
   approvals: ToolApprovalMap = {}
 ) {
-  return render(withProviders(ui, awaitingToolCallId, approvals))
+  const view = render(withProviders(ui, awaitingToolCallId, approvals))
+  const history = screen.queryByRole("button", { name: /^Worked/ })
+  if (history?.getAttribute("aria-expanded") === "false")
+    fireEvent.click(history)
+  return view
 }
 
 function turn(blocks: ContentBlock[], id = "t"): MessageTurn {
@@ -135,6 +139,100 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+describe("ZCode work history", () => {
+  it("collapses completed work while keeping the answer visible, and reopens it on demand", () => {
+    const message = turn([
+      toolUse("r1", "Read", { file_path: "/repo/file.ts" }),
+      toolResult("r1", "source"),
+    ])
+    render(withProviders(<Round parts={parts(message)} />))
+    const history = screen.getByRole("button", { name: /^Worked for/ })
+    expect(history).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByText("Done.")).toBeTruthy()
+    expect(screen.queryByText("/repo/file.ts")).toBeNull()
+    fireEvent.click(history)
+    expect(history).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText("/repo/file.ts")).toBeTruthy()
+    fireEvent.click(history)
+    expect(history).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("keeps live work visible and folds it only when the answer finishes", () => {
+    const message = turn([
+      toolUse("r1", "Read", { file_path: "/repo/live.ts" }),
+      toolResult("r1", "source"),
+    ])
+    const view = render(
+      withProviders(<Round parts={parts(message, true)} completed={false} />)
+    )
+    expect(screen.getByText("/repo/live.ts")).toBeTruthy()
+    view.rerender(withProviders(<Round parts={parts(message)} completed />))
+    expect(screen.getByRole("button", { name: /^Worked/ })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    )
+    expect(screen.queryByText("/repo/live.ts")).toBeNull()
+    expect(screen.getByText("Done.")).toBeTruthy()
+  })
+
+  it("remembers an opened history when a virtualized row remounts", () => {
+    const stableParts = parts(
+      turn([
+        toolUse("r-remount", "Read", { file_path: "/repo/remount.ts" }),
+        toolResult("r-remount", "source"),
+      ])
+    )
+    const first = render(withProviders(<Round parts={stableParts} />))
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }))
+    expect(screen.getByText("/repo/remount.ts")).toBeTruthy()
+    first.unmount()
+    render(withProviders(<Round parts={stableParts} />))
+    expect(screen.getByRole("button", { name: /^Worked/ })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    expect(screen.getByText("/repo/remount.ts")).toBeTruthy()
+  })
+})
+
+describe("ZCode thought row", () => {
+  it("shows the latest streaming line and reveals the complete thought", () => {
+    const message: MessageTurn = {
+      id: "thought-test",
+      role: "assistant",
+      timestamp: "2026-10-22T10:00:00Z",
+      blocks: [{ type: "thinking", text: "First line\nLatest line" }],
+    }
+    renderUi(<Round parts={parts(message, true)} completed={false} />)
+    expect(screen.getByText(/Latest line/)).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: /Thinking/ }))
+    expect(screen.getByText(/First line/)).toBeTruthy()
+  })
+})
+
+describe("ZCode tool summary", () => {
+  it("opens and closes command details using the keyboard", () => {
+    renderUi(
+      <Round
+        parts={parts(
+          turn([
+            toolUse("keyboard-command", "Bash", { command: "pnpm test" }),
+            toolResult("keyboard-command", "Tests passed"),
+          ])
+        )}
+      />
+    )
+    const row = rowOf("pnpm test")
+    const trigger = within(row).getByRole("button")
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    fireEvent.keyDown(trigger, { key: "Enter" })
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+    expect(within(row).getByText("Tests passed")).toBeTruthy()
+    fireEvent.keyDown(trigger, { key: " " })
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+  })
 })
 
 describe("delegation row", () => {
@@ -184,7 +282,7 @@ describe("delegation row", () => {
   })
 })
 
-describe("a folded turn", () => {
+describe("delegated tasks in the turn", () => {
   const delegated = (id: string, taskId: string, status: string) => [
     toolUse(
       id,
@@ -201,7 +299,36 @@ describe("a folded turn", () => {
     toolResult(id, JSON.stringify(report)),
   ]
 
-  it("keeps the check whose sub-agent waits on the user under its header", () => {
+  it("keeps an active delegated task visible while work history is collapsed", () => {
+    render(
+      withProviders(
+        <Round
+          parts={parts(
+            turn([
+              ...delegated("d1", "aaaa1111", "running"),
+              ...checked("p1", {
+                task_id: "aaaa1111",
+                status: "running",
+                blocked_on: { kind: "permission" },
+              }),
+            ])
+          )}
+        />
+      )
+    )
+    expect(screen.getByRole("button", { name: /^Worked/ })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    )
+    expect(screen.getByText("Waiting for task #aaaa1111 result")).toBeTruthy()
+    expect(rowOf("Waiting for task #aaaa1111 result")).toHaveAttribute(
+      "data-status",
+      "awaiting"
+    )
+    expect(screen.getByText("Done.")).toBeTruthy()
+  })
+
+  it("keeps both the waiting and completed sub-agent checks visible", () => {
     renderUi(
       <Round
         parts={parts(
@@ -223,21 +350,15 @@ describe("a folded turn", () => {
       />
     )
     expect(screen.getAllByText(/^Waiting for task/)).toHaveLength(2)
-    fireEvent.click(screen.getByRole("button", { name: "Activity" }))
     expect(screen.getByText("#aaaa1111")).toBeTruthy()
     expect(
       rowOf("Waiting for task #aaaa1111 result").getAttribute("data-status")
     ).toBe("awaiting")
-    expect(screen.queryByText("#bbbb2222")).toBeNull()
-    expect(screen.queryByText("Waiting for task #bbbb2222 result")).toBeNull()
-    // What stays in view is no list of the turn's steps: it has no end mark.
+    expect(screen.getByText("#bbbb2222")).toBeTruthy()
+    expect(screen.getByText("Waiting for task #bbbb2222 result")).toBeTruthy()
     const lists = document.querySelectorAll(".activity-timeline")
     expect(lists).toHaveLength(1)
     expect(lists[0]).not.toHaveAttribute("data-end")
-    // It hangs under the header as the open list does: a step's gap below
-    // it, the rail running up to it (globals.css), no margin of its own.
-    expect(lists[0]).toHaveAttribute("data-headed")
-    expect(lists[0]!.className.split(/\s+/)).not.toContain("mt-2")
   })
 })
 
@@ -329,7 +450,7 @@ describe("agent row", () => {
   it("shows the prompt on its title line, the result's first line under it, and opens to its own steps", () => {
     renderUi(<Round parts={parts(AGENT)} />)
     const row = rowOf("Explore")
-    const header = row.querySelector(":scope > button")!
+    const header = row.querySelector(':scope > [role="button"]')!
     expect(within(row).getByText("Find binding consumers")).toBeTruthy()
     expect(
       within(row).getAllByText("Find every consumer of source_bindings.")
@@ -365,8 +486,8 @@ describe("waiting on the user", () => {
   })
 })
 
-describe("jumping to a failure", () => {
-  it("opens the turn's first unrecovered failure from the header", () => {
+describe("unrecovered failures", () => {
+  it("opens the failed tool and its details in the visible timeline", () => {
     const FAILING = turn([
       toolUse("r1", "Read", { file_path: "/r/a.ts" }),
       toolResult("r1", "a"),
@@ -374,10 +495,9 @@ describe("jumping to a failure", () => {
       toolResult("r2", "Permission denied", true),
     ])
     renderUi(<Round parts={parts(FAILING)} />)
-    // Folded, and the failed read sits inside the Explored group.
-    fireEvent.click(screen.getByRole("button", { name: "Activity" }))
-    expect(screen.queryByText("Permission denied")).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "1 failed" }))
+    expect(
+      screen.getByRole("button", { name: /Read .*b\.ts failed/ })
+    ).toHaveAttribute("aria-expanded", "true")
     expect(screen.getByText("Permission denied")).toBeTruthy()
   })
 })
@@ -634,11 +754,12 @@ describe("a command group in a reply being written", () => {
       "tool:c2",
       "tool:c3",
     ])
-    expect(within(rowOf("pnpm lint")).getByText("Command")).toBeTruthy()
+    expect(within(rowOf("pnpm lint")).getByText("Terminal")).toBeTruthy()
     expect(rowOf("pnpm test").getAttribute("data-status")).toBe("succeeded")
     expect(rowOf("rm -rf build").getAttribute("data-status")).toBe("running")
 
     rerender(withProviders(<Round parts={parts(LIVE)} />, null))
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }))
     expect(
       screen.getByRole("button", { name: /Ran 3 commands/ })
     ).toHaveAttribute("aria-expanded", "false")
@@ -655,6 +776,7 @@ describe("a command group in a reply being written", () => {
     // Opened again, it stays open once the reply is done.
     fireEvent.click(screen.getByRole("button", { name: /Running 3 commands/ }))
     rerender(withProviders(<Round parts={parts(LIVE)} />, null))
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }))
     expect(screen.getByText("pnpm lint")).toBeTruthy()
   })
 
@@ -1088,20 +1210,15 @@ describe("a failed command", () => {
   })
 })
 
-describe("the foot of a live reply", () => {
+describe("a live reply", () => {
   const LIVE = turn([
     toolUse("c1", "Bash", { command: "pnpm lint" }),
     toolResult("c1", "ok"),
     toolUse("r1", "Read", { file_path: "/r/a.ts" }),
   ])
-  const footOf = () =>
-    document.querySelector<HTMLElement>(".activity-timeline")!
-      .lastElementChild as HTMLElement
   const working = () => document.querySelectorAll('[data-marker="working"]')
 
-  it("turns at the foot of the steps the answer is being written beneath, the reply's one turning mark", () => {
-    // The answer has started under the steps: the ring at their foot still
-    // turns, and nothing turns under the answer.
+  it("shows the running indicator after the live content", () => {
     renderUi(<Round parts={parts(LIVE, true, ["r1"])} completed={false} />)
     // Still being written: a character at a time, each its own span.
     expect(
@@ -1111,33 +1228,23 @@ describe("the foot of a live reply", () => {
           ![...element.children].some((child) => child.textContent === "Done.")
       )
     ).toBeTruthy()
-    expect(footOf()).toHaveAttribute("data-marker", "working")
-    expect(footOf().querySelector(".animate-spin")).toBeTruthy()
     expect(working()).toHaveLength(1)
+    expect(working()[0]!.querySelector(".animate-spin")).toBeTruthy()
   })
 
-  it("rests on the fold row while the agent waits on the user", () => {
+  it("stops the working indicator while the agent waits on the user", () => {
     renderUi(
       <Round parts={parts(LIVE, true, ["r1"])} completed={false} />,
       "r1"
     )
-    expect(footOf()).toHaveAttribute("data-marker", "foot")
-    console.log("FOOTTEXT", JSON.stringify(footOf().textContent))
-    expect(
-      within(footOf()).getByRole("button", { name: "Collapse 2 steps" })
-    ).toBeTruthy()
     expect(working()).toHaveLength(0)
+    expect(screen.getByText("needs you")).toBeTruthy()
   })
 
-  it("gives way to the turning mark under the reply once the steps fold", () => {
+  it("keeps the live rows available without a turn-level fold", () => {
     renderUi(<Round parts={parts(LIVE, true, ["r1"])} completed={false} />)
-    fireEvent.click(screen.getByRole("button", { name: "Working" }))
-    expect(document.querySelector(".activity-timeline > li")).toBeNull()
-    expect(working()).toHaveLength(1)
-    expect(working()[0]!.querySelector(".animate-spin")).toBeTruthy()
-    // Unfolded, the foot of the rail takes it back.
-    fireEvent.click(screen.getByRole("button", { name: "Working" }))
-    expect(footOf()).toHaveAttribute("data-marker", "working")
+    expect(screen.getByText("pnpm lint")).toBeTruthy()
+    expect(screen.getByText("/r/a.ts")).toBeTruthy()
     expect(working()).toHaveLength(1)
   })
 })
@@ -1195,7 +1302,7 @@ describe("a reply's rail while it is written", () => {
       members.lastElementChild
     )
 
-    // A step joins the reply, above the turning ring the rail runs down to.
+    // A step joins the reply after the command group.
     view.rerender(
       withProviders(
         <Round
@@ -1210,9 +1317,8 @@ describe("a reply's rail while it is written", () => {
     await act(async () => {})
     const read = rowOf(/a\.ts/)
     expect(marked(read)).toBe("enter")
-    expect(marked(rowOf("Running 3 commands"))).toBe("")
-    expect(list.lastElementChild).toHaveAttribute("data-marker", "working")
-    expect(read.nextElementSibling).toBe(list.lastElementChild)
+    expect(marked(rowOf("Running 3 commands"))).toBe("extend")
+    expect(read).toBe(list.lastElementChild)
 
     // Done, the marks go: nothing replays in history.
     view.rerender(
@@ -1282,10 +1388,8 @@ describe("command row", () => {
     )
 
     expect(screen.getByText("pnpm lint")).toHaveClass("text-activity-secondary")
-    expect(screen.getByText("Run the tests")).toHaveClass(
-      "text-activity-secondary"
-    )
-    for (const label of screen.getAllByText("Command")) {
+    expect(screen.getByText("pnpm test")).toHaveClass("text-activity-secondary")
+    for (const label of screen.getAllByText("Terminal")) {
       expect(label).toHaveClass("text-activity-secondary", "font-medium")
     }
   })
@@ -1307,10 +1411,12 @@ describe("command row", () => {
 
     // `.activity-row-toggle` (globals.css) takes the secondary ink inside the
     // header that opens the row to the foreground.
-    const header = screen.getByText("Run the tests").closest("button")!
+    const header = screen
+      .getByText("pnpm test")
+      .closest<HTMLElement>('[role="button"]')!
     expect(header).toHaveAttribute("aria-expanded")
     expect(header).toHaveClass("activity-row-toggle")
-    expect(within(header).getByText("Command")).toHaveClass(
+    expect(within(header).getByText("Terminal")).toHaveClass(
       "text-activity-secondary"
     )
     // So does the grey glyph in its ring, the row's marker beside it.
@@ -1371,8 +1477,9 @@ describe("a command's exit", () => {
     const figure = within(row).getByText("no matches")
     expect(figure).toHaveAttribute("title", "exit 1")
     expect(figure).not.toHaveClass("text-tone-danger")
-    // Not counted with the failures in the reply's header.
-    expect(screen.getByText("2 failed")).toBeTruthy()
+    // The two genuine failures remain marked on their own rows.
+    expect(rowOf("pyhton x.py")).toHaveAttribute("data-status", "failed")
+    expect(rowOf("node crawl.js")).toHaveAttribute("data-status", "failed")
   })
 
   it("says a failure in the words its code stands for, the code on hover", () => {

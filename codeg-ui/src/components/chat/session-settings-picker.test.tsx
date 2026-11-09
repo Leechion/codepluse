@@ -5,7 +5,13 @@ import {
   type ReactNode,
   type Ref,
 } from "react"
-import { cleanup, render, screen, within } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { createTranslator, NextIntlClientProvider } from "next-intl"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -135,11 +141,15 @@ function renderPicker({
   modes = [],
   currentModeId = null,
   loadingLabel = null,
+  permission = false,
+  effortSlider = false,
 }: {
   configOptions?: SessionConfigOptionInfo[]
   modes?: SessionModeInfo[]
   currentModeId?: string | null
   loadingLabel?: string | null
+  permission?: boolean
+  effortSlider?: boolean
 } = {}) {
   const onChange = vi.fn()
   const tree = (options: SessionConfigOptionInfo[]) => (
@@ -154,6 +164,8 @@ function renderPicker({
         })}
         loadingLabel={loadingLabel}
         onChange={onChange}
+        permission={permission}
+        effortSlider={effortSlider}
       />
     </NextIntlClientProvider>
   )
@@ -240,6 +252,42 @@ describe("SessionSettingsPicker — the chip", () => {
 })
 
 describe("SessionSettingsPicker — the popover", () => {
+  it("shows permission options as described rows and commits the selected mode", async () => {
+    const user = userEvent.setup()
+    const { onChange } = renderPicker({
+      configOptions: [CLAUDE[0]],
+      permission: true,
+    })
+    const popover = await openPopover(user)
+    expect(within(popover).getByText("Always ask first")).toBeVisible()
+    expect(
+      within(popover).getByRole("button", { name: /Manual/ })
+    ).toHaveAttribute("aria-pressed", "true")
+    await user.click(within(popover).getByRole("button", { name: /Plan/ }))
+    expect(onChange).toHaveBeenCalledWith(
+      { type: "config", configId: "mode" },
+      "plan"
+    )
+  })
+
+  it("uses a discrete slider for the actual reasoning options", async () => {
+    const user = userEvent.setup()
+    const { onChange } = renderPicker({
+      configOptions: [CLAUDE[2]],
+      effortSlider: true,
+    })
+    const popover = await openPopover(user)
+    const slider = within(popover).getByRole("slider", { name: "Effort" })
+    expect(slider).toHaveAttribute("aria-valuetext", "High")
+    expect(within(popover).getByTestId("composer-thought-bubbles")).toBeTruthy()
+    fireEvent.change(slider, { target: { value: "0" } })
+    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.pointerUp(slider)
+    expect(onChange).toHaveBeenCalledWith(
+      { type: "config", configId: "effort" },
+      "low"
+    )
+  })
   it("opens with focus on the panel itself, not on a control", async () => {
     // A search box first in line would raise the on-screen keyboard on touch.
     const user = userEvent.setup()
@@ -395,6 +443,55 @@ describe("SessionSettingsPicker — the popover", () => {
       { type: "config", configId: "model" },
       "openai/gpt-4o"
     )
+  })
+
+  it("switches DSH providers using the original tuple model ID", async () => {
+    const user = userEvent.setup()
+    const first = JSON.stringify(["deepseek-official", "deepseek-v4"])
+    const second = JSON.stringify(["qwen-token-plan-cn", "deepseek-v4"])
+    const option = (current: string) =>
+      select("model", "Model", "model", current, [
+        { value: first, name: "DeepSeek V4", description: null },
+        { value: second, name: "DeepSeek V4", description: null },
+      ])
+    const { onChange, update } = renderPicker({
+      configOptions: [option(first), CLAUDE[2]],
+      effortSlider: true,
+    })
+    const popover = await openPopover(user)
+    expect(
+      within(popover).getByRole("slider", { name: "Effort" })
+    ).toBeVisible()
+    await user.click(
+      within(popover).getByRole("button", {
+        name: "Provider: deepseek-official",
+      })
+    )
+    expect(within(popover).queryByRole("slider", { name: "Effort" })).toBeNull()
+    await user.click(
+      within(popover).getByRole("button", { name: "qwen-token-plan-cn" })
+    )
+    expect(onChange).toHaveBeenCalledWith(
+      { type: "config", configId: "model" },
+      second
+    )
+    expect(
+      within(popover).getByRole("button", {
+        name: "Provider: deepseek-official",
+      })
+    ).toBeInTheDocument()
+    update([option(second), CLAUDE[2]])
+    expect(
+      within(popover).getByRole("slider", { name: "Effort" })
+    ).toBeVisible()
+    expect(
+      within(popover).getByRole("button", {
+        name: "Provider: qwen-token-plan-cn",
+      })
+    ).toBeInTheDocument()
+    expect(
+      within(popover).getByRole("button", { name: /DeepSeek V4/ })
+    ).toHaveAttribute("aria-current", "true")
   })
 
   it("searches a long list", async () => {

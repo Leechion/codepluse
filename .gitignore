@@ -11,3 +11,6 @@ codeg-ui/out/
 *.exe
 .workbuddy/
 *.log
+.zcode/
+.swc-cache/
+*.tsbuildinfo

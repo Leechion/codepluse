@@ -152,6 +152,44 @@ func TestOriginalWebSocketReceivesRealACPStream(t *testing.T) {
 	if len(rows) != 1 || rows[0].(map[string]any)["status"] != "pending_review" {
 		t.Fatal(rows)
 	}
+	detail := command(t, s, "get_folder_conversation", Row{"conversationId": rows[0].(map[string]any)["id"]}).(map[string]any)
+	turns := detail["turns"].([]any)
+	if got := turns[len(turns)-1].(map[string]any)["source_turn_id"]; got != "fixture-message-1" {
+		t.Fatalf("native assistant message ID not persisted: %v", got)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, text(turns[len(turns)-1].(map[string]any)["timestamp"])); err != nil {
+		t.Fatalf("assistant timestamp not persisted: %v", err)
+	}
+}
+
+func TestNativeMessageIDDoesNotLeakAcrossUnidentifiedChunks(t *testing.T) {
+	s := testServer(t)
+	cid := command(t, s, "acp_connect", Row{"agentType": "codex"}).(string)
+	s.mu.Lock()
+	runtimeID := s.connections[cid].RuntimeID
+	s.mu.Unlock()
+	s.nativeUpdate(runtimeID, Row{"sessionUpdate": "agent_message_chunk", "messageId": "native-a", "content": Row{"type": "text", "text": "first"}})
+	s.mu.Lock()
+	createdAt := text(s.connections[cid].Live["created_at"])
+	s.mu.Unlock()
+	s.nativeUpdate(runtimeID, Row{"sessionUpdate": "agent_message_chunk", "content": Row{"type": "text", "text": "unknown"}})
+	s.mu.Lock()
+	got := text(s.connections[cid].Live["source_turn_id"])
+	stillCreatedAt := text(s.connections[cid].Live["created_at"])
+	s.mu.Unlock()
+	if createdAt == "" || createdAt != stillCreatedAt {
+		t.Fatalf("assistant creation time changed across chunks: %q, %q", createdAt, stillCreatedAt)
+	}
+	if got != "" {
+		t.Fatalf("unidentified final chunk inherited an old message ID: %q", got)
+	}
+	s.nativeUpdate(runtimeID, Row{"sessionUpdate": "agent_message_chunk", "messageId": "native-b", "content": Row{"type": "text", "text": "last"}})
+	s.mu.Lock()
+	got = text(s.connections[cid].Live["source_turn_id"])
+	s.mu.Unlock()
+	if got != "native-b" {
+		t.Fatalf("expected final native message ID, got %q", got)
+	}
 }
 func TestDelegationFansOutToNativeSessionsAndScopesResults(t *testing.T) {
 	s := testServer(t)
@@ -203,6 +241,34 @@ func TestDelegationFansOutToNativeSessionsAndScopesResults(t *testing.T) {
 	_, err = s.tool(context.Background(), &Caller{Depth: 4}, "delegate_to_agent", Row{"agent_type": "codex", "task": "too deep"})
 	if err == nil {
 		t.Fatal("depth limit bypassed")
+	}
+}
+
+func TestDelegationInheritsSelectedFullAccessMode(t *testing.T) {
+	s := testServer(t)
+	cid := command(t, s, "acp_connect", Row{"agentType": "codex"}).(string)
+	command(t, s, "acp_set_config_option", Row{"connectionId": cid, "configId": "mode", "value": "agent-full-access"})
+	s.mu.Lock()
+	caller := s.callers[cid]
+	s.mu.Unlock()
+	result, err := s.tool(context.Background(), caller, "delegate_to_agent", Row{"agent_type": "codex", "task": "child full access test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tid := result.(Row)["task_id"].(string)
+	if _, err = s.tool(context.Background(), caller, "get_delegation_status", Row{"task_ids": []any{tid}, "wait_ms": float64(3000)}); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	childID := s.tasks[tid].ConnectionID
+	mode := s.tasks[tid].Mode
+	s.mu.Unlock()
+	if mode != "agent-full-access" || childID == "" {
+		t.Fatal("full access was not forwarded")
+	}
+	snapshot := command(t, s, "acp_get_session_snapshot", Row{"connectionId": childID}).(map[string]any)
+	if snapshot["modes"].(map[string]any)["current_mode_id"] != "agent-full-access" {
+		t.Fatal("child mode was downgraded")
 	}
 }
 

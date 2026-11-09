@@ -3705,6 +3705,9 @@ export async function openImportSessionsWindow(
 }
 
 export async function openProjectBootWindow(source?: string): Promise<void> {
+  if (goDesktopBridge()) {
+    return openAppWindow("project-boot", async () => ({ path: "/project-boot" }))
+  }
   if (isDesktop()) {
     return getShellTransport().call("open_project_boot_window", {
       source,

@@ -1,7 +1,6 @@
 "use client"
 
 import { memo, useMemo } from "react"
-import Ansi from "ansi-to-react"
 import { useTranslations } from "next-intl"
 
 import {
@@ -26,6 +25,7 @@ import { ActivityMembers, ActivityRow, useGroupPlace } from "../activity-row"
 import { CopyAction, DetailBox, DetailScroll } from "../detail-box"
 import { useDisclosure } from "../disclosure-store"
 import { SlideSlot } from "../../slide-slot"
+import { ExecuteOutput } from "../../zcode/execute-output"
 import { RailIcon } from "../rail-icon"
 import {
   GROUP_ICON,
@@ -110,9 +110,9 @@ function useCommandOutput(step: ToolStep): CommandOutput | null {
   }, [part.output, part.errorText, tool.background, tool.kind, tool.status, t])
 }
 
-/** What a command row says: a fixed "Command", then the agent's description
- *  of the command when it gave one, else the command line (a heredoc's opener
- *  for a heredoc); codex's session polls and scripts lead with their own verb.
+/** What a command row says: ZCode's "Terminal" or running label followed by
+ *  the command line (a heredoc's opener for a heredoc); codex's session polls
+ *  and scripts lead with their own verb.
  *  All of it in the label's light ink: a command line is long and dense, and
  *  in the body colour it would outweigh every other row. `commandRef`
  *  measures whether the line cuts the command short. */
@@ -189,8 +189,7 @@ function CommandLabel({
   const live = step.tool.status === "running" || step.tool.status === "pending"
   // One line: the label, then the title, which gives way first (the panel and
   // the tooltip have it whole); its notes keep their room, and nothing runs
-  // past the line's end. A description is words, with nothing about the
-  // command's lines — the command is atop the panel.
+  // past the line's end. A description is kept in the row's tooltip.
   return (
     <span className="flex min-w-0 items-baseline gap-2 overflow-hidden">
       <span
@@ -199,9 +198,13 @@ function CommandLabel({
           live ? "activity-shimmer" : "text-activity-secondary"
         )}
       >
-        {step.tool.kind === "monitor" ? t("row.monitor") : t("row.command")}
+        {step.tool.kind === "monitor"
+          ? t("row.monitor")
+          : live
+            ? t("row.terminalRunning")
+            : t("row.terminal")}
       </span>
-      {command.description ? (
+      {(step.tool.kind === "monitor" || !firstLine) && command.description ? (
         <span dir="auto" className="min-w-0 truncate text-activity-secondary">
           {command.description}
         </span>
@@ -209,7 +212,7 @@ function CommandLabel({
         <>
           <span
             ref={commandRef}
-            className="min-w-0 truncate font-mono text-[0.8125rem] text-activity-secondary"
+            className="min-w-0 truncate font-sans text-sm text-activity-secondary"
             dir="ltr"
           >
             {firstLine}
@@ -410,12 +413,7 @@ function CommandDetail({
           {t("detail.tailOnly", { count: MAX_OUTPUT_LINES })}
         </p>
       ) : null}
-      <pre
-        className="activity-ansi whitespace-pre-wrap break-words px-4 py-3 font-mono text-[0.78125rem] leading-relaxed"
-        dir="ltr"
-      >
-        <Ansi>{output.text}</Ansi>
-      </pre>
+      <ExecuteOutput text={output.text} running={live} />
     </>
   ) : (
     <p className="px-4 py-3 text-xs text-muted-foreground">
@@ -430,7 +428,7 @@ function CommandDetail({
     <DetailBox
       tone={failed ? "danger" : "neutral"}
       anchor={script ? "start" : anchor}
-      unbounded={!!script}
+      unbounded
       footer={output ? t("detail.lines", { count: output.lines }) : null}
       actions={
         copy || output ? (
@@ -475,11 +473,7 @@ function CommandDetail({
           {fullCommand}
         </pre>
       ) : null}
-      {script && output ? (
-        <DetailScroll anchor={anchor}>{shownOutput}</DetailScroll>
-      ) : (
-        shownOutput
-      )}
+      {shownOutput}
     </DetailBox>
   )
 }

@@ -110,9 +110,6 @@ export default async function RootLayout({
                 <WebConnectionGuard />
                 <WebVersionNotice />
                 <WindowResizeGrips />
-                {/* Self-gated to the main window: every route it can show
-                    (/workspace, /login, the redirecting /) must be able to
-                    answer a close press. */}
                 <CloseRequestDialog />
                 {children}
               </AppearanceProvider>

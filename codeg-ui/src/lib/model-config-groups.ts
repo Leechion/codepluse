@@ -19,6 +19,17 @@ export interface ModelOptionGroup {
 // (`connection.rs::is_model_config_option`).
 export const MODEL_CONFIG_OPTION_ID = "model"
 
+// DSH identifies models as JSON tuples. Keep the original value for ACP.
+export function modelTupleProvider(value: string): string | null {
+  if (!value.trimStart().startsWith("[")) return null
+  try {
+    const tuple: unknown = JSON.parse(value)
+    return Array.isArray(tuple) && tuple.length === 2 && typeof tuple[0] === "string" && tuple[0].trim() && typeof tuple[1] === "string" && tuple[1].trim() ? tuple[0] : null
+  } catch {
+    return null
+  }
+}
+
 // Only the model picker groups by `/` prefix — never the mode picker or any
 // other agent config option. The backend ships the model option with
 // `id === "model"` and no category; Codex's approval-preset option uses
@@ -127,6 +138,24 @@ export function deriveModelGroups(
   if (option.kind.type !== "select") return null
   const kind = option.kind
   if (kind.groups.length > 0) return null
+
+  const tupleProviders = kind.options.map((opt) => modelTupleProvider(opt.value))
+  if (tupleProviders.some((provider) => provider !== null)) {
+    const groups: ModelOptionGroup[] = []
+    const byProvider = new Map<string, ModelOptionGroup>()
+    kind.options.forEach((opt, index) => {
+      const provider = tupleProviders[index]
+      const key = provider === null ? "__ungrouped__" : `tuple:${provider}`
+      let group = byProvider.get(key)
+      if (!group) {
+        group = { key, name: provider, options: [] }
+        byProvider.set(key, group)
+        groups.push(group)
+      }
+      group.options.push(opt)
+    })
+    return groups
+  }
 
   const prefixes = kind.options.map((opt) => prefixOf(opt.value))
   if (!prefixes.some((prefix) => prefix !== null)) return null

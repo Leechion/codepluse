@@ -8,7 +8,7 @@ import {
   currentTaskFromMessage,
   resetTaskFromMessageForTests,
 } from "@/lib/task-from-message"
-import { TurnStats } from "./turn-stats"
+import { TurnStats, formatMessageTime } from "./turn-stats"
 import { MessageScrollProvider } from "./message-scroll-context"
 import { ModelLabelProvider } from "./model-label-context"
 import type { ModelLabelResolver } from "@/hooks/use-model-labels"
@@ -35,6 +35,78 @@ function renderStats(ui: ReactNode, modelLabel?: ModelLabelResolver) {
 }
 
 const jumpLabel = enMessages.Folder.chat.messageList.jumpToPreviousUserMessage
+
+describe("reply creation time", () => {
+  it("shows today, yesterday, earlier this year and earlier years distinctly", () => {
+    const now = new Date(2026, 10, 7, 15, 30)
+    expect(formatMessageTime(new Date(2026, 10, 7, 10, 0), "en", now)).toMatch(
+      /10:00/
+    )
+    expect(formatMessageTime(new Date(2026, 10, 6, 10, 0), "en", now)).toMatch(
+      /yesterday/i
+    )
+    expect(formatMessageTime(new Date(2026, 9, 1, 10, 0), "en", now)).toMatch(
+      /Oct 1/
+    )
+    expect(formatMessageTime(new Date(2025, 9, 1, 10, 0), "en", now)).toMatch(
+      /2025/
+    )
+  })
+
+  it("labels the source timestamp and omits invalid or epoch timestamps", () => {
+    const view = renderStats(
+      <TurnStats copyText="Answer" createdAt="2026-11-07T10:00:00Z" />
+    )
+    expect(screen.getByLabelText(/^Message created:/)).toBeInTheDocument()
+    view.unmount()
+    const invalid = renderStats(
+      <TurnStats copyText="Answer" createdAt="invalid" />
+    )
+    expect(screen.queryByLabelText(/^Message created:/)).not.toBeInTheDocument()
+    invalid.unmount()
+    renderStats(
+      <TurnStats copyText="Answer" createdAt="1970-01-01T00:00:00Z" />
+    )
+    expect(screen.queryByLabelText(/^Message created:/)).not.toBeInTheDocument()
+  })
+})
+
+describe("TurnStats reply feedback", () => {
+  it("toggles mutually exclusive reactions and clears them on remount", async () => {
+    const view = renderStats(<TurnStats copyText="Answer" />)
+    const like = screen.getByRole("button", { name: "Like reply" })
+    const dislike = screen.getByRole("button", { name: "Dislike reply" })
+    expect(like).toHaveAttribute("aria-pressed", "false")
+    await userEvent.click(like)
+    expect(like).toHaveAttribute("aria-pressed", "true")
+    await userEvent.click(dislike)
+    expect(like).toHaveAttribute("aria-pressed", "false")
+    expect(dislike).toHaveAttribute("aria-pressed", "true")
+    await userEvent.click(dislike)
+    expect(dislike).toHaveAttribute("aria-pressed", "false")
+    await userEvent.click(like)
+    view.unmount()
+    renderStats(<TurnStats copyText="Answer" />)
+    expect(screen.getByRole("button", { name: "Like reply" })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    )
+  })
+
+  it("does not offer feedback for a streaming or empty reply", () => {
+    const view = renderStats(
+      <TurnStats copyText="Answer" isResponseComplete={false} />
+    )
+    expect(
+      screen.queryByRole("button", { name: "Like reply" })
+    ).not.toBeInTheDocument()
+    view.unmount()
+    renderStats(<TurnStats copyText=" " />)
+    expect(
+      screen.queryByRole("button", { name: "Like reply" })
+    ).not.toBeInTheDocument()
+  })
+})
 
 describe("TurnStats jump-to-previous-user gating", () => {
   it("shows the jump button for a duration-only turn (no token usage)", () => {

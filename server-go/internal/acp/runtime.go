@@ -41,6 +41,7 @@ type Options struct {
 	Permission   string         `json:"permission"`
 	Workdir      string         `json:"workdir"`
 	Model        string         `json:"model,omitempty"`
+	Mode         string         `json:"mode,omitempty"`
 	ChatID       string         `json:"chatId,omitempty"`
 	MissionID    string         `json:"missionId,omitempty"`
 	TaskID       string         `json:"taskId,omitempty"`
@@ -142,6 +143,7 @@ type Turn struct {
 	StopReason    string           `json:"stopReason,omitempty"`
 	Error         string           `json:"error,omitempty"`
 	ReceivedChars int              `json:"receivedChars,omitempty"`
+	lastActivity  time.Time
 }
 
 // Tools is always an array, including turns with no native tool calls.
@@ -167,6 +169,7 @@ type SessionRecord struct {
 	TaskID          string            `json:"taskId,omitempty"`
 	Role            string            `json:"role,omitempty"`
 	Permission      string            `json:"permission"`
+	NativeMode      string            `json:"nativeMode,omitempty"`
 	Cwd             string            `json:"cwd"`
 	State           string            `json:"state"`
 	NativeSessionID string            `json:"nativeSessionId,omitempty"`
@@ -201,6 +204,7 @@ type Driver struct {
 	Info     map[string]any
 	alive    bool
 	Closed   chan struct{}
+	stopped  chan struct{}
 	stderr   strings.Builder
 	perm     string
 	cwd      string
@@ -289,6 +293,7 @@ type Runtime struct {
 	StateFile         string
 	TimeoutMs         int
 	LaunchFn          func(agent *hub.Agent, permission, cwd string) (*Launch, error)
+	LaunchVersion     func(agent *hub.Agent) string
 	ExtraMCP          func(agent *hub.Agent, o Options, sessionID string) []map[string]any
 	OnUpdate          func(sessionID string, update map[string]any)
 	AllowInternalTool func(sessionID string, toolCall map[string]any) bool
@@ -406,6 +411,9 @@ func (r *Runtime) driver(agent *hub.Agent, permission, cwd string) (*Driver, err
 	defer r.driverStartMu.Unlock()
 	r.mu.Lock()
 	key := driverKey(agent.ID, permission, cwd)
+	if r.LaunchVersion != nil {
+		key += "|" + r.LaunchVersion(agent)
+	}
 	if d, ok := r.drivers[key]; ok && d.alive {
 		r.mu.Unlock()
 		return d, nil
@@ -444,9 +452,11 @@ func (r *Runtime) startDriver(agent *hub.Agent, permission, cwd string) (*Driver
 		return nil, fmt.Errorf("适配器进程启动失败：%w", err)
 	}
 	d := &Driver{cmd: cmd, stdin: stdin, pending: map[int64]chan *rpcMsg{},
-		sessions: map[*SessionRecord]bool{}, alive: true, Closed: make(chan struct{}),
+		sessions: map[*SessionRecord]bool{}, alive: true, Closed: make(chan struct{}), stopped: make(chan struct{}),
 		perm: permission, cwd: cwd, agentID: agent.ID, rt: r}
+	stderrDone := make(chan struct{})
 	go func() { // stderr tail for error messages
+		defer close(stderrDone)
 		buf := make([]byte, 8192)
 		for {
 			n, err := stderr.Read(buf)
@@ -466,6 +476,7 @@ func (r *Runtime) startDriver(agent *hub.Agent, permission, cwd string) (*Driver
 	}()
 	go d.serve(stdout)
 	go func() {
+		defer close(d.stopped)
 		_ = cmd.Wait()
 		close(d.Closed)
 		d.mu.Lock()
@@ -497,6 +508,13 @@ func (r *Runtime) startDriver(agent *hub.Agent, permission, cwd string) (*Driver
 	}, 30*time.Second)
 	if err != nil {
 		d.Kill()
+		select {
+		case <-stderrDone:
+		case <-time.After(time.Second):
+		}
+		if tail := strings.TrimSpace(d.stderrTail()); tail != "" {
+			return nil, fmt.Errorf("ACP 初始化失败：%w: %s", err, tail)
+		}
 		return nil, fmt.Errorf("ACP 初始化失败：%w", err)
 	}
 	var info map[string]any
@@ -608,6 +626,9 @@ func (d *Driver) handleNotification(params json.RawMessage) {
 func (r *Runtime) applyUpdate(d *Driver, rec *SessionRecord, u map[string]any) {
 	kind, _ := u["sessionUpdate"].(string)
 	rec.activeMu.Lock()
+	if rec.active != nil {
+		rec.active.lastActivity = time.Now()
+	}
 	defer func() {
 		rec.activeMu.Unlock()
 		r.changed(rec)
@@ -668,7 +689,13 @@ func (r *Runtime) applyUpdate(d *Driver, rec *SessionRecord, u map[string]any) {
 		}
 	case "config_option_update":
 		applyConfiguration(rec, map[string]any{"configOptions": u["configOptions"]})
+		for _, option := range rec.ConfigOptions {
+			if option["id"] == "mode" {
+				rec.NativeMode, _ = option["currentValue"].(string)
+			}
+		}
 	case "current_mode_update":
+		rec.NativeMode, _ = u["currentModeId"].(string)
 		if rec.Modes != nil {
 			rec.Modes.CurrentModeID, _ = u["currentModeId"].(string)
 		}
@@ -732,7 +759,7 @@ func (r *Runtime) requestPermission(d *Driver, p map[string]any) (map[string]any
 	}
 	rec.activeMu.Lock()
 	rec.Permissions = append(rec.Permissions, card)
-	if rec.Permission != "workspace" {
+	if !rec.canWrite() {
 		card.State = "denied"
 		card.Reason = "当前为只读会话，权限提升已拒绝。需要写入时请选择目录内读写权限启动新任务。"
 		rec.activeMu.Unlock()
@@ -917,7 +944,23 @@ func (r *Runtime) fsRead(d *Driver, p map[string]any) (map[string]any, error) {
 }
 
 func (r *Runtime) fsWrite(d *Driver, p map[string]any) (map[string]any, error) {
-	if d.perm != "workspace" {
+	allowed := d.perm == "workspace"
+	nativeID, _ := p["sessionId"].(string)
+	d.mu.Lock()
+	var record *SessionRecord
+	for rec := range d.sessions {
+		if rec.NativeSessionID == nativeID {
+			record = rec
+			break
+		}
+	}
+	d.mu.Unlock()
+	if record != nil {
+		record.activeMu.Lock()
+		allowed = record.canWrite()
+		record.activeMu.Unlock()
+	}
+	if !allowed {
 		return nil, fmt.Errorf("此会话未授予文件写入权限")
 	}
 	path, _ := p["path"].(string)
@@ -1029,7 +1072,13 @@ func (r *Runtime) ensure(agent *hub.Agent, o Options) (*SessionRecord, *Driver, 
 	d.mu.Lock()
 	d.sessions[rec] = true
 	d.mu.Unlock()
-	wanted := wantedMode(agent, permission)
+	wanted := rec.NativeMode
+	if wanted == "" {
+		wanted = o.Mode
+	}
+	if wanted == "" {
+		wanted = wantedMode(agent, permission)
+	}
 	if wanted != "" {
 		if rec.Modes != nil && len(rec.Modes.AvailableModes) > 0 {
 			found := false
@@ -1048,6 +1097,7 @@ func (r *Runtime) ensure(agent *hub.Agent, o Options) (*SessionRecord, *Driver, 
 			return nil, nil, err
 		}
 		rec.activeMu.Lock()
+		rec.NativeMode = wanted
 		if rec.Modes != nil {
 			rec.Modes.CurrentModeID = wanted
 		}
@@ -1080,6 +1130,42 @@ func wantedMode(agent *hub.Agent, permission string) string {
 		return map[string]string{"readonly": "read-only", "workspace": "workspace-write", "shell": "read-only"}[permission]
 	case "claude":
 		return map[string]string{"readonly": "plan", "workspace": "default", "shell": "plan"}[permission]
+	}
+	return ""
+}
+
+// ModeLevel preserves the difference between workspace access and full access.
+func ModeLevel(mode string) string {
+	switch mode {
+	case "read-only", "readonly", "plan":
+		return "readonly"
+	case "workspace-write", "default", "acceptEdits", "auto", "agent":
+		return "workspace"
+	case "danger-full-access", "agent-full-access", "bypassPermissions":
+		return "full"
+	}
+	return ""
+}
+
+// The caller holds activeMu. This affects host callbacks, not native approvals.
+func (rec *SessionRecord) canWrite() bool {
+	if level := ModeLevel(rec.NativeMode); level != "" {
+		return level != "readonly"
+	}
+	return rec.Permission == "workspace"
+}
+
+func DelegatedMode(agent *hub.Agent, level string) string {
+	if level != "full" && agent.ACPModes != nil {
+		if mode := agent.ACPModes[level]; mode != "" {
+			return mode
+		}
+	}
+	if agent.RealTool == "codex" {
+		return map[string]string{"readonly": "read-only", "workspace": "workspace-write", "full": "agent-full-access"}[level]
+	}
+	if agent.RealTool == "claude" || agent.RealTool == "workbuddy" {
+		return map[string]string{"readonly": "plan", "workspace": "default", "full": "bypassPermissions"}[level]
 	}
 	return ""
 }
@@ -1152,6 +1238,241 @@ func (r *Runtime) Connect(agent *hub.Agent, o Options) (string, error) {
 	return rec.ID, nil
 }
 
+// SupportsFork reports the native ACP capability, without implying that an
+// arbitrary local history row has a usable native fork point.
+func (r *Runtime) SupportsFork(sessionID string) bool {
+	r.mu.Lock()
+	d := r.bindings[sessionID]
+	r.mu.Unlock()
+	if d == nil {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.alive {
+		return false
+	}
+	caps, _ := d.Info["agentCapabilities"].(map[string]any)
+	sessions, _ := caps["sessionCapabilities"].(map[string]any)
+	fork, ok := sessions["fork"].(map[string]any)
+	return ok && fork != nil
+}
+
+func (r *Runtime) PromptCapabilities(sessionID string) map[string]bool {
+	out := map[string]bool{"image": false, "audio": false, "embedded_context": false}
+	r.mu.Lock()
+	d := r.bindings[sessionID]
+	r.mu.Unlock()
+	if d == nil {
+		return out
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.alive {
+		return out
+	}
+	caps, _ := d.Info["agentCapabilities"].(map[string]any)
+	prompt, _ := caps["promptCapabilities"].(map[string]any)
+	out["image"], _ = prompt["image"].(bool)
+	out["embedded_context"], _ = prompt["embeddedContext"].(bool)
+	return out
+}
+
+// SupportsNativeSteering requires both the ACP extension declaration and a
+// locally verified adapter implementation of the no-detached-turn fallback.
+func (r *Runtime) SupportsNativeSteering(sessionID string) bool {
+	r.mu.Lock()
+	d := r.bindings[sessionID]
+	r.mu.Unlock()
+	if d == nil {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.alive {
+		return false
+	}
+	meta, _ := d.Info["_meta"].(map[string]any)
+	steering, _ := meta["steering"].(map[string]any)
+	supported, _ := steering["supported"].(bool)
+	info, _ := d.Info["agentInfo"].(map[string]any)
+	name, _ := info["name"].(string)
+	version, _ := info["version"].(string)
+	return supported && ((name == "@agentclientprotocol/codex-acp" && version == "2.5.0") || (name == "@agentclientprotocol/claude-agent-acp" && version == "0.101.0"))
+}
+
+// Steer requests an in-flight injection; promptRequired means the caller keeps
+// the draft and may queue it. It must never start a detached turn implicitly.
+func (r *Runtime) Steer(sessionID string, blocks []map[string]any) error {
+	if !r.SupportsNativeSteering(sessionID) {
+		return fmt.Errorf("native steering unavailable")
+	}
+	r.mu.Lock()
+	d, rec := r.bindings[sessionID], r.record(sessionID)
+	r.mu.Unlock()
+	if d == nil || rec == nil || rec.NativeSessionID == "" {
+		return fmt.Errorf("no active turn")
+	}
+	response, err := d.call("_session/steering", map[string]any{"sessionId": rec.NativeSessionID, "prompt": blocks, "_meta": map[string]any{"steering": map[string]any{"idleBehavior": "promptRequired"}}}, 20*time.Second)
+	if err != nil {
+		return err
+	}
+	var result struct {
+		Outcome string `json:"outcome"`
+	}
+	if err := json.Unmarshal(response, &result); err != nil {
+		return err
+	}
+	if result.Outcome == "promptRequired" {
+		return fmt.Errorf("no active turn")
+	}
+	if result.Outcome != "injected" {
+		return fmt.Errorf("unexpected steering outcome: %s", result.Outcome)
+	}
+	return nil
+}
+
+// SupportsPointFork is narrower than ACP's fork flag: the standard capability
+// does not promise historical message selection. These adapter versions are
+// the ones whose AIR messageId extension is known to be implemented locally.
+func (r *Runtime) SupportsPointFork(sessionID string, agent *hub.Agent) bool {
+	if agent == nil || !r.SupportsFork(sessionID) {
+		return false
+	}
+	r.mu.Lock()
+	d := r.bindings[sessionID]
+	r.mu.Unlock()
+	if d == nil {
+		return false
+	}
+	d.mu.Lock()
+	info, _ := d.Info["agentInfo"].(map[string]any)
+	name, _ := info["name"].(string)
+	version, _ := info["version"].(string)
+	d.mu.Unlock()
+	// Restrict this to the locally inspected adapter releases; an ACP agent may
+	// legally ignore unknown _meta and otherwise silently fork the wrong point.
+	return (agent.RealTool == "codex" && name == "@agentclientprotocol/codex-acp" && version == "2.5.0") ||
+		(agent.RealTool == "claude" && name == "@agentclientprotocol/claude-agent-acp" && version == "0.101.0")
+}
+
+// Fork creates a new ACP session at a native message ID. The caller owns the
+// conversation-store transaction and must not substitute a local row ID.
+func (r *Runtime) Fork(agent *hub.Agent, sourceID string, source Options, newSessionKey, messageID string, extraMCP []map[string]any) (string, error) {
+	if agent == nil || newSessionKey == "" || messageID == "" {
+		return "", fmt.Errorf("分支需要执行端、新会话标识和原生消息标识")
+	}
+	// The standard ACP request does not define a historical fork point. Only
+	// these adapters are known to implement the AIR messageId extension.
+	if agent.RealTool != "codex" && agent.RealTool != "claude" {
+		return "", fmt.Errorf("该执行端未确认支持按消息位置分支")
+	}
+	r.mu.Lock()
+	rec := r.record(sourceID)
+	d := r.bindings[sourceID]
+	r.mu.Unlock()
+	if rec == nil || d == nil || rec.AgentID != agent.ID || !r.SupportsPointFork(sourceID, agent) {
+		return "", fmt.Errorf("当前执行端未声明会话分支能力")
+	}
+	if !rec.turnMu.TryLock() {
+		return "", fmt.Errorf("turn_in_progress")
+	}
+	defer rec.turnMu.Unlock()
+	if source.Workdir != rec.Cwd || source.Permission != rec.Permission || optionsKey(source)+"|"+agent.ID+"|"+rec.Permission != rec.Key {
+		return "", fmt.Errorf("分支工作目录或权限与原会话不一致")
+	}
+	destOptions := source
+	destOptions.SessionKey = newSessionKey
+	destKey := optionsKey(destOptions) + "|" + agent.ID + "|" + rec.Permission
+	r.mu.Lock()
+	for _, existing := range r.records {
+		if existing.Key == destKey {
+			r.mu.Unlock()
+			return "", fmt.Errorf("分支会话标识已存在")
+		}
+	}
+	r.mu.Unlock()
+	servers := r.mcpServers(agent, source)
+	if extraMCP != nil {
+		servers = append(servers, extraMCP...)
+	} else if r.ExtraMCP != nil {
+		servers = append(servers, r.ExtraMCP(agent, source, rec.ID)...)
+	}
+	params := map[string]any{
+		"sessionId": rec.NativeSessionID, "cwd": rec.Cwd, "mcpServers": servers,
+		"_meta": map[string]any{"jetbrains": map[string]any{"air": map[string]any{
+			"fork": map[string]any{"version": 1, "messageId": messageID},
+		}}},
+	}
+	result, err := d.call("session/fork", params, 30*time.Second)
+	if err != nil {
+		return "", err
+	}
+	var response map[string]any
+	if err := json.Unmarshal(result, &response); err != nil {
+		return "", fmt.Errorf("分支响应无效: %w", err)
+	}
+	nativeID, _ := response["sessionId"].(string)
+	if nativeID == "" || nativeID == rec.NativeSessionID {
+		return "", fmt.Errorf("分支未返回新的原生会话标识")
+	}
+	// Clone persisted settings without copying the source record's mutexes.
+	rec.activeMu.Lock()
+	encoded, err := json.Marshal(rec)
+	rec.activeMu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	var fork SessionRecord
+	if err := json.Unmarshal(encoded, &fork); err != nil {
+		return "", err
+	}
+	fork.ID, fork.Key, fork.NativeSessionID = "session_"+newID(), destKey, nativeID
+	fork.State, fork.Error, fork.CreatedAt = "idle", "", time.Now().UnixMilli()
+	fork.Turns, fork.Permissions, fork.Notices = nil, nil, nil
+	fork.HandedOff, fork.HandedOffTo = false, ""
+	applyConfiguration(&fork, response)
+	r.mu.Lock()
+	for _, existing := range r.records {
+		if existing.Key == destKey || existing.NativeSessionID == nativeID {
+			r.mu.Unlock()
+			return "", fmt.Errorf("分支会话标识发生冲突")
+		}
+	}
+	r.records = append(r.records, &fork)
+	r.bindings[fork.ID] = d
+	r.mu.Unlock()
+	d.mu.Lock()
+	d.sessions[&fork] = true
+	d.mu.Unlock()
+	r.changed(&fork)
+	r.save()
+	return fork.ID, nil
+}
+
+// ForgetFork removes an unpublished local record if the caller cannot commit
+// its conversation-store transaction. It does not delete the native session.
+func (r *Runtime) ForgetFork(sessionID string) {
+	r.mu.Lock()
+	rec, driver := r.record(sessionID), r.bindings[sessionID]
+	if rec != nil {
+		for i, candidate := range r.records {
+			if candidate == rec {
+				r.records = append(r.records[:i], r.records[i+1:]...)
+				break
+			}
+		}
+		delete(r.bindings, sessionID)
+	}
+	r.mu.Unlock()
+	if rec != nil && driver != nil {
+		driver.mu.Lock()
+		delete(driver.sessions, rec)
+		driver.mu.Unlock()
+	}
+	r.save()
+}
+
 func (r *Runtime) Configure(sessionID, configID string, value any) error {
 	r.mu.Lock()
 	rec := r.record(sessionID)
@@ -1174,6 +1495,14 @@ func (r *Runtime) Configure(sessionID, configID string, value any) error {
 	}
 	rec.activeMu.Lock()
 	applyConfiguration(rec, configured)
+	if configID == "mode" {
+		if mode, ok := value.(string); ok {
+			rec.NativeMode = mode
+			if rec.Modes != nil {
+				rec.Modes.CurrentModeID = mode
+			}
+		}
+	}
 	rec.activeMu.Unlock()
 	r.changed(rec)
 	r.save()
@@ -1181,16 +1510,20 @@ func (r *Runtime) Configure(sessionID, configID string, value any) error {
 }
 
 func (r *Runtime) Prompt(agent *hub.Agent, text string, o Options) Result {
+	return r.PromptBlocks(agent, []map[string]any{{"type": "text", "text": text}}, o)
+}
+
+func (r *Runtime) PromptBlocks(agent *hub.Agent, blocks []map[string]any, o Options) Result {
 	rec, _, err0 := r.ensure(agent, o)
 	if err0 != nil {
 		return Result{OK: false, Error: err0.Error(), Meta: map[string]any{}}
 	}
 	rec.turnMu.Lock()
 	defer rec.turnMu.Unlock()
-	return r.turn(rec, agent, text, o)
+	return r.turn(rec, agent, blocks, o)
 }
 
-func (r *Runtime) turn(rec *SessionRecord, agent *hub.Agent, text string, o Options) Result {
+func (r *Runtime) turn(rec *SessionRecord, agent *hub.Agent, blocks []map[string]any, o Options) Result {
 	r.mu.Lock()
 	d := r.bindings[rec.ID]
 	r.mu.Unlock()
@@ -1212,7 +1545,7 @@ func (r *Runtime) turn(rec *SessionRecord, agent *hub.Agent, text string, o Opti
 		applyConfiguration(rec, configured)
 		rec.activeMu.Unlock()
 	}
-	turn := &Turn{ID: "turn_" + newID(), Stage: o.Stage, Structured: o.Structured, StartedAt: time.Now().UnixMilli(), Status: "running"}
+	turn := &Turn{ID: "turn_" + newID(), Stage: o.Stage, Structured: o.Structured, StartedAt: time.Now().UnixMilli(), Status: "running", lastActivity: time.Now()}
 	rec.activeMu.Lock()
 	rec.active = turn
 	rec.State = "running"
@@ -1223,7 +1556,7 @@ func (r *Runtime) turn(rec *SessionRecord, agent *hub.Agent, text string, o Opti
 	if timeout == 0 {
 		timeout = time.Duration(r.TimeoutMs) * time.Millisecond
 	}
-	// Pausable clock: while a permission card waits, the deadline slides.
+	// Only inactivity consumes the timeout; streaming and tool updates renew it.
 	deadline := time.Now().Add(timeout)
 	type promptReply struct {
 		Raw json.RawMessage
@@ -1232,7 +1565,7 @@ func (r *Runtime) turn(rec *SessionRecord, agent *hub.Agent, text string, o Opti
 	done := make(chan promptReply, 1)
 	go func() {
 		result, err := d.call("session/prompt", map[string]any{"sessionId": rec.NativeSessionID,
-			"prompt": []map[string]any{{"type": "text", "text": text}}}, 0)
+			"prompt": blocks}, 0)
 		if result == nil && err == nil {
 			err = fmt.Errorf("空响应")
 		}
@@ -1243,6 +1576,7 @@ func (r *Runtime) turn(rec *SessionRecord, agent *hub.Agent, text string, o Opti
 	var promptErr error
 	var stopReason string
 	hardKilled := false
+	var cancelledAt time.Time
 clock:
 	for {
 		select {
@@ -1278,14 +1612,23 @@ clock:
 			}
 			break clock
 		case <-ticker.C:
-			if r.pendingCount(rec.ID) > 0 {
-				deadline = deadline.Add(500 * time.Millisecond)
+			if !hardKilled {
+				rec.activeMu.Lock()
+				lastActivity := turn.lastActivity
+				rec.activeMu.Unlock()
+				if candidate := lastActivity.Add(timeout); candidate.After(deadline) {
+					deadline = candidate
+				}
+				if r.pendingCount(rec.ID) > 0 {
+					deadline = time.Now().Add(timeout)
+				}
 			}
-			if time.Now().After(deadline) {
+			if !hardKilled && time.Now().After(deadline) {
 				_ = d.notify("session/cancel", map[string]any{"sessionId": rec.NativeSessionID})
 				hardKilled = true
+				cancelledAt = time.Now()
 			}
-			if hardKilled && time.Now().After(deadline.Add(10*time.Second)) {
+			if hardKilled && time.Since(cancelledAt) > 10*time.Second {
 				d.Kill()
 				promptErr = fmt.Errorf("ACP 会话超时")
 				break clock
@@ -1294,6 +1637,9 @@ clock:
 			promptErr = fmt.Errorf("ACP 进程已退出")
 			break clock
 		}
+	}
+	if hardKilled && promptErr == nil {
+		promptErr = fmt.Errorf("ACP 会话超时")
 	}
 	r.cancelPermissions(rec.ID)
 	rec.activeMu.Lock()
@@ -1457,8 +1803,33 @@ func (r *Runtime) Shutdown() {
 		}
 		d.Kill()
 		select {
-		case <-d.Closed:
+		case <-d.stopped:
 		case <-time.After(3 * time.Second):
+		}
+	}
+}
+
+// KillDriversAt terminates pooled drivers whose working directory is the given
+// path, waiting for the processes to exit — used before removing a worktree so
+// the agent process does not pin the directory on Windows.
+func (r *Runtime) KillDriversAt(dir string) {
+	r.mu.Lock()
+	var doomed []*Driver
+	for key, d := range r.drivers {
+		if d.cwd == dir {
+			doomed = append(doomed, d)
+			delete(r.drivers, key)
+		}
+	}
+	r.mu.Unlock()
+	for _, d := range doomed {
+		for rec := range d.sessions {
+			r.cancelPermissions(rec.ID)
+		}
+		d.Kill()
+		select {
+		case <-d.stopped:
+		case <-time.After(5 * time.Second):
 		}
 	}
 }

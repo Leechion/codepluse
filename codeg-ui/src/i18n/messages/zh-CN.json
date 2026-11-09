@@ -2681,7 +2681,7 @@
       "fallbackFolderName": "文件夹",
       "openFolder": "打开文件夹",
       "cloneRepository": "克隆仓库",
-      "projectBoot": "项目启动器",
+      "projectBoot": "API 供应商",
       "opened": "已打开",
       "recentOpen": "最近打开"
     },
@@ -3474,6 +3474,9 @@
         "toggleOn": "开",
         "toggleOff": "关",
         "agentSettings": "智能体设置",
+        "providerLabel": "供应商",
+        "providerBack": "返回",
+        "otherModels": "其他模型",
         "searchModel": "搜索模型...",
         "searchModelAria": "搜索模型",
         "modelListLabel": "模型",
@@ -3764,7 +3767,10 @@
         "copyMessage": "复制",
         "forkFromHere": "从此处分叉",
         "forkBusy": "当前有回合正在进行，暂不可分叉",
-        "forkNotReady": "这条回复暂时还不能作为分叉点，请稍后再试",
+        "messageCreatedAt": "消息创建时间",
+        "likeReply": "赞同回复",
+        "dislikeReply": "不赞同回复",
+        "forkNotReady": "这条回复没有可用的原生分叉位置",
         "copied": "已复制",
         "selectionActions": "选中内容操作",
         "selectionCopy": "复制文本",
@@ -3969,6 +3975,12 @@
         "row": {
           "thought": "思考",
           "thinking": "正在思考",
+          "terminal": "终端",
+          "terminalRunning": "正在执行",
+          "historyWorked": "已处理",
+          "historyWorkedFor": "已工作 {duration}",
+          "thoughtFewSeconds": "持续了几秒",
+          "thoughtSeconds": "持续了 {seconds} 秒",
           "explored": "查看",
           "exploring": "正在查看",
           "ranCommands": "运行了 {count} 条命令",
@@ -4361,7 +4373,7 @@
     }
   },
   "ProjectBoot": {
-    "title": "项目启动器",
+    "title": "API 供应商",
     "tabs": {
       "shadcn": "shadcn",
       "hyperframes": "HyperFrames"
