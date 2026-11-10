@@ -1,0 +1,808 @@
+/* ===========================================================================
+   ZCode Workspace — 复刻自 zai-org/ZCode v3.17.2
+   ---------------------------------------------------------------------------
+   规范来源：
+   - DESIGN.md（4px 间距、radius 层级、text-ui-* 字号、克制阴影、高密度）
+   - packages/ui/src/styles.css @theme / .theme-zai-light / .theme-zai-dark（色值）
+   - TaskListItem.tsx（任务行：前置状态槽 + 标题行 + 元信息行 + diff）
+   - TodoPanel.tsx / workflow-timeline/*（阶段 pills、步骤轨、产物卡片）
+
+   作用域严格限定在 .zw-root 内：只在 /workspace 生效，不污染 codepluse 的
+   其它页面。这里同时补齐 vendored ZCode 组件在 codeg-ui 中缺失的 token，
+   让 ZCode v4 的对话时间线 / composer 恢复原生 ZCode 视觉。
+   =========================================================================== */
+
+.zw-root {
+  /* ZCode text-ui-* 字号体系（默认 --ui-font-size: 14px） */
+  --zw-ui-size: 14px;
+  --zw-text-xl: calc(var(--zw-ui-size) + 4px);
+  --zw-text-lg: calc(var(--zw-ui-size) + 2px);
+  --zw-text-caption: calc(var(--zw-ui-size) - 1px);
+  --zw-text-sm: calc(var(--zw-ui-size) - 2px);
+  --zw-text-xs: calc(var(--zw-ui-size) - 4px);
+
+  /* radius：第一个圆角容器 rounded-xl，向内逐级 lg → md → sm */
+  --zw-radius-xl: 12px;
+  --zw-radius-lg: 8px;
+  --zw-radius-md: 6px;
+  --zw-radius-sm: 4px;
+
+  /* Zai Light（ZCode 当前默认亮色主题） */
+  --zw-bg: #f8f8f8;
+  --zw-bg-alt: #f0f0f0;
+  --zw-header: #ffffff;
+  --zw-panel: #ffffff;
+  --zw-sidebar: #f0f0f0;
+  --zw-card: #ffffff;
+  --zw-surface: rgba(13, 13, 13, 0.03);
+  --zw-surface-hover: rgba(13, 13, 13, 0.05);
+  --zw-selected: rgba(13, 13, 13, 0.05);
+  --zw-border: rgba(13, 13, 13, 0.1);
+  --zw-border-hover: rgba(13, 13, 13, 0.15);
+  --zw-fg: #0d0d0d;
+  --zw-fg-subtle: #5c5c5c;
+  --zw-fg-subtlest: #8a8a8a;
+  --zw-brand: #000000;
+  --zw-accent: #ebf4ff;
+  --zw-icon-blue: #0b7fff;
+  --zw-success: #1e8a3e;
+  --zw-success-surface: rgba(30, 138, 62, 0.14);
+  --zw-warning: #e07b00;
+  --zw-warning-surface: rgba(224, 123, 0, 0.12);
+  --zw-destructive: #e03131;
+  --zw-destructive-surface: rgba(224, 49, 49, 0.12);
+  --zw-user-bubble: rgba(13, 13, 13, 0.05);
+  --zw-shadow: 0 1px 3px rgb(0 0 0 / 4%), 0 6px 18px rgb(0 0 0 / 4%);
+
+  /* 把 codeg-ui 的 @theme inline 变量重映射到 ZCode 色板：ZCodeChatPage 里
+     bg-background / border-border / text-muted-foreground 等类会跟着切换。 */
+  --background: var(--zw-bg);
+  --foreground: var(--zw-fg);
+  --border: var(--zw-border);
+  --input: var(--zw-border);
+  --ring: var(--zw-icon-blue);
+  --card: var(--zw-card);
+  --popover: var(--zw-card);
+  --card-foreground: var(--zw-fg);
+  --popover-foreground: var(--zw-fg);
+  --muted: var(--zw-surface);
+  --muted-foreground: var(--zw-fg-subtle);
+  --accent: var(--zw-accent);
+  --accent-foreground: var(--zw-fg);
+  --secondary: var(--zw-surface);
+  --secondary-foreground: var(--zw-fg);
+  --destructive: var(--zw-destructive);
+
+  color: var(--zw-fg);
+  background: var(--zw-bg);
+  font-size: var(--zw-ui-size);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Zai Dark */
+.dark .zw-root {
+  --zw-bg: #161616;
+  --zw-bg-alt: #202020;
+  --zw-header: #202020;
+  --zw-panel: #202020;
+  --zw-sidebar: #161616;
+  --zw-card: #2b2b2b;
+  --zw-surface: rgba(255, 255, 255, 0.05);
+  --zw-surface-hover: rgba(255, 255, 255, 0.1);
+  --zw-selected: rgba(255, 255, 255, 0.1);
+  --zw-border: rgba(255, 255, 255, 0.1);
+  --zw-border-hover: rgba(255, 255, 255, 0.15);
+  --zw-fg: #f5f5f5;
+  --zw-fg-subtle: #adadad;
+  --zw-fg-subtlest: #888888;
+  --zw-brand: #ffffff;
+  --zw-accent: #001d3d;
+  --zw-icon-blue: #4099ff;
+  --zw-success: #4ade80;
+  --zw-success-surface: rgba(74, 222, 128, 0.16);
+  --zw-warning: #f59e0b;
+  --zw-warning-surface: rgba(245, 158, 11, 0.16);
+  --zw-destructive: #ff5c5c;
+  --zw-destructive-surface: rgba(255, 92, 92, 0.16);
+  --zw-user-bubble: rgba(255, 255, 255, 0.08);
+  --zw-shadow: 0 1px 3px rgb(0 0 0 / 20%), 0 6px 18px rgb(0 0 0 / 24%);
+}
+
+/* ---------------------------------------------------------------------------
+   补齐 vendored ZCode 组件在 codeg-ui 里没有的 utility（scoped）。
+   codeg-ui 的 @theme inline 只映射了 shadcn 基础色，bg-selected / text-ui-*
+   / text-foreground-subtle / text-success 等在 ZCode 组件里会失效。
+   --------------------------------------------------------------------------- */
+.zw-root .text-ui-xl { font-size: var(--zw-text-xl); line-height: 1.4; }
+.zw-root .text-ui-lg { font-size: var(--zw-text-lg); line-height: 1.45; }
+.zw-root .text-ui-base { font-size: var(--zw-ui-size); line-height: 1.5; }
+.zw-root .text-ui-caption { font-size: var(--zw-text-caption); line-height: 1.5; }
+.zw-root .text-ui-sm { font-size: var(--zw-text-sm); line-height: 1.5; }
+.zw-root .text-ui-xs { font-size: var(--zw-text-xs); line-height: 1.5; }
+.zw-root .text-foreground-subtle { color: var(--zw-fg-subtle); }
+.zw-root .text-foreground-subtlest { color: var(--zw-fg-subtlest); }
+.zw-root .text-success { color: var(--zw-success); }
+.zw-root .text-icon-blue { color: var(--zw-icon-blue); }
+.zw-root .text-warning { color: var(--zw-warning); }
+.zw-root .text-diff-added { color: var(--zw-success); }
+.zw-root .text-diff-removed { color: var(--zw-destructive); }
+.zw-root .bg-selected { background-color: var(--zw-selected); }
+.zw-root .bg-surface-hover { background-color: var(--zw-surface-hover); }
+.zw-root .hover\:bg-surface-hover:hover { background-color: var(--zw-surface-hover); }
+.zw-root .bg-surface { background-color: var(--zw-surface); }
+.zw-root .bg-header { background-color: var(--zw-header); }
+.zw-root .bg-panel { background-color: var(--zw-panel); }
+.zw-root .bg-user-message-bubble { background-color: var(--zw-user-bubble); }
+.zw-root .bg-success\/14 { background-color: var(--zw-success-surface); }
+.zw-root .bg-warning-surface { background-color: var(--zw-warning-surface); }
+.zw-root .text-warning-surface-foreground { color: var(--zw-warning); }
+.zw-root .border-border { border-color: var(--zw-border); }
+.zw-root .border-input-border-focused { border-color: var(--zw-icon-blue); }
+.zw-root .focus-visible\:ring-input-border-focused:focus-visible {
+  outline: 2px solid var(--zw-icon-blue);
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------------------
+   Shell：三框布局（工作处理面板 | 会话列表 | 对话），4px 可缩放间隙。
+   --------------------------------------------------------------------------- */
+.zw-shell {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.zw-work {
+  display: flex;
+  flex: 0 0 306px;
+  width: 306px;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--zw-sidebar);
+  border-right: 1px solid var(--zw-border);
+}
+
+.zw-divider {
+  position: relative;
+  flex: 0 0 4px;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+}
+.zw-divider::after {
+  content: "";
+  position: absolute;
+  inset: var(--zw-radius-xl) 1px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.zw-divider:hover::after {
+  background: var(--zw-fg-subtlest, var(--border, rgba(128, 128, 128, 0.4)));
+}
+
+.zw-chat {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.zw-chat > div { flex: 1 1 0; min-width: 0; }
+
+/* ---------------------------------------------------------------------------
+   Panel header / tabs / search
+   --------------------------------------------------------------------------- */
+.zw-work-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 12px 12px 8px;
+}
+.zw-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--zw-text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.zw-title-icon { display: inline-flex; color: var(--zw-icon-blue); }
+.zw-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--zw-radius-sm);
+  background: var(--zw-surface);
+  color: var(--zw-fg-subtle);
+  font-size: var(--zw-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.zw-header-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.zw-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--zw-radius-md);
+  background: transparent;
+  color: var(--zw-fg-subtle);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.zw-icon-btn:hover { background: var(--zw-surface-hover); color: var(--zw-fg); }
+.zw-icon-btn:focus-visible { outline: 2px solid var(--zw-icon-blue); outline-offset: 1px; }
+.zw-icon-btn:disabled { opacity: 0.45; cursor: default; }
+
+.zw-tabs {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  margin: 0 12px 8px;
+  padding: 3px;
+  border-radius: var(--zw-radius-lg);
+  background: var(--zw-surface);
+}
+.zw-tab {
+  flex: 1 1 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--zw-radius-md);
+  background: transparent;
+  color: var(--zw-fg-subtle);
+  font-size: var(--zw-text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.zw-tab:hover { color: var(--zw-fg); }
+.zw-tab[data-active="true"] {
+  background: var(--zw-card);
+  color: var(--zw-fg);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 6%);
+}
+.dark .zw-tab[data-active="true"] { box-shadow: 0 1px 2px rgb(0 0 0 / 30%); }
+
+.zw-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  height: 30px;
+  margin: 0 12px 10px;
+  padding: 0 8px;
+  border: 1px solid var(--zw-border);
+  border-radius: var(--zw-radius-lg);
+  background: var(--zw-card);
+  color: var(--zw-fg-subtlest);
+  transition: border-color 120ms ease;
+}
+.zw-search:focus-within { border-color: var(--zw-icon-blue); }
+.zw-search-input {
+  flex: 1 1 0;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--zw-fg);
+  font-size: var(--zw-text-caption);
+  font-family: inherit;
+}
+.zw-search-input::placeholder { color: var(--zw-fg-subtlest); }
+.zw-kbd {
+  padding: 1px 4px;
+  border: 1px solid var(--zw-border);
+  border-radius: var(--zw-radius-sm);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--zw-text-xs);
+  color: var(--zw-fg-subtlest);
+}
+
+.zw-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--zw-border-hover) transparent;
+}
+.zw-scroll::-webkit-scrollbar { width: 8px; }
+.zw-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: var(--zw-border-hover);
+}
+
+/* ---------------------------------------------------------------------------
+   任务列表（TaskList / TaskListItem 形态）
+   --------------------------------------------------------------------------- */
+.zw-section { padding: 0 8px 8px; }
+.zw-section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 6px 4px;
+  color: var(--zw-fg-subtlest);
+  font-size: var(--zw-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.zw-task-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px 6px 10px;
+  border: 0;
+  border-radius: var(--zw-radius-lg);
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.zw-task-row:hover { background: var(--zw-surface-hover); }
+.zw-task-row[data-active="true"] { background: var(--zw-selected); }
+.zw-task-row:focus-visible { outline: 2px solid var(--zw-icon-blue); outline-offset: -2px; }
+.zw-task-leading {
+  display: flex;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 24px;
+  margin-top: 0;
+}
+.zw-dot { display: block; width: 6px; height: 6px; border-radius: 999px; }
+.zw-dot--idle { background: var(--zw-border-hover); }
+.zw-dot--loading { background: var(--zw-icon-blue); }
+.zw-dot--success { background: var(--zw-success); }
+.zw-dot--error { background: var(--zw-destructive); }
+.zw-dot--warning { background: var(--zw-warning); }
+.zw-dot--unread { background: var(--zw-icon-blue); width: 7px; height: 7px; }
+.zw-spinner {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--zw-border-hover);
+  border-top-color: var(--zw-fg-subtle);
+  border-radius: 999px;
+  animation: zw-spin 900ms linear infinite;
+}
+@keyframes zw-spin { to { transform: rotate(360deg); } }
+
+.zw-task-body { display: flex; flex: 1 1 0; min-width: 0; flex-direction: column; gap: 2px; }
+.zw-task-title {
+  overflow: hidden;
+  color: var(--zw-fg);
+  font-size: var(--zw-ui-size);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zw-task-row[data-active="true"] .zw-task-title { font-weight: 600; }
+.zw-task-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 18px;
+  color: var(--zw-fg-subtle);
+  font-size: var(--zw-text-sm);
+}
+.zw-task-meta > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zw-meta-sep { color: var(--zw-fg-subtlest); }
+.zw-task-trailing { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; height: 18px; }
+
+.zw-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--zw-radius-sm);
+  font-size: var(--zw-text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.zw-badge--agent { background: var(--zw-surface); color: var(--zw-fg-subtle); font-family: var(--font-mono, monospace); }
+.zw-badge--running { background: var(--zw-accent); color: var(--zw-icon-blue); }
+.zw-badge--success { background: var(--zw-success-surface); color: var(--zw-success); }
+.zw-badge--error { background: var(--zw-destructive-surface); color: var(--zw-destructive); }
+.zw-badge--warning { background: var(--zw-warning-surface); color: var(--zw-warning); }
+.zw-diff { display: inline-flex; gap: 4px; font-family: var(--font-mono, monospace); font-size: var(--zw-text-xs); }
+.zw-diff-add { color: var(--zw-success); }
+.zw-diff-del { color: var(--zw-destructive); }
+
+/* ---------------------------------------------------------------------------
+   工作处理详情：阶段 pills + 工作流时间线 + 产物卡片
+   --------------------------------------------------------------------------- */
+.zw-detail {
+  flex: 0 1 auto;
+  height: 58%;
+  max-height: 58%;
+  min-height: 250px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-top: 1px solid var(--zw-border);
+  background: var(--zw-panel);
+}
+/* 阶段 / 时间线 / 产物在同一滚动区里，避免固定高度的产物卡片把时间线挤没。 */
+.zw-detail-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--zw-border-hover) transparent;
+}
+.zw-detail-scroll::-webkit-scrollbar { width: 8px; }
+.zw-detail-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: var(--zw-border-hover);
+}
+.zw-detail-header { display: flex; align-items: flex-start; gap: 8px; padding: 12px 12px 8px; }
+.zw-detail-title {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--zw-ui-size);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zw-detail-sub { padding: 0 12px 10px; color: var(--zw-fg-subtle); font-size: var(--zw-text-sm); }
+
+.zw-phases { display: flex; gap: 4px; flex: 0 0 auto; padding: 0 12px 10px; }
+.zw-phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--zw-border);
+  border-radius: 999px;
+  color: var(--zw-fg-subtlest);
+  font-size: var(--zw-text-xs);
+  white-space: nowrap;
+}
+.zw-phase[data-state="done"] { border-color: transparent; background: var(--zw-success-surface); color: var(--zw-success); }
+.zw-phase[data-state="active"] { border-color: transparent; background: var(--zw-accent); color: var(--zw-icon-blue); }
+.zw-phase-line { flex: 1 1 0; align-self: center; height: 1px; background: var(--zw-border); }
+
+.zw-timeline { flex: 1 1 0; min-height: 108px; padding: 0 12px 8px; }
+.zw-tl-item { position: relative; display: flex; gap: 10px; min-height: 30px; padding-bottom: 6px; }
+.zw-tl-rail {
+  position: relative;
+  flex: 0 0 14px;
+  display: flex;
+  justify-content: center;
+}
+.zw-tl-rail::before {
+  content: "";
+  position: absolute;
+  top: 14px;
+  bottom: -6px;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--zw-border);
+}
+.zw-tl-item:last-child .zw-tl-rail::before { display: none; }
+.zw-tl-node {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  border: 1px solid var(--zw-border);
+  border-radius: 999px;
+  background: var(--zw-card);
+  color: var(--zw-fg-subtlest);
+}
+.zw-tl-item[data-state="done"] .zw-tl-node { border-color: transparent; background: var(--zw-success-surface); color: var(--zw-success); }
+.zw-tl-item[data-state="active"] .zw-tl-node { border-color: transparent; background: var(--zw-accent); color: var(--zw-icon-blue); }
+.zw-tl-item[data-state="error"] .zw-tl-node { border-color: transparent; background: var(--zw-destructive-surface); color: var(--zw-destructive); }
+.zw-tl-body { flex: 1 1 0; min-width: 0; padding-top: 2px; }
+.zw-tl-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--zw-text-caption);
+  color: var(--zw-fg);
+}
+.zw-tl-item[data-state="pending"] .zw-tl-label { color: var(--zw-fg-subtlest); }
+.zw-tl-label > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zw-tl-time { margin-left: auto; flex: 0 0 auto; color: var(--zw-fg-subtlest); font-family: var(--font-mono, monospace); font-size: var(--zw-text-xs); }
+.zw-tl-detail {
+  overflow: hidden;
+  color: var(--zw-fg-subtle);
+  font-size: var(--zw-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zw-tl-detail code { font-family: var(--font-mono, monospace); }
+
+.zw-artifact {
+  flex: 0 0 auto;
+  margin: 0 12px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--zw-border);
+  border-radius: var(--zw-radius-xl);
+  background: var(--zw-card);
+}
+.zw-artifact-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--zw-fg-subtle);
+  font-size: var(--zw-text-sm);
+  font-weight: 600;
+}
+.zw-artifact-head svg { color: var(--zw-icon-blue); }
+.zw-artifact-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.zw-metric {
+  padding: 6px 8px;
+  border-radius: var(--zw-radius-lg);
+  background: var(--zw-surface);
+}
+.zw-metric-value { color: var(--zw-fg); font-size: var(--zw-text-lg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.zw-metric-label { color: var(--zw-fg-subtlest); font-size: var(--zw-text-xs); }
+.zw-artifact-note {
+  margin-top: 8px;
+  overflow: hidden;
+  color: var(--zw-fg-subtle);
+  font-size: var(--zw-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zw-empty {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 16px;
+  color: var(--zw-fg-subtlest);
+  text-align: center;
+  font-size: var(--zw-text-sm);
+}
+.zw-empty svg { color: var(--zw-border-hover); }
+.zw-load-flag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border: 1px solid var(--zw-destructive-surface, rgba(224, 49, 49, 0.3));
+  border-radius: var(--zw-radius-sm);
+  background: var(--zw-destructive-surface, rgba(224, 49, 49, 0.1));
+  color: var(--zw-destructive, var(--destructive));
+  font-size: var(--zw-text-xs);
+}
+.zw-empty-hint {
+  max-width: 220px;
+  color: var(--zw-fg-subtlest, var(--muted-foreground));
+  font-size: var(--zw-text-sm);
+  line-height: 1.5;
+  text-align: center;
+}
+.zw-empty-retry {
+  margin-top: 4px;
+  padding: 4px 12px;
+  border: 1px solid var(--zw-border, var(--border));
+  border-radius: var(--zw-radius-lg, 8px);
+  background: var(--zw-card, var(--card));
+  color: var(--zw-fg, var(--foreground));
+  font-family: inherit;
+  font-size: var(--zw-text-sm);
+  cursor: pointer;
+}
+.zw-empty-retry:hover { background: var(--zw-surface-hover, var(--accent)); }
+
+.zw-float-toggle {
+  position: absolute;
+  z-index: 5;
+  top: 10px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--zw-border);
+  border-radius: var(--zw-radius-lg);
+  background: var(--zw-card);
+  color: var(--zw-fg-subtle);
+  box-shadow: var(--zw-shadow);
+  font-size: var(--zw-text-sm);
+  cursor: pointer;
+}
+.zw-float-toggle:hover { color: var(--zw-fg); background: var(--zw-surface-hover); }
+
+@media (max-width: 1280px) {
+  .zw-work { flex-basis: 268px; width: 268px; }
+}
+@media (max-width: 1024px) {
+  .zw-work { flex-basis: 232px; width: 232px; }
+  .zw-artifact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---------------------------------------------------------------------------
+   模型选择工具条：补回 vendor composer 在 web/Go 部署下隐藏的 ModelConfigSelect。
+   变量全部带 fallback，脱离 .zw-root 时回落 codepluse 主题，独立使用也不掉样式。
+   --------------------------------------------------------------------------- */
+.zw-model-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  border-top: 1px solid var(--zw-border, var(--border));
+  background: var(--zw-header, var(--background));
+}
+.zw-model-bar-label {
+  color: var(--zw-fg-subtlest, var(--muted-foreground));
+  font-size: var(--zw-text-xs, 10px);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.zw-model-bar-agent {
+  margin-left: 0;
+  overflow: hidden;
+  max-width: 40%;
+  color: var(--zw-fg-subtlest, var(--muted-foreground));
+  font-family: var(--font-mono, monospace);
+  font-size: var(--zw-text-xs, 10px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zw-model { position: relative; min-width: 0; }
+.zw-model-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--zw-border, var(--border));
+  border-radius: var(--zw-radius-lg, 8px);
+  background: var(--zw-card, var(--card));
+  color: var(--zw-fg, var(--foreground));
+  font-family: inherit;
+  font-size: var(--zw-text-caption, 13px);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.zw-model-trigger:hover:not(:disabled) {
+  background: var(--zw-surface-hover, var(--accent));
+  border-color: var(--zw-border-hover, var(--border));
+}
+.zw-model-trigger[data-open="true"] { border-color: var(--zw-icon-blue, var(--ring)); }
+.zw-model-trigger:disabled { opacity: 0.5; cursor: default; }
+.zw-model-trigger:focus-visible {
+  outline: 2px solid var(--zw-icon-blue, var(--ring));
+  outline-offset: 1px;
+}
+.zw-model-trigger > svg:first-child { color: var(--zw-icon-blue, var(--primary)); flex: 0 0 auto; }
+.zw-model-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zw-model-chevron { flex: 0 0 auto; color: var(--zw-fg-subtlest, var(--muted-foreground)); transition: transform 120ms ease; }
+.zw-model-chevron[data-open="true"] { transform: rotate(180deg); }
+.zw-model-spin { animation: zw-spin 900ms linear infinite; }
+
+.zw-model-menu {
+  position: absolute;
+  z-index: 50;
+  bottom: calc(100% + 6px);
+  /* 控件靠右下角：菜单右缘对齐触发器，向左展开，避免超出视口右侧。 */
+  left: auto;
+  right: 0;
+  width: min(320px, 78vw);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--zw-border, var(--border));
+  border-radius: var(--zw-radius-xl, 12px);
+  background: var(--zw-card, var(--popover));
+  color: var(--zw-fg, var(--popover-foreground));
+  box-shadow: var(--zw-shadow, 0 8px 24px rgb(0 0 0 / 12%));
+  scrollbar-width: thin;
+}
+.zw-model-menu-head {
+  padding: 4px 8px 6px;
+  color: var(--zw-fg-subtlest, var(--muted-foreground));
+  font-size: var(--zw-text-xs, 10px);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.zw-model-hint {
+  padding: 8px;
+  color: var(--zw-fg-subtle, var(--muted-foreground));
+  font-size: var(--zw-text-sm, 12px);
+}
+.zw-model-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--zw-radius-lg, 8px);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.zw-model-option:hover { background: var(--zw-surface-hover, var(--accent)); }
+.zw-model-option[data-active="true"] { background: var(--zw-selected, var(--accent)); }
+.zw-model-option > svg { flex: 0 0 auto; margin-top: 2px; color: var(--zw-success, var(--primary)); }
+.zw-model-option-body { display: flex; flex: 1 1 0; min-width: 0; flex-direction: column; gap: 1px; }
+.zw-model-option-name { font-size: var(--zw-ui-size, 14px); font-weight: 500; }
+.zw-model-option-desc {
+  overflow: hidden;
+  color: var(--zw-fg-subtle, var(--muted-foreground));
+  font-size: var(--zw-text-sm, 12px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 发送被后端拒绝时的可操作提示，避免「点了没反应」。 */
+.zw-send-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--zw-destructive-surface, rgba(224, 49, 49, 0.12));
+  background: var(--zw-destructive-surface, rgba(224, 49, 49, 0.1));
+  color: var(--zw-destructive, var(--destructive));
+  font-size: var(--zw-text-sm, 12px);
+}
+.zw-send-error > span { flex: 1 1 0; min-width: 0; }
+.zw-send-error button {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--zw-radius-sm, 4px);
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.zw-send-error button:hover { background: var(--zw-surface-hover, var(--accent)); }

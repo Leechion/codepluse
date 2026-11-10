@@ -49,6 +49,31 @@ describe("setCustomAgentDisplay", () => {
     expect(getAgentColor("claude_code")).toBeTruthy()
   })
 
+  it("hydrates harness instances and falls back to the base tool", () => {
+    // No registry entry yet: "claude 2号" must not render the raw wire, and
+    // must wear Claude's brand rather than the unknown-agent gray.
+    expect(getAgentLabel("inst_claude2")).toBe("Claude Code")
+    expect(getAgentColor("inst_claude2")).toBe(getAgentColor("claude_code"))
+    expect(getAgentLabel("inst_codex11")).toBe("Codex")
+    expect(getAgentInitial("inst_claude2")).toBe("C")
+
+    setCustomAgentDisplay([
+      { agentType: "inst_claude2", name: "Claude 2号" },
+      { agentType: "inst_codex11", name: "Codex 深海" },
+    ])
+    expect(getAgentLabel("inst_claude2")).toBe("Claude 2号")
+    expect(getAgentLabel("inst_codex11")).toBe("Codex 深海")
+    expect(getAgentInitial("inst_codex11")).toBe("C")
+    // Colors stay the base tool's regardless of the display name.
+    expect(getAgentColor("inst_claude2")).toBe(getAgentColor("claude_code"))
+    expect(getAgentColor("inst_codex11")).toBe(getAgentColor("codex"))
+
+    // An unknown wire shape (a future tool without a mapping) degrades to the
+    // humanized wire + gray, not a crash or a wrong brand.
+    expect(getAgentLabel("inst_mystery3")).toBe("Inst Mystery3")
+    expect(getAgentColor("inst_mystery3")).toBe("bg-muted-foreground")
+  })
+
   it("only notifies subscribers when what they render actually changed", () => {
     const listener = vi.fn()
     const unsubscribe = subscribeCustomAgentDisplay(listener)

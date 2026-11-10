@@ -41,6 +41,11 @@ type Agent struct {
 	ACPModes      map[string]string `json:"acpModes,omitempty"`
 	ACPVersion    string            `json:"acpVersion,omitempty"`
 	Permissions   []string          `json:"permissions,omitempty"`
+	// Instance fields (multi-harness): a named copy of a built-in tool that
+	// pins its own provider/model instead of following the global selection.
+	Wire         string `json:"wire,omitempty"`         // unique wire name, e.g. claude_2; empty = built-in mapping
+	ProviderID   string `json:"providerId,omitempty"`   // pinned provider ("" = follow global active)
+	DefaultModel string `json:"defaultModel,omitempty"` // pinned model applied when a session starts
 }
 
 // Execution carries the real-run facts of a task.
@@ -195,6 +200,52 @@ func (h *Hub) SetAgentEnabled(id string, on bool) *Agent {
 		h.emitLocked("agent", a)
 	}
 	return a
+}
+
+// DeleteAgent removes an agent from the registry. It is used for user-created
+// harness instances only; seeded built-ins are restored on every boot anyway.
+func (h *Hub) DeleteAgent(id string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	a := h.agents[id]
+	if a == nil {
+		return false
+	}
+	delete(h.agents, id)
+	for i, oid := range h.order {
+		if oid == id {
+			h.order = append(h.order[:i], h.order[i+1:]...)
+			break
+		}
+	}
+	h.emitLocked("agent", a)
+	return true
+}
+
+// UpdateAgent mutates a registered agent under the root lock and re-emits it.
+func (h *Hub) UpdateAgent(id string, fn func(*Agent)) *Agent {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	a := h.agents[id]
+	if a == nil {
+		return nil
+	}
+	fn(a)
+	h.emitLocked("agent", a)
+	return a
+}
+
+// AgentByWire finds an agent by its wire name (the name conversations and the
+// frontend address it by), for agents that carry one.
+func (h *Hub) AgentByWire(wire string) *Agent {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, id := range h.order {
+		if a := h.agents[id]; a != nil && a.Wire == wire {
+			return a
+		}
+	}
+	return nil
 }
 
 // --- tasks ---

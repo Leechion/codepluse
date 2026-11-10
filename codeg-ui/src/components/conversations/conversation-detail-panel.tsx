@@ -1716,6 +1716,25 @@ const ConversationTabView = memo(function ConversationTabView({
     ]
   )
 
+  // Task-split card: the proposal tool already returned, so this answer IS the
+  // dispatch — `approve` fans the edited plan out as delegations, `reject`
+  // retires it. The backend broadcasts `task_split_resolved`, which clears the
+  // card on every client; no follow-up prompt is sent (the next turn's prefix
+  // carries the plan state server-side).
+  const handleRespondTaskSplit = useCallback(
+    (
+      splitId: string,
+      action: "approve" | "reject",
+      tasks?: Array<{
+        title: string
+        prompt: string
+        agent_type: string
+        model: string
+      }>
+    ) => acpActions.respondTaskSplit(tabId, splitId, action, tasks),
+    [acpActions, tabId]
+  )
+
   // Queue edit flow: derive editing draft text from queue state
   const editingQueueDraftText = useMemo(() => {
     if (!mqEditingItemId) return null
@@ -2317,6 +2336,7 @@ const ConversationTabView = memo(function ConversationTabView({
       pendingQuestion={conn.pendingQuestion}
       pendingAskQuestion={conn.pendingAskQuestion}
       pendingPlanApproval={conn.pendingPlanApproval}
+      pendingSplit={conn.pendingSplit}
       onFocus={handleFocus}
       onSend={handleSend}
       onCancel={handleCancel}
@@ -2324,6 +2344,7 @@ const ConversationTabView = memo(function ConversationTabView({
       onAnswerQuestion={handleAnswerQuestion}
       onAnswerAskQuestion={handleAnswerAskQuestion}
       onAnswerPlanApproval={handleAnswerPlanApproval}
+      onRespondTaskSplit={handleRespondTaskSplit}
       modes={connectionModes}
       configOptions={connectionConfigOptions}
       modeLoading={modeLoading}

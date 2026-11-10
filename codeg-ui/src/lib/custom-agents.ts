@@ -20,13 +20,29 @@ import {
   AGENT_COLORS,
   AGENT_LABELS,
   customAgentId,
+  instanceBaseAgent,
   isCustomAgentType,
+  isInstanceAgentType,
   type AgentType,
   type BuiltinAgentType,
 } from "@/lib/types"
 
 const customAgentNames = new Map<string, string>()
 const customAgentIcons = new Map<string, string>()
+
+/**
+ * Map key for an agent's runtime display metadata: the registry id for a
+ * `custom:<id>` agent, the full wire for a harness instance (`inst_claude2`),
+ * null for built-ins (compile-time labels already cover those). Instances
+ * share this store because ~70 render paths reach names/icons only through
+ * getAgentLabel / getAgentIconUrl — teaching those two the wire shape is far
+ * cheaper than teaching every call site about instances.
+ */
+function displayKeyOf(agentType: AgentType): string | null {
+  if (isCustomAgentType(agentType)) return customAgentId(agentType)
+  if (isInstanceAgentType(agentType)) return agentType
+  return null
+}
 
 // Version counter + listeners so a component can re-render when the map is
 // hydrated. Labels tolerate arriving late (the humanized-id fallback is usually
@@ -59,7 +75,7 @@ export function setCustomAgentDisplay(
   const names = new Map<string, string>()
   const icons = new Map<string, string>()
   for (const entry of entries) {
-    const id = customAgentId(entry.agentType)
+    const id = displayKeyOf(entry.agentType)
     if (!id) continue
     if (entry.name.trim()) {
       names.set(id, entry.name.trim())
@@ -99,7 +115,7 @@ function sameEntries(a: Map<string, string>, b: Map<string, string>): boolean {
  * a manually added agent need not supply one.
  */
 export function getAgentIconUrl(agentType: AgentType): string | null {
-  const id = customAgentId(agentType)
+  const id = displayKeyOf(agentType)
   if (!id) return null
   return customAgentIcons.get(id) ?? null
 }
@@ -115,14 +131,24 @@ function humanizeId(id: string): string {
 
 /**
  * Human-readable name for any agent type. Built-ins use their pinned label;
- * custom agents use their registered name, falling back to a humanized id.
+ * harness instances use their configured display name, falling back to the
+ * base tool's label; custom agents use their registered name, falling back to
+ * a humanized id.
  */
 export function getAgentLabel(agentType: AgentType): string {
   const builtin = AGENT_LABELS[agentType as BuiltinAgentType]
   if (builtin) return builtin
-  const id = customAgentId(agentType)
+  const id = displayKeyOf(agentType)
   if (!id) return agentType
-  return customAgentNames.get(id) ?? humanizeId(id)
+  const name = customAgentNames.get(id)
+  if (name) return name
+  if (isInstanceAgentType(agentType)) {
+    // "claude 2号" before the agent list lands would otherwise render the raw
+    // wire; the base tool's label reads sensibly in the meantime.
+    const base = instanceBaseAgent(agentType)
+    if (base) return AGENT_LABELS[base]
+  }
+  return humanizeId(id)
 }
 
 /**
@@ -149,10 +175,16 @@ function hashId(id: string): number {
   return Math.abs(hash)
 }
 
-/** Tailwind background class for an agent's dot/swatch. */
+/** Tailwind background class for an agent's dot/swatch. A harness instance
+ *  wears its base tool's brand color, so "claude 3号" reads as Claude. */
 export function getAgentColor(agentType: AgentType): string {
   const builtin = AGENT_COLORS[agentType as BuiltinAgentType]
   if (builtin) return builtin
+  if (isInstanceAgentType(agentType)) {
+    const base = instanceBaseAgent(agentType)
+    if (base) return AGENT_COLORS[base] ?? "bg-muted-foreground"
+    return "bg-muted-foreground"
+  }
   const id = customAgentId(agentType)
   if (!id) return "bg-muted-foreground"
   return CUSTOM_AGENT_COLORS[hashId(id) % CUSTOM_AGENT_COLORS.length]
@@ -235,4 +267,4 @@ function classifyMonoSvg(base64: string): boolean {
   return allBlack || allWhite
 }
 
-export { isCustomAgentType, customAgentId }
+export { isCustomAgentType, isInstanceAgentType, customAgentId }

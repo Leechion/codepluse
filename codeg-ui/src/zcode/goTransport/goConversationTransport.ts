@@ -183,6 +183,9 @@ class GoConversationSession {
   autoDrain = true;
   pauseReason: "stopped" | "manual" | "error" | undefined;
   admissionSeq = 0;
+  /** busy 拒绝后的一次性排水重试（防泄漏 busy 卡队列；上限见 scheduleDrainRetry）。 */
+  drainRetry: ReturnType<typeof setTimeout> | null = null;
+  drainRetries = 0;
   /** transport 级帧扇出（SessionDataLayer 按帧 topic 分发给各 store）。 */
   private emitFrame: (frame: ConversationTopicFrame, deliveryKind: TopicFrameDeliveryKind) => void;
   private dirty = false;
@@ -748,7 +751,7 @@ export class GoConversationTransport implements ConversationTransport {
       ],
     });
 
-    let connectionId: string;
+    let connectionId = "";
     try {
       connectionId = await this.ensureConnection(session.conversationId, session.sessionId);
       const conversationId = session.draft ? null : Number(session.sessionId);
@@ -772,7 +775,13 @@ export class GoConversationTransport implements ConversationTransport {
         control: { phase: session.phase, sessionEnded: true, canStop: false, stopState: "idle" },
         inputRouting: { mode: session.inputRoutingMode() },
       });
-      if (error instanceof TurnBusyError) return false;
+      if (error instanceof TurnBusyError) {
+        // 后端只在「真的有 turn 在跑」时才返回 409；连接 busy 标志泄漏的
+        // 情况由 Go 端原地接管（turn_live=false 时下一条 prompt 直接重发），
+        // 到不了这里。所以自愈的正确姿势就是原本的入队语义（返回 false），
+        // 绝不能用「断开重连」去掐掉正在跑的会话。
+        return false;
+      }
       throw error;
     }
   }
@@ -810,6 +819,7 @@ export class GoConversationTransport implements ConversationTransport {
       if (session.isRunning) await acpCancel(connectionId);
       const sent = await this.dispatchPrompt(session, envelope, item.text, item.attachments);
       if (sent) {
+        session.drainRetries = 0;
         session.queue = session.queue.filter((candidate) => candidate.queueItemId !== item.queueItemId);
         session.emitState({
           queue: session.queueState(),
@@ -820,13 +830,35 @@ export class GoConversationTransport implements ConversationTransport {
       throw new Error("turn_in_progress");
     } catch (error) {
       // 提升失败：回到队首，等下一轮 turn_complete / sendQueuedNow 再试。
+      // busy 拒绝且本地并不在跑 turn 时，多半是后端连接上的陈旧 busy：
+      // Go 端在陈旧宽限期后会自动接管重发，这里做一次有界定时重试兜底，
+      // 避免用户必须再敲一次消息才能把队列踢活。
       item.dispatch.state = "queued";
       if (!session.queue.some((candidate) => candidate.queueItemId === item.queueItemId)) {
         session.queue = [item, ...session.queue];
       }
       session.emitState({ queue: session.queueState() });
+      if (!session.isRunning) this.scheduleDrainRetry(session);
       void error;
     }
+  }
+
+  /**
+   * 有界的队列排水重试：turn_complete 是正常触发器，但「后端连接卡在陈旧
+   * busy」场景下永远不会等来 turn_complete（那轮早就死了）。Go 端的陈旧宽
+   * 限期是 3s，重试排在 4s 后、最多两次，覆盖接管窗口又不和真忙互相轰炸；
+   * 超过上限就交还给正常的 turn_complete / 手动发送路径。
+   */
+  private scheduleDrainRetry(session: GoConversationSession): void {
+    if (!session.autoDrain || session.queue.length === 0) return;
+    if (session.drainRetry !== null || session.drainRetries >= 2) return;
+    session.drainRetries += 1;
+    session.drainRetry = setTimeout(() => {
+      session.drainRetry = null;
+      // 会话已退订（页面切换/关闭）时不再踢队列。
+      if (this.sessions.get(session.sessionId) !== session) return;
+      this.maybeAutoDrain(session);
+    }, 4000);
   }
 
   private maybeAutoDrain(session: GoConversationSession): void {
@@ -1285,6 +1317,8 @@ export class GoConversationTransport implements ConversationTransport {
         break;
       }
       case "turn_complete": {
+        // 排水恢复正常的证据：重新武装有界重试的次数预算。
+        session.drainRetries = 0;
         session.closeRunningTurn(String(event.stop_reason ?? "end_turn"));
         session.phase = "completedSuccess";
         session.emitState({

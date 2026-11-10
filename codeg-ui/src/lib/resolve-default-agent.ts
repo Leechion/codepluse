@@ -4,6 +4,12 @@ export interface ResolveDefaultAgentInput {
   /** Folder's saved `default_agent_type`, or null if none set. */
   folderDefault: AgentType | null
   /**
+   * The main bot — the harness chosen in Settings that new conversations
+   * start on. Null when unset or when it names an agent the current list
+   * doesn't offer (a deleted instance must not strand drafts).
+   */
+  mainBot: AgentType | null
+  /**
    * Agent to inherit when "new conversation" is launched from inside a
    * real conversation context (caller passes the active tab's agentType
    * only when its `conversationId != null`).
@@ -38,13 +44,15 @@ export interface ResolveDefaultAgentResult {
  *
  * Priority (highest first):
  *   1. `folderDefault` — the user explicitly pinned a default on this folder.
- *   2. `inherit` — "new conversation" launched from inside an existing
+ *   2. `mainBot` — the harness picked in Settings ("主 bot"): new
+ *      conversations land on it without switching harness by hand.
+ *   3. `inherit` — "new conversation" launched from inside an existing
  *      conversation should produce another conversation with the same agent.
- *   3. `sortedTypes[0]` — first entry of the user-managed drag-sorted list.
- *   4. `AGENT_DISPLAY_ORDER[0]` — final fallback when even the sorted list
+ *   4. `sortedTypes[0]` — first entry of the user-managed drag-sorted list.
+ *   5. `AGENT_DISPLAY_ORDER[0]` — final fallback when even the sorted list
  *      isn't available yet (cold start).
  *
- * The result is marked `provisional: true` for cases 3 and 4 when `fresh`
+ * The result is marked `provisional: true` for cases 4 and 5 when `fresh`
  * is false — i.e. the sorted list might still be stale or empty seed data
  * from localStorage, and the caller should re-resolve once fresh data
  * arrives.
@@ -52,9 +60,12 @@ export interface ResolveDefaultAgentResult {
 export function resolveDefaultAgent(
   input: ResolveDefaultAgentInput
 ): ResolveDefaultAgentResult {
-  const { folderDefault, inherit, sortedTypes, fresh } = input
+  const { folderDefault, mainBot, inherit, sortedTypes, fresh } = input
   if (folderDefault) {
     return { agentType: folderDefault, provisional: false }
+  }
+  if (mainBot) {
+    return { agentType: mainBot, provisional: false }
   }
   if (inherit) {
     return { agentType: inherit, provisional: false }

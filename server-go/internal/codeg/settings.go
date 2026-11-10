@@ -11,9 +11,13 @@ var settingDefaults = map[string]Row{
 	"get_chat_authoring_settings":   {"enabled": false},
 	"get_conversation_branch_tag":   {"enabled": false, "color": "default"},
 	"get_delegation_settings":       {"enabled": true, "depth_limit": 4, "completed_cache_max_mb": 32, "agent_defaults": Row{}},
+	// The main bot: the harness + model a new conversation starts on when the
+	// folder has no default and nothing is inherited. Empty wire = unset.
+	"get_main_bot_settings": {"agent_type": "", "model": ""},
 }
 var settingUpdates = map[string]string{
 	"update_system_language_settings":  "get_system_language_settings",
 	"update_system_rendering_settings": "get_system_rendering_settings",
 	"update_system_terminal_settings":  "get_system_terminal_settings",
+	"update_main_bot_settings":         "get_main_bot_settings",
 }

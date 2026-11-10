@@ -441,6 +441,34 @@ export async function acpRespondPermission(
 }
 
 /**
+ * Answer a task-split card (Go `acp_respond_task_split`). `approve` (the
+ * default) dispatches the CONFIRMED task list — the card's copy, edits
+ * included, replaces the model's draft — as parallel delegations; `reject`
+ * retires the proposal without launching anything. Either way the backend
+ * emits `task_split_resolved`, so the card clears on every client.
+ * Answering a split that is already gone is an error (the card shows it and
+ * re-reads the snapshot).
+ */
+export async function acpRespondTaskSplit(
+  connectionId: string,
+  splitId: string,
+  action: "approve" | "reject",
+  tasks?: Array<{
+    title: string
+    prompt: string
+    agent_type: string
+    model: string
+  }>
+): Promise<{ split_id: string; action: string; task_ids?: string[] }> {
+  return getTransport().call("acp_respond_task_split", {
+    connectionId,
+    splitId,
+    action,
+    tasks,
+  })
+}
+
+/**
  * Submit the user's answer to a blocking `ask_user_question`. Resolves the
  * parked tool call on the backend (and clears the card on every client via the
  * `question_resolved` event). Idempotent: answering an already-resolved /
@@ -519,6 +547,79 @@ export async function acpFindConnectionForConversation(
 
 export async function acpListAgents(): Promise<AcpAgentInfo[]> {
   return getTransport().call("acp_list_agents")
+}
+
+// ── Harness instances ──────────────────────────────────────────────────────
+// Named copies of claude/codex that pin their own provider + default model.
+// `agentType` on the wire is the instance name (inst_claude2); the built-in
+// it was cloned from is `realTool` ("claude" | "codex").
+
+export interface HarnessInstance extends AcpAgentInfo {
+  instance: true
+}
+
+export interface HarnessProviderInfo {
+  id: string
+  name: string
+  agent: string
+  url: string
+  model: string
+  hasKey: boolean
+  source?: string
+  ccCurrent?: boolean
+}
+
+export async function listHarnessInstances(): Promise<HarnessInstance[]> {
+  return getTransport().call("codepluse_instance_list")
+}
+
+export async function createHarnessInstance(params: {
+  name: string
+  realTool: "claude" | "codex"
+  providerId?: string
+  defaultModel?: string
+}): Promise<HarnessInstance> {
+  return getTransport().call("codepluse_instance_create", { ...params })
+}
+
+export async function updateHarnessInstance(params: {
+  agentType: string
+  name?: string
+  providerId?: string
+  defaultModel?: string
+}): Promise<HarnessInstance> {
+  return getTransport().call("codepluse_instance_update", { ...params })
+}
+
+export async function deleteHarnessInstance(agentType: string): Promise<void> {
+  await getTransport().call("codepluse_instance_delete", { agentType })
+}
+
+export async function listHarnessProviders(): Promise<{
+  providers: HarnessProviderInfo[]
+  active: Record<string, string>
+}> {
+  return getTransport().call("codepluse_providers_list")
+}
+
+// ── Main bot ───────────────────────────────────────────────────────────────
+// The harness a new conversation starts on when nothing else decides it
+// (folder default and per-chat picks still win). `model` is the optional
+// session default on top of the harness's own pin.
+
+export interface MainBotSettings {
+  agent_type: string
+  model: string
+}
+
+export async function getMainBotSettings(): Promise<MainBotSettings> {
+  return getTransport().call("get_main_bot_settings")
+}
+
+export async function setMainBotSettings(
+  settings: MainBotSettings
+): Promise<void> {
+  await getTransport().call("update_main_bot_settings", { settings })
 }
 
 export async function acpGetAgentStatus(
@@ -4404,6 +4505,16 @@ export async function workTaskTemplateDelete(id: number): Promise<void> {
 
 export async function getHomeDirectory(): Promise<string> {
   return getTransport().call("get_home_directory")
+}
+
+/**
+ * 弹出操作系统原生的文件夹选择窗口（本机 Go 服务通过 PowerShell 的
+ * FolderBrowserDialog 打开），返回选中的绝对路径；用户取消时为空字符串。
+ * 与 `get_home_directory` 不同，它不经过应用内的目录浏览器。
+ */
+export async function pickDirectory(): Promise<string> {
+  // 用户可能盯着资源管理器挑很久，别用默认的请求超时把它掐断。
+  return getTransport().call("pick_directory", {}, { timeoutMs: 300_000 })
 }
 
 export async function listDirectoryEntries(

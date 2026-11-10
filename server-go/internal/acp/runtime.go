@@ -1240,6 +1240,29 @@ func (r *Runtime) Connect(agent *hub.Agent, o Options) (string, error) {
 
 // SupportsFork reports the native ACP capability, without implying that an
 // arbitrary local history row has a usable native fork point.
+// HasActiveTurn reports whether a prompt turn is genuinely in flight on the
+// session record. The codeg layer uses it to tell a live turn (real work in
+// progress) from a leaked connection-level busy flag, so a stuck connection
+// can be reset without ever killing running work.
+func (r *Runtime) HasActiveTurn(sessionID string) bool {
+	r.mu.Lock()
+	rec := r.record(sessionID)
+	r.mu.Unlock()
+	if rec == nil {
+		return false
+	}
+	rec.activeMu.Lock()
+	defer rec.activeMu.Unlock()
+	return rec.active != nil
+}
+
+// ForgetSession releases one session record: it is removed from the runtime
+// and unbound from its pooled driver. The driver itself stays alive while other
+// sessions still use it (drivers are shared per agent+permission+cwd).
+func (r *Runtime) ForgetSession(sessionID string) {
+	r.ForgetFork(sessionID)
+}
+
 func (r *Runtime) SupportsFork(sessionID string) bool {
 	r.mu.Lock()
 	d := r.bindings[sessionID]

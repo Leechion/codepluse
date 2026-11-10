@@ -756,6 +756,20 @@ export function CanvasConversationSurface({
     [acpActions, contextKey]
   )
 
+  const handleRespondTaskSplit = useCallback(
+    (
+      splitId: string,
+      action: "approve" | "reject",
+      tasks?: Array<{
+        title: string
+        prompt: string
+        agent_type: string
+        model: string
+      }>
+    ) => acpActions.respondTaskSplit(contextKey, splitId, action, tasks),
+    [acpActions, contextKey]
+  )
+
   // Client-local, like the conversation panel's — and what lets the muted
   // "recovered" line expire on its own.
   const handleSessionFailureDismiss = useCallback(
@@ -858,6 +872,7 @@ export function CanvasConversationSurface({
           pendingQuestion={conn.pendingQuestion}
           pendingAskQuestion={conn.pendingAskQuestion}
           pendingPlanApproval={conn.pendingPlanApproval}
+          pendingSplit={conn.pendingSplit}
           onFocus={handleFocus}
           onSend={handleSend}
           onCancel={handleCancel}
@@ -865,6 +880,7 @@ export function CanvasConversationSurface({
           onAnswerQuestion={handleAnswerQuestion}
           onAnswerAskQuestion={handleAnswerAskQuestion}
           onAnswerPlanApproval={handleAnswerPlanApproval}
+          onRespondTaskSplit={handleRespondTaskSplit}
           modes={connectionModes}
           configOptions={connectionConfigOptions}
           modeLoading={modeLoading}

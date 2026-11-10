@@ -171,6 +171,40 @@ func Delete(root, id string) error {
 	}
 	return fmt.Errorf("供应商不存在")
 }
+// Find resolves one provider by id, including ccswitch: entries. An unknown
+// or keyless ccswitch provider is an error so a pinned instance never silently
+// falls back to another vendor's credentials.
+func Find(root, id string) (Provider, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	d, e := read(root)
+	if e != nil {
+		return Provider{}, e
+	}
+	if strings.HasPrefix(id, "ccswitch:") {
+		cc, err := CCSwitch()
+		if err != nil {
+			return Provider{}, fmt.Errorf("读取 CC Switch 失败: %w", err)
+		}
+		for _, p := range cc {
+			if p.ID == id {
+				if !p.HasKey && !p.CCCurrent {
+					return Provider{}, fmt.Errorf("该 CC Switch 供应商没有 API 密钥，请先在 CC Switch 中切换到它")
+				}
+				return p, nil
+			}
+		}
+		return Provider{}, fmt.Errorf("供应商不存在")
+	}
+	for _, p := range d.Providers {
+		if p.ID == id {
+			p.HasKey = p.Key != ""
+			return p, nil
+		}
+	}
+	return Provider{}, fmt.Errorf("供应商不存在")
+}
+
 func Active(root, agent string) (Provider, bool, error) {
 	mu.Lock()
 	defer mu.Unlock()

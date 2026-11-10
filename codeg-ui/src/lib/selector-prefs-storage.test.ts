@@ -188,4 +188,50 @@ describe("selector-prefs-storage", () => {
       configValues: { model: "claude-sonnet-5" },
     })
   })
+
+  it("starts a harness instance from the base tool's picks, minus the model", () => {
+    seed({
+      claude_code: {
+        modeId: "bypassPermissions",
+        configValues: { model: "claude-opus-5", thinking: "high" },
+      },
+    })
+    // The mode and non-model picks carry over to every instance (same binary,
+    // same selectors) — but NOT the base tool's saved model: that would
+    // silently outrank the instance's own pinned default model on connect.
+    expect(getSavedPrefsForConnect("inst_claude2")).toEqual({
+      modeId: "bypassPermissions",
+      configValues: { thinking: "high" },
+    })
+    expect(getSavedPrefsForConnect("inst_codex11")).toEqual({
+      modeId: null,
+      configValues: null,
+    })
+  })
+
+  it("keeps an instance's own picks once it has any", () => {
+    seed({
+      claude_code: { modeId: "bypassPermissions" },
+      inst_claude2: { configValues: { model: "glm-5.2" } },
+    })
+    // Own entry wins wholesale — the fallback is only for a never-configured
+    // instance, and a partial merge would resurrect the base's mode behind
+    // the user's back.
+    expect(getSavedPrefsForConnect("inst_claude2")).toEqual({
+      modeId: null,
+      configValues: { model: "glm-5.2" },
+    })
+
+    // The first pick on the instance re-projects the inherited (model-free)
+    // fallback into its own entry, so the base's model still doesn't leak in
+    // when the user only ever chose a mode for the instance.
+    saveModePreference("inst_claude3", {
+      current_mode_id: "default",
+      available_modes: [],
+    })
+    expect(getSavedPrefsForConnect("inst_claude3")).toEqual({
+      modeId: "default",
+      configValues: null,
+    })
+  })
 })

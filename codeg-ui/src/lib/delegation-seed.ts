@@ -38,6 +38,9 @@ export function buildDelegationSeedEnvelopes(
       task_id: d.task_id ?? null,
       assistant_id: d.assistant_id ?? null,
       assistant_name: d.assistant_name ?? null,
+      // Carried so the split board keeps tracking a child after a reload;
+      // harmless on plain delegations (the field is optional).
+      split_id: d.split_id ?? null,
     })
   }
   return out

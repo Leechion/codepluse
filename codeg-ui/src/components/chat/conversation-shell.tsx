@@ -23,6 +23,7 @@ import { RemoteControlStrip } from "@/components/chat/remote-control-strip"
 import type {
   PendingPermission,
   PendingQuestion,
+  PendingTaskSplit,
   ClaudeApiRetryState,
 } from "@/contexts/acp-connections-context"
 import type { QueuedMessage } from "@/hooks/use-message-queue"
@@ -35,6 +36,7 @@ import { PermissionDialog } from "@/components/chat/permission-dialog"
 import { QuestionDialog } from "@/components/chat/question-dialog"
 import { AskQuestionCard } from "@/components/chat/ask-question-card"
 import { PlanApprovalCard } from "@/components/chat/plan-approval-card"
+import { TaskSplitCard } from "@/components/chat/task-split-card"
 import { MarkdownImageProvider } from "@/components/ai-elements/markdown-local-image"
 
 interface ConversationShellProps {
@@ -72,6 +74,9 @@ interface ConversationShellProps {
   pendingAskQuestion: PendingQuestionState | null
   /** Awaiting-decision Grok `exit_plan_mode` approval. */
   pendingPlanApproval: PendingPlanApprovalState | null
+  /** Main-bot task-split proposal awaiting the user's decision (the card IS
+   *  the dispatch point; the proposal tool already returned). */
+  pendingSplit?: PendingTaskSplit | null
   onFocus: () => void
   onSend: (draft: PromptDraft, modeId?: string | null) => void
   onCancel: () => void
@@ -84,6 +89,20 @@ interface ConversationShellProps {
   onAnswerPlanApproval: (
     approvalId: string,
     answer: PlanApprovalAnswer
+  ) => void | Promise<void>
+  /** Answers the task-split card: `approve` dispatches the edited plan,
+   *  `reject` retires it. Optional — surfaces without a handler of their own
+   *  render no card at all (they should route through ConnectionBlockingPrompts
+   *  instead). */
+  onRespondTaskSplit?: (
+    splitId: string,
+    action: "approve" | "reject",
+    tasks?: Array<{
+      title: string
+      prompt: string
+      agent_type: string
+      model: string
+    }>
   ) => void | Promise<void>
   children: ReactNode
   modes?: SessionModeInfo[]
@@ -184,6 +203,7 @@ export function ConversationShell({
   pendingQuestion,
   pendingAskQuestion,
   pendingPlanApproval,
+  pendingSplit,
   onFocus,
   onSend,
   onCancel,
@@ -191,6 +211,7 @@ export function ConversationShell({
   onAnswerQuestion,
   onAnswerAskQuestion,
   onAnswerPlanApproval,
+  onRespondTaskSplit,
   children,
   modes,
   configOptions,
@@ -304,6 +325,19 @@ export function ConversationShell({
                 onAnswer={onAnswerPlanApproval}
               />
             </MarkdownImageProvider>
+          </div>
+        )}
+        {pendingSplit && onRespondTaskSplit && (
+          <div className="mx-auto w-full chat-content-w px-4">
+            {/* key on split_id so the card remounts (fresh edit state, fresh
+                in-flight/error flags) if the slot is reused for a new split.
+                Needs a handler: the card's confirm/reject must go somewhere. */}
+            <TaskSplitCard
+              key={pendingSplit.split_id}
+              split={pendingSplit}
+              agentType={agentType}
+              onRespond={onRespondTaskSplit}
+            />
           </div>
         )}
 

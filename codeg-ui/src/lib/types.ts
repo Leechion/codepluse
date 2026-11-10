@@ -42,11 +42,41 @@ export function isCustomAgentType(agentType: AgentType): boolean {
   return agentType.startsWith(CUSTOM_AGENT_PREFIX)
 }
 
+/** Prefix marking a user-created harness instance ("claude 2号") of a
+ *  built-in tool. Mirrors the Go backend's `inst_<tool><N>` wire names. */
+export const INSTANCE_AGENT_PREFIX = "inst_"
+
+/** True for a harness instance wire (inst_claude2 / inst_codex5). */
+export function isInstanceAgentType(agentType: AgentType): boolean {
+  return agentType.startsWith(INSTANCE_AGENT_PREFIX)
+}
+
 /** The registry id behind `custom:<id>`, or `null` for a built-in. */
 export function customAgentId(agentType: AgentType): string | null {
   return isCustomAgentType(agentType)
     ? agentType.slice(CUSTOM_AGENT_PREFIX.length)
     : null
+}
+
+/**
+ * The built-in an instance wire is a copy of, using the same tool→wire table
+ * the Go backend's `wireAgent()` maps for built-ins. `inst_claude2` →
+ * `claude_code`, `inst_codex11` → `codex`. Only claude/codex instances can be
+ * created (the backend rejects pinning a provider for anything else), so the
+ * other arms are future-proofing; an unrecognized suffix yields `null` and the
+ * caller treats the instance as an unbranded agent.
+ */
+export function instanceBaseAgent(
+  agentType: AgentType
+): BuiltinAgentType | null {
+  if (!isInstanceAgentType(agentType)) return null
+  const tool = agentType
+    .slice(INSTANCE_AGENT_PREFIX.length)
+    .replace(/[0-9]+$/, "")
+  if (tool === "claude") return "claude_code"
+  if (tool === "codex") return "codex"
+  if (tool === "dsh") return "deepseek"
+  return null
 }
 
 export type AppErrorCode =
@@ -3033,6 +3063,28 @@ export type AcpEvent =
     }
   | {
       /**
+       * The main bot proposed a task split and the interactive card is up
+       * (Go `task_split_request`). The proposal tool call already returned —
+       * unlike a permission request this does NOT block the agent's turn;
+       * the card alone decides, and confirming it dispatches the children.
+       */
+      type: "task_split_request"
+      split: PendingTaskSplitState
+    }
+  | {
+      /**
+       * A split card left the pending state: `approve` (children launched,
+       * `task_ids` lists them), `reject` (user declined), or `expired` (the
+       * parent session went away). Every client drops its copy of the card
+       * on this event, including one that answered it.
+       */
+      type: "task_split_resolved"
+      split_id: string
+      action: "approve" | "reject" | "expired"
+      task_ids?: string[]
+    }
+  | {
+      /**
        * What an answer decided about the card's tool call. Follows the
        * `permission_resolved` that retired the card, only for answers.
        */
@@ -3308,6 +3360,8 @@ export type AcpEvent =
        *  Absent for a plain agent delegation. */
       assistant_id?: number | null
       assistant_name?: string | null
+      /** Split card this child came from; absent on a plain delegation. */
+      split_id?: string | null
     }
   /**
    * The child sub-session has finished (or errored / timed out / been
@@ -3328,6 +3382,8 @@ export type AcpEvent =
       /** Mirrors `delegation_started`'s assistant identity. */
       assistant_id?: number | null
       assistant_name?: string | null
+      /** Split card this child came from; absent on a plain delegation. */
+      split_id?: string | null
     }
   /**
    * The user's submitted prompt, broadcast on the connection stream so OTHER
@@ -3547,6 +3603,39 @@ export interface ActiveDelegationState {
   /** The assistant the child runs as, mirrored for the same reason. */
   assistant_id?: number | null
   assistant_name?: string | null
+  /** Split card the child came from; absent on a plain delegate_to_agent. */
+  split_id?: string | null
+}
+
+/**
+ * One subtask inside a pending task-split card. The server auto-fills
+ * `agent_type`/`model` for anything the main bot left blank, so a card row
+ * always shows a concrete, runnable choice; `auto` marks the guesses the
+ * user may want to double-check.
+ */
+export interface TaskSplitTaskState {
+  index: number
+  title: string
+  prompt: string
+  agent_type: string
+  model: string
+  auto?: boolean
+}
+
+/**
+ * A task-split proposal from the main bot waiting for the user's decision
+ * (mirror of Go `splitWire`). The card is the decision point: confirming it
+ * fans the tasks out as parallel delegations; rejecting retires it. The same
+ * object appears in `task_split_request` events and in the snapshot's
+ * `pending_split` slot so a reload re-raises the exact same card.
+ */
+export interface PendingTaskSplitState {
+  split_id: string
+  parent_connection_id: string
+  root_connection_id: string
+  parent_tool_use_id?: string
+  tasks: TaskSplitTaskState[]
+  created_at: string
 }
 
 /** Lifecycle of a live-feedback note (mirror of Rust `FeedbackStatus`). */
@@ -3785,6 +3874,9 @@ export interface LiveSessionSnapshot {
   /** Live sub-agent delegations recoverable from the snapshot. May be absent
    *  on older server payloads (then treated as `[]`). */
   active_delegations?: ActiveDelegationState[]
+  /** Task-split card awaiting the user, recoverable on attach (Go
+   *  `pending_split`). Absent / null when nothing is pending. */
+  pending_split?: PendingTaskSplitState | null
   /** Live-feedback notes for the current turn. Absent on older payloads /
    *  when empty (then treated as `[]`). */
   feedback?: FeedbackItem[]
@@ -3914,6 +4006,15 @@ export interface AcpAgentInfo {
   sort_order: number
   installed_version: string | null
   env: Record<string, string>
+  /** True for a user-created harness instance (`inst_<tool><N>` wire) rather
+   *  than a built-in. Instances pin their own provider / default model. */
+  instance?: boolean
+  /** "claude" | "codex" for instances — which built-in they were cloned from. */
+  real_tool?: string
+  /** Pinned provider id for an instance; "" follows the global selection. */
+  provider_id?: string
+  /** Model an instance starts every session on; "" leaves the choice per-chat. */
+  default_model?: string
   /**
    * The RESOLVED `CODEG_ACP_HOST_TOOLS` verdict: whether the next launch hands
    * the `fs/*` + `terminal/*` channels — and, with them, codeg-mcp's delegation

@@ -62,10 +62,13 @@ import { WebProviderStubs } from "@/zcode/goTransport/webProviderStubs";
 import {
   acpConnect,
   acpFindConnectionForConversation,
+  describeAgentOptions,
   listConversations,
 } from "@/lib/api";
+import { getCachedSelectors } from "@/contexts/acp-connections-context";
 import type { AgentType, ConversationSummary } from "@/lib/types";
 import { getTransport } from "@/lib/transport";
+import { ZCodeModelPicker, type ZCodeModelOption } from "./ZCodeModelPicker";
 
 type PendingPermissionInteraction = NonNullable<
   ReturnType<typeof useConversationProjection>["snapshot"]
@@ -114,9 +117,46 @@ function formatConversationTime(value: string): string {
   });
 }
 
-function ZCodeChatPageInner() {
+/** 按执行端缓存模型目录，避免 describeAgentOptions 的 probe 连接重复建立。 */
+const modelOptionsCache = new Map<
+  string,
+  { options: ZCodeModelOption[]; current: string }
+>();
+
+/** 从 Go 的 config_options（session_config_options 事件 / describeAgentOptions）里取 model 项。 */
+function parseModelOptions(
+  raw: unknown,
+): { options: ZCodeModelOption[]; current: string } | null {
+  if (!Array.isArray(raw)) return null;
+  const entry = raw.find(
+    (item) =>
+      item != null &&
+      typeof item === "object" &&
+      (item as Record<string, unknown>).id === "model",
+  ) as Record<string, unknown> | undefined;
+  const kind = entry?.kind as Record<string, unknown> | undefined;
+  if (!kind || kind.type !== "select" || !Array.isArray(kind.options)) return null;
+  const options: ZCodeModelOption[] = [];
+  for (const item of kind.options) {
+    const option = item as Record<string, unknown> | null;
+    const value = String(option?.value ?? "");
+    if (!value) continue;
+    options.push({
+      value,
+      name: String(option?.name ?? value),
+      ...(option?.description
+        ? { description: String(option.description) }
+        : {}),
+    });
+  }
+  return { options, current: String(kind.current_value ?? "") };
+}
+
+function ZCodeChatPageInner({ sidebarClassName }: { sidebarClassName: string }) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [listError, setListError] = useState<string | null>(null);
+  /** 发送被后端拒绝时的可操作提示（例如连接卡在上一轮 turn）。 */
+  const [sendError, setSendError] = useState<string | null>(null);
   /** 数字 = Go conversation id；draft 会话 = 适配器分配的字符串 id（createSession）。 */
   const [selectedSession, setSelectedSession] = useState<string | number | null>(null);
   const [creating, setCreating] = useState(false);
@@ -143,6 +183,11 @@ function ZCodeChatPageInner() {
       .then((rows) => {
         setConversations(rows);
         setListError(null);
+        // 首次进入工作区直接落到最近一个会话，让「对话框界面」的时间线与
+        // composer 可见；已选中（含 draft）时保持用户的选择不被刷新覆盖。
+        setSelectedSession((current) =>
+          current != null ? current : rows.length > 0 ? Number(rows[0].id) : null,
+        );
       })
       .catch((error) => {
         setListError(error instanceof Error ? error.message : String(error));
@@ -416,7 +461,14 @@ function ZCodeChatPageInner() {
         sessionId,
       });
       const ack = await dispatchCommand(envelope);
-      return ack.status === "accepted" ? "sent" : "blocked";
+      if (ack.status !== "accepted") {
+        setSendError(
+          (ack as { reason?: string }).reason ?? "发送失败，请稍后重试",
+        );
+        return "blocked";
+      }
+      setSendError(null);
+      return "sent";
     },
     [dispatchCommand, sessionId, snapshot],
   );
@@ -445,6 +497,101 @@ function ZCodeChatPageInner() {
     },
     [dispatchCommand, sessionId, snapshot],
   );
+
+  // ── 模型选择（复刻页补齐）─────────────────────────────────────────────
+  // vendor composer 的 ModelConfigSelect 依赖桌面 Host 的 ModelSelectionService，
+  // web/Go 部署里该服务是断连桩 → modelSelectGroups 为空 → 模型按钮被隐藏。
+  // 这里直接消费 Go 的 ACP config_options（session_config_options 事件 +
+  // describeAgentOptions 懒加载），选择仍走已有 switchModelConfig 命令。
+  const agentTypeForModels = String(selectedConversation?.agent_type ?? "codex");
+  const workingDirForModels = selectedConversation?.folder_path ?? null;
+  const [modelOptions, setModelOptions] = useState<ZCodeModelOption[]>(
+    () => modelOptionsCache.get(agentTypeForModels)?.options ?? [],
+  );
+  const [currentModel, setCurrentModel] = useState<string>(
+    () => modelOptionsCache.get(agentTypeForModels)?.current ?? "",
+  );
+  const [modelLoading, setModelLoading] = useState(false);
+
+  useEffect(() => {
+    const cached =
+      modelOptionsCache.get(agentTypeForModels) ??
+      parseModelOptions(getCachedSelectors(agentTypeForModels)?.configOptions);
+    if (cached) {
+      modelOptionsCache.set(agentTypeForModels, cached);
+      setModelOptions(cached.options);
+      setCurrentModel(cached.current);
+    }
+    let cancelled = false;
+    let off: (() => void) | null = null;
+    void getTransport()
+      .subscribe("acp://event", (payload: unknown) => {
+        if (cancelled) return;
+        const envelope = (payload ?? {}) as Record<string, unknown>;
+        const event = (envelope.event ?? envelope.data ?? envelope) as Record<string, unknown>;
+        if (event.type !== "session_config_options") return;
+        // acp://event 是全局 firehose：另一个执行端的连接（codex 与 claude
+        // 同时在跑）推来的目录若不过滤，会把当前 agent 的模型列表覆盖掉。
+        // 旧事件没有 agent_type 时保持放行（渐进兼容）。
+        if (typeof event.agent_type === "string" && event.agent_type !== agentTypeForModels) return;
+        const parsed = parseModelOptions(event.config_options);
+        if (!parsed) return;
+        modelOptionsCache.set(agentTypeForModels, parsed);
+        setModelOptions(parsed.options);
+        setCurrentModel(parsed.current);
+      })
+      .then((unsubscribe) => {
+        if (cancelled) unsubscribe();
+        else off = unsubscribe;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }, [agentTypeForModels]);
+
+  const requestModelOptions = useCallback(() => {
+    const cached = modelOptionsCache.get(agentTypeForModels);
+    if (cached) {
+      setModelOptions(cached.options);
+      setCurrentModel(cached.current);
+      return;
+    }
+    if (modelLoading) return;
+    setModelLoading(true);
+    void describeAgentOptions(agentTypeForModels as AgentType, workingDirForModels)
+      .then((result) => {
+        const parsed = parseModelOptions(result?.config_options);
+        if (!parsed) return;
+        modelOptionsCache.set(agentTypeForModels, parsed);
+        setModelOptions(parsed.options);
+        setCurrentModel(parsed.current);
+      })
+      .catch(() => {})
+      .finally(() => setModelLoading(false));
+  }, [agentTypeForModels, workingDirForModels, modelLoading]);
+
+  // 事件里通常已带 config_options；若迟迟没有（连接早已建立、不再重发），
+  // 后台补一次 describeAgentOptions，避免按钮一直停在「选择模型」。
+  useEffect(() => {
+    if (modelOptionsCache.has(agentTypeForModels)) return;
+    const timer = window.setTimeout(() => {
+      if (modelOptionsCache.has(agentTypeForModels)) return;
+      setModelLoading(true);
+      void describeAgentOptions(agentTypeForModels as AgentType, workingDirForModels)
+        .then((result) => {
+          const parsed = parseModelOptions(result?.config_options);
+          if (!parsed) return;
+          modelOptionsCache.set(agentTypeForModels, parsed);
+          setModelOptions(parsed.options);
+          setCurrentModel(parsed.current);
+        })
+        .catch(() => {})
+        .finally(() => setModelLoading(false));
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [agentTypeForModels, workingDirForModels]);
 
   const handleSelectThought = useCallback(() => {
     // Go 后端暂无 thought 级别目录；保留空实现（vendor 工具栏可降级）。
@@ -561,7 +708,7 @@ function ZCodeChatPageInner() {
     // 用 h-dvh 会按整个视口（含状态栏那 32px）撑高页面，把 composer 连同工具栏
     // 推到父容器之外，与状态栏重叠并被视口裁掉，只剩一条灰色输入行。
     <div className="flex h-full min-h-0 w-full overflow-hidden bg-background text-foreground">
-      <aside className="flex w-72 shrink-0 flex-col border-r border-border">
+      <aside className={`flex shrink-0 flex-col border-r border-border ${sidebarClassName}`}>
         <div className="flex items-center justify-between px-4 py-3 text-sm font-semibold">
           <span>会话</span>
           <div className="flex items-center gap-1">
@@ -672,6 +819,18 @@ function ZCodeChatPageInner() {
               />
             </div>
             <div className="shrink-0 border-t border-border">
+              {sendError ? (
+                <div className="zw-send-error" role="alert">
+                  <span>{sendError}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSendError(null)}
+                    aria-label="关闭发送提示"
+                  >
+                    ×
+                  </button>
+                </div>
+              ) : null}
               {queueState != null && sessionId != null ? (
                 <ConversationQueuePanel
                   queue={queueState}
@@ -720,6 +879,22 @@ function ZCodeChatPageInner() {
                 onSelectThought={handleSelectThought}
                 onSwitchMode={handleSwitchMode}
               />
+              {/* 模型选择固定在对话框右下角（composer 之后的最后一行，右对齐） */}
+              <div className="zw-model-bar">
+                <span className="zw-model-bar-agent">{agentTypeForModels}</span>
+                <span className="zw-model-bar-label">模型</span>
+                <ZCodeModelPicker
+                  models={modelOptions}
+                  current={currentModel}
+                  loading={modelLoading}
+                  disabled={sessionId == null}
+                  onRequestOptions={requestModelOptions}
+                  onSelect={(value) => {
+                    setCurrentModel(value);
+                    handleSelectModel("codepluse", value);
+                  }}
+                />
+              </div>
             </div>
             {pendingPermission != null ? (
               <div className="absolute inset-x-0 top-10 z-50 mx-auto max-w-xl px-4">
@@ -744,13 +919,20 @@ function ZCodeChatPageInner() {
   );
 }
 
-export default function ZCodeChatPage({ children }: { children?: ReactNode }) {
+export default function ZCodeChatPage({
+  children,
+  sidebarClassName = "w-72",
+}: {
+  children?: ReactNode;
+  /** 复刻页把会话侧栏收窄给工作处理面板让位；独立使用时保持 ZCode 的 288px。 */
+  sidebarClassName?: string;
+}) {
   // ZCodeIntlProvider 为 vendor 组件提供 intl 文案上下文；
   // WebProviderStubs 补齐桌面宿主才有的 Platform/Services 上下文（web 安全桩）。
   return (
     <ZCodeIntlProvider initialLocale="zh-CN">
       <WebProviderStubs>
-        <ZCodeChatPageInner />
+        <ZCodeChatPageInner sidebarClassName={sidebarClassName} />
         {children}
       </WebProviderStubs>
     </ZCodeIntlProvider>

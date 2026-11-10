@@ -79,6 +79,7 @@ export function useDelegationTaskLive(
   const pendingPermission = conn?.pendingPermission ?? null
   const pendingAskQuestion = conn?.pendingAskQuestion ?? null
   const pendingPlanApproval = conn?.pendingPlanApproval ?? null
+  const pendingSplit = conn?.pendingSplit ?? null
   const prompts = useMemo(
     () =>
       running
@@ -86,9 +87,16 @@ export function useDelegationTaskLive(
             pendingPermission,
             pendingAskQuestion,
             pendingPlanApproval,
+            pendingSplit,
           })
         : null,
-    [running, pendingPermission, pendingAskQuestion, pendingPlanApproval]
+    [
+      running,
+      pendingPermission,
+      pendingAskQuestion,
+      pendingPlanApproval,
+      pendingSplit,
+    ]
   )
   return {
     childConnectionId,

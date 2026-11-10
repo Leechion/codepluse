@@ -33,6 +33,7 @@ import {
   acpGoalControl,
   acpCancel,
   acpRespondPermission,
+  acpRespondTaskSplit,
   acpAnswerQuestion,
   acpAnswerPlanApproval,
   acpDisconnect,
@@ -148,6 +149,7 @@ import {
   saveModePreference,
   saveConfigPreference,
 } from "@/lib/selector-prefs-storage"
+import { withMainBotModel } from "@/lib/main-bot"
 import { rememberAdvertisedCommands } from "@/lib/advertised-commands-store"
 import { rememberModelLabels } from "@/lib/model-label-store"
 import { useActiveFolder } from "@/contexts/active-folder-context"
@@ -216,6 +218,29 @@ export interface PendingUserMessage {
 export interface PendingQuestion {
   tool_call_id: string
   question: string
+}
+
+/**
+ * A task-split proposal from the main bot awaiting the user's decision (Go
+ * `task_split_request` / snapshot `pending_split`). Unlike a permission
+ * request this does NOT park the agent's turn — the proposal tool returned
+ * and the turn ended; the card itself is what dispatches the children when
+ * confirmed. `respondTaskSplit` sends the user's edited task list.
+ */
+export interface PendingTaskSplit {
+  split_id: string
+  parent_connection_id?: string
+  root_connection_id?: string
+  parent_tool_use_id?: string
+  tasks: Array<{
+    index: number
+    title: string
+    prompt: string
+    agent_type: string
+    model: string
+    auto?: boolean
+  }>
+  created_at?: string
 }
 
 export interface ClaudeApiRetryState {
@@ -349,6 +374,14 @@ export interface ConnectionState {
   remoteControl: RemoteControlInfo | null
   liveMessage: LiveMessage | null
   pendingPermission: PendingPermission | null
+  /**
+   * Task-split card awaiting the user (see `PendingTaskSplit`). Set from a
+   * `task_split_request` event or a snapshot's `pending_split`; cleared when
+   * the card is answered (`task_split_resolved`) or its session dies
+   * (action `expired`). Not turn-scoped like a permission: an unanswered
+   * card survives the turn that raised it.
+   */
+  pendingSplit: PendingTaskSplit | null
   /** In-flight user prompt for the current turn — set from a `user_message`
    *  event or a snapshot's `pending_user_message`. A VIEWER mirrors this into
    *  the runtime as a synthesized user turn; `null` outside an active turn. */
@@ -714,6 +747,19 @@ type Action =
        * Omit for unconditional clears (e.g. cancel paths).
        */
       requestId?: string
+    }
+  | {
+      type: "SET_TASK_SPLIT"
+      contextKey: string
+      split: PendingTaskSplit
+    }
+  | {
+      type: "CLEAR_TASK_SPLIT"
+      contextKey: string
+      /** Only clear when the pending card carries this split id (same guard
+       *  shape as PERMISSION_CLEARED's requestId): a late resolved frame
+       *  must not retire a proposal raised after it. */
+      splitId?: string
     }
   | {
       // What an answered permission request decided about its tool call
@@ -1940,6 +1986,7 @@ function connectionsReducer(
         pendingPermission: null,
         pendingUserMessage: null,
         steeredMessageIds: EMPTY_STEERED_MESSAGE_IDS,
+        pendingSplit: null,
         pendingQuestion: null,
         pendingAskQuestion: null,
         pendingPlanApproval: null,
@@ -2006,6 +2053,7 @@ function connectionsReducer(
         pendingPermission: null,
         pendingUserMessage: null,
         steeredMessageIds: EMPTY_STEERED_MESSAGE_IDS,
+        pendingSplit: null,
         pendingQuestion: null,
         pendingAskQuestion: null,
         pendingPlanApproval: null,
@@ -2206,6 +2254,7 @@ function connectionsReducer(
         // beside it until the turn ends. Turn-scoped, and visible.
         steeredMessageIds: EMPTY_STEERED_MESSAGE_IDS,
         pendingPermission: hydratedPendingPermission,
+        pendingSplit: action.patch.pendingSplit ?? null,
         pendingAskQuestion: action.patch.pendingAskQuestion,
         pendingPlanApproval: action.patch.pendingPlanApproval,
         pendingUserMessage: action.patch.pendingUserMessage,
@@ -2765,6 +2814,33 @@ function connectionsReducer(
         ...conn,
         pendingPermission: null,
       })
+      return next
+    }
+
+    case "SET_TASK_SPLIT": {
+      // Replace whatever card is showing: the server keeps one pending split
+      // per connection, and a re-proposal after an edit is the SAME decision
+      // re-raised, not a queue. Unlike a permission this survives the turn
+      // that raised it, so nothing here is turn-scoped.
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      const next = new Map(state)
+      next.set(action.contextKey, { ...conn, pendingSplit: action.split })
+      return next
+    }
+
+    case "CLEAR_TASK_SPLIT": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      if (
+        action.splitId !== undefined &&
+        conn.pendingSplit?.split_id !== action.splitId
+      ) {
+        return state
+      }
+      if (!conn.pendingSplit) return state
+      const next = new Map(state)
+      next.set(action.contextKey, { ...conn, pendingSplit: null })
       return next
     }
 
@@ -3490,6 +3566,22 @@ export interface AcpActionsValue {
     contextKey: string,
     requestId: string,
     optionId: string
+  ): Promise<void>
+  /**
+   * Answer a task-split card. `approve` dispatches the given (edited) task
+   * list as parallel delegations; `reject` retires the proposal. Throws on
+   * a lost connection so the card can show a retryable error.
+   */
+  respondTaskSplit(
+    contextKey: string,
+    splitId: string,
+    action: "approve" | "reject",
+    tasks?: Array<{
+      title: string
+      prompt: string
+      agent_type: string
+      model: string
+    }>
   ): Promise<void>
   answerQuestion(
     contextKey: string,
@@ -5536,6 +5628,39 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             }
           }
           break
+        case "task_split_request": {
+          // A task-split proposal from the main bot. Unlike a permission
+          // request this did NOT park the turn — the tool returned and the
+          // model handed off — so the card is the only thing deciding. Do
+          // not flush queues around it (nothing is waiting on it), and do
+          // not notify per-task: the card names each task.
+          dispatch({ type: "SET_TASK_SPLIT", contextKey, split: e.split })
+          if (!quiet) {
+            const nc = storeRef.current.connections.get(contextKey)
+            if (nc) {
+              const agentLabel = getAgentLabel(nc.agentType)
+              void notifyDesktop(
+                "permission_request",
+                sessionNotification(contextKey, {
+                  body: `${agentLabel}: ${tChat("taskSplitCard.notifyBody", {
+                    count: e.split.tasks?.length ?? 0,
+                  })}`,
+                })
+              )
+              void requestWindowAttention("permission_request")
+            }
+          }
+          break
+        }
+        case "task_split_resolved":
+          // The card retires everywhere: on the window that answered it, on
+          // a second window watching, and on expiry (parent session gone).
+          dispatch({
+            type: "CLEAR_TASK_SPLIT",
+            contextKey,
+            splitId: e.split_id,
+          })
+          break
         case "session_started":
           flushStreamingQueue(contextKey)
           dispatch({
@@ -7464,7 +7589,14 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         // regressed when the snapshot path replaced the event path on tab
         // re-open (the snapshot frame doesn't carry a `session_modes` event,
         // so the apply-on-event hook never fired).
-        const savedPrefs = getSavedPrefsForConnect(agentType)
+        // A main-bot model rides along only when this harness IS the main bot
+        // and the user has no saved model pick for it — an explicit pick (or an
+        // instance's own pinned default, which the backend applies when this
+        // value is empty) always wins.
+        const savedPrefs = withMainBotModel(
+          agentType,
+          getSavedPrefsForConnect(agentType)
+        )
         const connectionId = await acpConnect(
           agentType,
           workingDir,
@@ -8138,6 +8270,44 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     [dispatch]
   )
 
+  const respondTaskSplit = useCallback(
+    async (
+      contextKey: string,
+      splitId: string,
+      action: "approve" | "reject",
+      tasks?: Array<{
+        title: string
+        prompt: string
+        agent_type: string
+        model: string
+      }>
+    ) => {
+      const conn = storeRef.current.connections.get(contextKey)
+      if (!conn) {
+        // Throw, don't silently return: TaskSplitCard awaits this and holds a
+        // disabled in-flight state (spinner) until it resolves; a silent
+        // resolve would leave the card stuck. The throw routes to the card's
+        // retryable inline error.
+        throw new Error(
+          `[AcpConnections] respondTaskSplit: no connection for ${contextKey}`
+        )
+      }
+      try {
+        lastActivityRef.current.set(contextKey, Date.now())
+        await acpRespondTaskSplit(conn.connectionId, splitId, action, tasks)
+        // Optimistically clear this window's copy; the backend's
+        // task_split_resolved broadcast (idempotent on the split id) is what
+        // retires the card on every OTHER client, including this one after a
+        // reload.
+        dispatch({ type: "CLEAR_TASK_SPLIT", contextKey, splitId })
+      } catch (e) {
+        console.error("[AcpConnections] respondTaskSplit failed:", e)
+        throw e
+      }
+    },
+    [dispatch]
+  )
+
   const answerQuestion = useCallback(
     async (contextKey: string, questionId: string, answer: QuestionAnswer) => {
       const conn = storeRef.current.connections.get(contextKey)
@@ -8346,6 +8516,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       cancel,
       goalControl,
       respondPermission,
+      respondTaskSplit,
       answerQuestion,
       answerPlanApproval,
       setActiveKey,
@@ -8374,6 +8545,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       cancel,
       goalControl,
       respondPermission,
+      respondTaskSplit,
       answerQuestion,
       answerPlanApproval,
       setActiveKey,

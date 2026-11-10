@@ -38,6 +38,20 @@ import {
 } from "@/components/ui/tooltip"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useImeGuard } from "@/hooks/use-ime-guard"
+
+/** 把后端拒绝的具体原因带进「加载目录失败」：Web 部署的目录浏览被限制在
+ *  服务根目录内，越界时后端返回「工作目录必须位于 … 之内」，只显示通用
+ *  文案会让人以为浏览器坏了。 */
+function withLoadErrorDetail(base: string, error: unknown): string {
+  const message =
+    error && typeof error === "object" && typeof (error as { message?: unknown }).message === "string"
+      ? (error as { message: string }).message.trim()
+      : error instanceof Error
+        ? error.message.trim()
+        : ""
+  if (!message || message === "undefined" || message === "null") return base
+  return `${base}：${message}`
+}
 import { cn } from "@/lib/utils"
 import {
   createDirectory,
@@ -162,6 +176,9 @@ export const DirectoryBrowser = forwardRef<
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
+  /** 服务允许浏览的根目录（`get_home_directory`）。Web 部署把它钉在服务根上：
+   *  到了这里再往上就是越界，按钮要直接禁用，而不是点了什么都不发生。 */
+  const [homePath, setHomePath] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [newFolder, setNewFolder] = useState<NewFolderDraft | null>(null)
   const newFolderInputRef = useRef<HTMLInputElement>(null)
@@ -235,8 +252,10 @@ export const DirectoryBrowser = forwardRef<
           setEntries((prev) => new Map(prev).set(path, result))
         }
         return result
-      } catch {
-        if (gen === sessionGen.current) setError(t("errorLoadingDir"))
+      } catch (error) {
+        if (gen === sessionGen.current) {
+          setError(withLoadErrorDetail(t("errorLoadingDir"), error))
+        }
         return null
       } finally {
         if (gen === sessionGen.current) {
@@ -301,10 +320,12 @@ export const DirectoryBrowser = forwardRef<
 
     const init = async () => {
       try {
-        const startPath = initialPath || (await getHomeDirectory())
+        const home = await getHomeDirectory()
         // Drop these writes if a hide/show superseded this init, or the user
         // already navigated somewhere else while the start dir was loading.
         if (gen !== sessionGen.current || seq !== navSeq.current) return
+        setHomePath(home)
+        const startPath = initialPath || home
         setRootPath(startPath)
         onValueChange(startPath)
         setLoading(new Set([startPath]))
@@ -313,9 +334,9 @@ export const DirectoryBrowser = forwardRef<
         if (gen !== sessionGen.current || seq !== navSeq.current) return
         setEntries(new Map([[startPath, result]]))
         setLoading(new Set())
-      } catch {
+      } catch (error) {
         if (gen !== sessionGen.current || seq !== navSeq.current) return
-        setError(t("errorLoadingDir"))
+        setError(withLoadErrorDetail(t("errorLoadingDir"), error))
         setLoading(new Set())
       }
     }
@@ -383,9 +404,9 @@ export const DirectoryBrowser = forwardRef<
       const home = await getHomeDirectory()
       if (gen !== sessionGen.current) return
       navigateTo(home)
-    } catch {
+    } catch (error) {
       if (gen !== sessionGen.current) return
-      setError(t("errorLoadingDir"))
+      setError(withLoadErrorDetail(t("errorLoadingDir"), error))
     }
   }, [navigateTo, t])
 
@@ -545,6 +566,11 @@ export const DirectoryBrowser = forwardRef<
     })
   }
 
+  // 后端放开浏览范围后（HARNESS_HUB_ALLOW_ANY_PATH=1），只有真的到了盘符根
+  // 才禁用「返回上级目录」；服务根本身是可以继续往上的。
+  const atFileSystemRoot =
+    !rootPath || /^[A-Za-z]:[\\/]?$/.test(rootPath) || rootPath === "/"
+
   return (
     <div className="space-y-3">
       {/* The app mounts no global tooltip provider — each surface brings its
@@ -556,13 +582,14 @@ export const DirectoryBrowser = forwardRef<
               icon={Home}
               label={t("goHome")}
               onClick={handleGoHome}
-              disabled={creatingFolder}
+              disabled={creatingFolder || !homePath || rootPath === homePath}
             />
             <NavButton
               icon={UndoDot}
               label={t("navigateUp")}
               onClick={handleNavigateUp}
-              disabled={creatingFolder}
+              // 只有到盘符根才没有“上一级”；服务根可以继续往上选外部文件夹。
+              disabled={creatingFolder || atFileSystemRoot}
             />
             {allowCreateFolder ? (
               <NavButton
@@ -589,6 +616,16 @@ export const DirectoryBrowser = forwardRef<
         </InputGroup>
       </TooltipProvider>
 
+      {/* 错误固定在列表上方，而不是塞在滚动区底部：导航被拒时目录不变，
+          提示若在长列表下面就看不出“点了没反应”。 */}
+      {error && !loading.size ? (
+        <div
+          role="alert"
+          className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+        >
+          {error}
+        </div>
+      ) : null}
       <ScrollArea className={cn(heightClassName, "rounded-md border")}>
         <div className="p-1">
           {newFolder && rootPath ? (
@@ -604,11 +641,6 @@ export const DirectoryBrowser = forwardRef<
             />
           ) : null}
           {renderEntries(rootPath, 0)}
-          {error && !loading.size && (
-            <div className="p-4 text-center text-sm text-destructive">
-              {error}
-            </div>
-          )}
         </div>
       </ScrollArea>
     </div>

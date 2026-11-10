@@ -25,6 +25,8 @@ type Server struct {
 	subscribers map[chan Row]bool
 	tasks       map[string]*Delegation
 	callers     map[string]*Caller
+	// splits are the task-split cards waiting for the user (see split.go).
+	splits map[string]*taskSplit
 	terminalMu  sync.Mutex
 	terminals   map[string]*TerminalSession
 	watchMu     sync.Mutex
@@ -34,6 +36,12 @@ type Server struct {
 	tasks2      *taskStore
 	browser     *browserManager
 	computer    *computerState
+	// Warm pool: pre-connected, unused sessions that acp_connect can claim
+	// without paying the 15-25s session/new cost on every harness switch.
+	warmMu      sync.Mutex
+	warm        map[string][]warmEntry
+	warming     map[string]bool
+	started     bool // guarded by warmMu; prewarming is a runtime-only behavior
 }
 
 func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (string, error)) (*Server, error) {
@@ -41,7 +49,7 @@ func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (s
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{Runtime: rt, Hub: h, Root: root, Base: base, Resolve: resolve, store: st, connections: map[string]*Connection{}, subscribers: map[chan Row]bool{}, tasks: map[string]*Delegation{}, callers: map[string]*Caller{}, terminals: map[string]*TerminalSession{}}
+	s := &Server{Runtime: rt, Hub: h, Root: root, Base: base, Resolve: resolve, store: st, connections: map[string]*Connection{}, subscribers: map[chan Row]bool{}, tasks: map[string]*Delegation{}, callers: map[string]*Caller{}, splits: map[string]*taskSplit{}, terminals: map[string]*TerminalSession{}, warm: map[string][]warmEntry{}, warming: map[string]bool{}}
 	s.auto = newAutoStore(root)
 	s.forge = newForgeStore(root)
 	s.tasks2 = newTaskStore(root)
@@ -51,12 +59,23 @@ func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (s
 	if err := s.loadDelegations(); err != nil {
 		return nil, err
 	}
+	s.loadInstances()
+	s.loadSplits()
 	rt.OnUpdate = s.nativeUpdate
 	rt.ExtraMCP = s.extraMCP
 	rt.AllowInternalTool = s.allowInternalTool
 	return s, nil
 }
-func (s *Server) Start() { go s.permissionsLoop() }
+func (s *Server) Start() {
+	go s.permissionsLoop()
+	if os.Getenv("HARNESS_HUB_WARM") != "0" {
+		s.warmMu.Lock()
+		s.started = true
+		s.warmMu.Unlock()
+		go s.warmAll()
+		go s.warmSweeper()
+	}
+}
 func respond(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -87,6 +106,9 @@ func (s *Server) pick(agentType string) *hub.Agent {
 	return nil
 }
 func wireAgent(a *hub.Agent) string {
+	if a.Wire != "" {
+		return a.Wire
+	}
 	if a.RealTool == "dsh" {
 		return "deepseek"
 	}
@@ -107,7 +129,7 @@ func (s *Server) agents() []Row {
 		if !a.Real {
 			continue
 		}
-		out = append(out, Row{"agent_type": wireAgent(a), "name": a.Name, "description": "ACP · " + a.Name, "available": a.Enabled, "enabled": a.Enabled, "registry_id": wireAgent(a), "registry_version": nil, "skills_capable": true, "supports_custom_version": false, "distribution_type": "system", "is_acp_adapter": a.RealTool != "", "custom_source": nil, "installed_version": s.installedVersion(a), "sort_order": len(out), "env": Row{}, "config_json": nil, "host_tools_agent_mode": true})
+		out = append(out, Row{"agent_type": wireAgent(a), "name": a.Name, "description": "ACP · " + a.Name, "available": a.Enabled, "enabled": a.Enabled, "registry_id": wireAgent(a), "registry_version": nil, "skills_capable": true, "supports_custom_version": false, "distribution_type": "system", "is_acp_adapter": a.RealTool != "", "custom_source": nil, "installed_version": s.installedVersion(a), "sort_order": len(out), "env": Row{}, "config_json": nil, "host_tools_agent_mode": true, "instance": a.Wire != "", "real_tool": a.RealTool, "provider_id": a.ProviderID, "default_model": a.DefaultModel})
 	}
 	return out
 }
@@ -171,6 +193,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	result, err := s.command(command, args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[codeg-api]", command, err)
+		// A 409 here always means a genuine turn is running: prompt() takes a
+		// leaked busy flag over in place (past the stale grace, no runtime
+		// active turn) instead of rejecting it, so the client never sees a
+		// healable rejection and must never disconnect to "recover".
 		if err.Error() == "turn_in_progress" {
 			respond(w, 409, Row{"code": "turn_in_progress", "message": "A turn is already in progress"})
 			return
@@ -247,6 +273,9 @@ func (s *Server) command(command string, a Row) (any, error) {
 	if strings.HasPrefix(command, "git_") || command == "get_git_branch" {
 		return s.gitCommand(command, a)
 	}
+	if strings.HasPrefix(command, "codepluse_instance_") {
+		return s.instanceCommand(command, a)
+	}
 	switch command {
 	case "codepluse_providers_list":
 		return providers.Public(s.Root)
@@ -260,6 +289,8 @@ func (s *Server) command(command string, a Row) (any, error) {
 		return s.agents(), nil
 	case "experts_list", "science_list", "experts_read_content", "science_read_content", "experts_list_all_install_statuses", "science_list_all_install_statuses", "officecli_skill_list_all_install_statuses", "acp_list_agent_runtime_skills", "acp_list_agent_skills":
 		return s.skills(command, a)
+	case "pick_directory":
+		return s.pickDirectory()
 	case "get_home_directory", "list_directory_entries", "list_directory_with_files", "get_file_tree", "list_workspace_files", "read_file_preview", "read_file_for_edit", "read_file_base64", "read_workspace_file_base64", "save_file_content", "save_file_copy", "get_git_head":
 		return s.files(command, a)
 	case "computer_available":
@@ -349,7 +380,10 @@ func (s *Server) command(command string, a Row) (any, error) {
 		s.mu.Lock()
 		cid := ""
 		for _, c := range s.connections {
-			if c.ConversationID == number(a["conversationId"]) {
+			// A warm pre-built connection has no conversation yet and can be
+			// claimed (or released) at any moment; binding a conversation to it
+			// here would hand out an idle session that is about to move.
+			if c.ConversationID == number(a["conversationId"]) && !c.Warm {
 				cid = c.ID
 			}
 		}
@@ -364,6 +398,8 @@ func (s *Server) command(command string, a Row) (any, error) {
 	case "acp_respond_permission":
 		choice := text(a["optionId"])
 		return nil, s.Runtime.RespondPermission(text(a["requestId"]), &choice)
+	case "acp_respond_task_split":
+		return s.respondTaskSplit(a)
 	}
 	st := s.store
 	st.mu.Lock()

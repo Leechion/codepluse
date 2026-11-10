@@ -16,6 +16,11 @@
  * already in flight on the connection (a second, concurrent prompt — e.g. two
  * clients co-controlling one conversation). Callers re-queue the draft in the
  * message queue rather than surfacing an error.
+ *
+ * A leaked busy flag (no runtime turn behind it) is NOT surfaced here: the Go
+ * server takes such a connection over in place on the next prompt, so a
+ * rejection that reaches the client always means real work is running and
+ * must not be interrupted by disconnecting.
  */
 export class TurnBusyError extends Error {
   constructor() {

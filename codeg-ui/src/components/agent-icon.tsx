@@ -1,12 +1,14 @@
 import { memo, useId, useState, useSyncExternalStore } from "react"
 
 import type { AgentType } from "@/lib/types"
+import { instanceBaseAgent } from "@/lib/types"
 import {
   getAgentColor,
   getAgentIconUrl,
   getAgentInitial,
   getCustomAgentDisplayVersion,
   isCustomAgentType,
+  isInstanceAgentType,
   isMonochromeSvgDataUrl,
   subscribeCustomAgentDisplay,
 } from "@/lib/custom-agents"
@@ -644,7 +646,15 @@ export function AgentIcon({ agentType, className }: AgentIconProps) {
   // items), which can leave it smaller or larger than the box. Centered, it
   // still shares the box's center line with the label beside it, rather than
   // hanging off the box's top corner.
-  const ColorIcon = COLOR_ICONS[agentType]
+  //
+  // A harness instance ("claude 2号") is the same binary as its base tool, so
+  // it wears the base tool's compiled-in mark. Its display NAME still differs —
+  // only the glyph is shared, which is exactly what the user wants to read at a
+  // glance: three rows, same Claude logo, different names.
+  const markKey: AgentType = isInstanceAgentType(agentType)
+    ? (instanceBaseAgent(agentType) ?? agentType)
+    : agentType
+  const ColorIcon = COLOR_ICONS[markKey]
   if (ColorIcon) {
     return (
       <span
@@ -658,7 +668,7 @@ export function AgentIcon({ agentType, className }: AgentIconProps) {
     )
   }
 
-  const MonoIcon = MONO_ICONS[agentType]
+  const MonoIcon = MONO_ICONS[markKey]
   if (MonoIcon) {
     // Mono marks fill with `currentColor`, so without an explicit color they
     // inherit the parent's text color and look faint in muted contexts (agent
@@ -669,7 +679,7 @@ export function AgentIcon({ agentType, className }: AgentIconProps) {
       <span
         className={cn(
           "inline-flex shrink-0 items-center justify-center text-foreground",
-          AGENT_TEXT_COLORS[agentType],
+          AGENT_TEXT_COLORS[markKey],
           className
         )}
       >

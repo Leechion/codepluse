@@ -56,6 +56,7 @@ import {
   type CanvasSurfaceKey,
 } from "@/lib/canvas-view-storage"
 import { resolveDefaultAgent } from "@/lib/resolve-default-agent"
+import { mainBotAgentFor } from "@/lib/main-bot"
 import {
   AGENT_DISPLAY_ORDER,
   type AgentType,
@@ -1886,6 +1887,9 @@ function CanvasFlow({
           : null
       const { agentType } = resolveDefaultAgent({
         folderDefault,
+        // No agent list here (cold-start semantics): the main bot is trusted
+        // and the card's AgentSelector self-corrects via `onFallback`.
+        mainBot: mainBotAgentFor([]),
         inherit: null,
         sortedTypes: [],
         fresh: false,

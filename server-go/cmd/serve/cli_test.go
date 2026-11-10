@@ -56,7 +56,7 @@ func TestDeepSeekLocalHome(t *testing.T) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	env, err := buildEnv("dsh")
+	env, err := buildEnv(&hub.Agent{RealTool: "dsh"})
 	if err != nil || !slices.Contains(env, "DSH_HOME="+dir) {
 		t.Fatalf("local DSH home missing: %v", err)
 	}

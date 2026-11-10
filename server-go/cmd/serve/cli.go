@@ -9,17 +9,24 @@ import (
 	"path/filepath"
 	"strings"
 
+	"harnesshub/internal/hub"
 	"harnesshub/internal/providers"
 )
 
-func providerVersion(tool string) string {
+// providerVersion fingerprints what the spawned driver's environment is
+// baked from, so editing or switching a provider rotates the driver instead
+// of leaving stale credentials in a pooled process. A harness instance that
+// pins its own provider is hashed against that pinned provider only —
+// flipping the global active selection never disturbs its driver.
+func providerVersion(agent *hub.Agent) string {
+	tool := agent.RealTool
 	if tool == "dsh" {
 		return dshModelVersion()
 	}
 	if tool != "claude" {
 		return "default"
 	}
-	p, ok, err := providers.Active(ROOT, tool)
+	p, ok, err := resolveProvider(agent)
 	if err != nil {
 		return "error"
 	}
@@ -31,6 +38,20 @@ func providerVersion(tool string) string {
 		Env      map[string]string
 	}{p, p.Env})
 	return fmt.Sprintf("%x", sha256.Sum256(b))
+}
+
+// resolveProvider returns the provider actually backing one agent: the
+// instance's pinned entry when set (falling back to the global selection if
+// the pin went stale), otherwise the global active selection the built-in
+// follows. The bool mirrors providers.Active's "configured" meaning.
+func resolveProvider(agent *hub.Agent) (providers.Provider, bool, error) {
+	if agent.ProviderID != "" {
+		if p, err := providers.Find(ROOT, agent.ProviderID); err == nil {
+			return p, true, nil
+		}
+		fmt.Fprintf(os.Stderr, "[hub] 实例 %s 钉住的供应商已失效，回退全局供应商\n", agent.Name)
+	}
+	return providers.Active(ROOT, agent.RealTool)
 }
 
 // ----------------------------- CLI locating -----------------------------
@@ -185,8 +206,17 @@ var permissions = []map[string]any{
 }
 
 // codexHome uses Codex's own settings and credentials in a writable workspace copy.
-func codexHome() (string, error) {
+// auth.json is copied only when the local copy is missing or the source was
+// updated by a fresh `codex login`: Codex refreshes tokens inside CODEX_HOME,
+// and overwriting that copy on every launch discarded the refreshed credentials
+// and forced a re-authentication on the next connection. config.toml stays
+// synced on every launch so user configuration edits still take effect.
+// An instance passes its own name so each Codex instance logs in separately.
+func codexHome(name ...string) (string, error) {
 	dir := filepath.Join(ROOT, ".data", "codex-native-home")
+	if len(name) > 0 && name[0] != "" {
+		dir = filepath.Join(ROOT, ".data", "codex-homes", name[0])
+	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", fmt.Errorf("无法创建 Codex 配置目录: %w", err)
 	}
@@ -199,14 +229,27 @@ func codexHome() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("读取 Codex %s 失败: %w", name, err)
 		}
-		if err = os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
+		dst := filepath.Join(dir, name)
+		if name == "auth.json" {
+			if info, statErr := os.Stat(dst); statErr == nil {
+				srcInfo, srcErr := os.Stat(src)
+				// A source newer than the copy means the user logged in again
+				// with the real CLI. Otherwise keep the copy: it may hold a
+				// token Codex refreshed inside this isolated CODEX_HOME.
+				if srcErr == nil && !srcInfo.ModTime().After(info.ModTime()) {
+					continue
+				}
+			}
+		}
+		if err = os.WriteFile(dst, data, 0600); err != nil {
 			return "", fmt.Errorf("写入 Codex %s 失败: %w", name, err)
 		}
 	}
 	return dir, nil
 }
 
-func buildEnv(tool string) ([]string, error) {
+func buildEnv(agent *hub.Agent) ([]string, error) {
+	tool := agent.RealTool
 	env := os.Environ()
 	set := func(k, v string) { env = append(env, k+"="+v) }
 	drop := func(k string) {
@@ -249,7 +292,7 @@ func buildEnv(tool string) ([]string, error) {
 		set("CLAUDE_CODE_EXECUTABLE", resolveBin("claude"))
 	}
 	if tool == "codex" && os.Getenv("HARNESS_HUB_CODEX_ISOLATE") != "0" {
-		dir, err := codexHome()
+		dir, err := codexHome(agent.Wire)
 		if err != nil {
 			return nil, err
 		}

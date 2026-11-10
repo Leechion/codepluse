@@ -11,6 +11,7 @@ import {
   type PendingPermission,
   type PendingUserMessage,
   type PendingQuestion,
+  type PendingTaskSplit,
 } from "@/contexts/acp-connections-context"
 import type {
   AgentType,
@@ -96,6 +97,9 @@ export interface UseConnectionReturn {
   pendingQuestion: PendingQuestion | null
   pendingAskQuestion: PendingQuestionState | null
   pendingPlanApproval: PendingPlanApprovalState | null
+  /** Main-bot task-split proposal awaiting the user's decision; see
+   *  `ConnectionState.pendingSplit`. */
+  pendingSplit: PendingTaskSplit | null
   claudeApiRetry: ClaudeApiRetryState | null
   /** AIR typed session failure table (active + resolved; see
    *  `lib/session-failures.ts`). `[]` when the connection has none. */
@@ -301,6 +305,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const pendingQuestion = connection?.pendingQuestion ?? null
   const pendingAskQuestion = connection?.pendingAskQuestion ?? null
   const pendingPlanApproval = connection?.pendingPlanApproval ?? null
+  const pendingSplit = connection?.pendingSplit ?? null
   const claudeApiRetry = connection?.claudeApiRetry ?? null
   const sessionFailures = connection?.sessionFailures ?? EMPTY_SESSION_FAILURES
   const toolApprovals = connection?.toolApprovals ?? EMPTY_TOOL_APPROVALS
@@ -412,6 +417,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       pendingQuestion,
       pendingAskQuestion,
       pendingPlanApproval,
+      pendingSplit,
       claudeApiRetry,
       sessionFailures,
       toolApprovals,
@@ -458,6 +464,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       pendingQuestion,
       pendingAskQuestion,
       pendingPlanApproval,
+      pendingSplit,
       claudeApiRetry,
       sessionFailures,
       toolApprovals,

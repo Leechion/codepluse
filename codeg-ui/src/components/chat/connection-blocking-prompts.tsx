@@ -2,7 +2,8 @@
 
 /**
  * A connection's blocking prompts — permission request, codeg-mcp
- * `ask_user_question`, plan approval — answered through THAT connection's id.
+ * `ask_user_question`, plan approval, task-split card — answered through THAT
+ * connection's id.
  *
  * For answering a session from outside its own conversation panel: the
  * read-only transcript viewers (`LiveTranscriptView`) and the
@@ -16,6 +17,7 @@ import { memo, useCallback } from "react"
 import { AskQuestionCard } from "@/components/chat/ask-question-card"
 import { PermissionDialog } from "@/components/chat/permission-dialog"
 import { PlanApprovalCard } from "@/components/chat/plan-approval-card"
+import { TaskSplitCard } from "@/components/chat/task-split-card"
 import { useAcpActions } from "@/contexts/acp-connections-context"
 import type { BlockingPrompts } from "@/lib/blocking-prompts"
 import type { AgentType, PlanApprovalAnswer, QuestionAnswer } from "@/lib/types"
@@ -36,8 +38,12 @@ function ConnectionBlockingPromptsImpl({
   agentType,
   itemClassName,
 }: Props) {
-  const { respondPermission, answerQuestion, answerPlanApproval } =
-    useAcpActions()
+  const {
+    respondPermission,
+    respondTaskSplit,
+    answerQuestion,
+    answerPlanApproval,
+  } = useAcpActions()
 
   const onRespondPermission = useCallback(
     (requestId: string, optionId: string) => {
@@ -54,6 +60,19 @@ function ConnectionBlockingPromptsImpl({
     (approvalId: string, answer: PlanApprovalAnswer) =>
       answerPlanApproval(connectionId, approvalId, answer),
     [connectionId, answerPlanApproval]
+  )
+  const onRespondTaskSplit = useCallback(
+    (
+      splitId: string,
+      action: "approve" | "reject",
+      tasks?: Array<{
+        title: string
+        prompt: string
+        agent_type: string
+        model: string
+      }>
+    ) => respondTaskSplit(connectionId, splitId, action, tasks),
+    [connectionId, respondTaskSplit]
   )
 
   return (
@@ -81,6 +100,18 @@ function ConnectionBlockingPromptsImpl({
             key={prompts.planApproval.approval_id}
             approval={prompts.planApproval}
             onAnswer={onAnswerPlanApproval}
+          />
+        </div>
+      )}
+      {prompts.split && (
+        <div className={itemClassName}>
+          {/* key on split_id so a reused slot remounts the card with fresh
+              edit/in-flight state. */}
+          <TaskSplitCard
+            key={prompts.split.split_id}
+            split={prompts.split}
+            agentType={agentType}
+            onRespond={onRespondTaskSplit}
           />
         </div>
       )}

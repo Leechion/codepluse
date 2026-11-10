@@ -17,7 +17,11 @@
  * incoming event and overwrite locally" path.
  */
 
-import type { SessionModeStateInfo } from "@/lib/types"
+import {
+  instanceBaseAgent,
+  isInstanceAgentType,
+  type SessionModeStateInfo,
+} from "@/lib/types"
 
 const STORAGE_KEY = "codeg:selector-prefs"
 
@@ -57,11 +61,38 @@ function writeAll(all: AllPrefs) {
  */
 const RETIRED_CUSTOM_AGENTS = new Map([["kiro", "custom:kiro-cli"]])
 
+/**
+ * A harness instance (`inst_claude2`) starts from its base tool's saved picks:
+ * both run the same binary and offer the same modes, so the user's permission
+ * mode and non-model config carry over instead of resetting on every new
+ * instance. The `model` value is deliberately NOT inherited — the instance's
+ * pinned default model (server-side) or the harness's own default must win,
+ * and a base-tool model preference arriving as `preferred_config_values` would
+ * silently outrank the pin. Once the user picks anything for the instance
+ * itself, its own `inst_*` key takes over wholesale (pin included — an
+ * explicit pick is meant to override).
+ */
+function instanceFallbackPrefs(
+  all: AllPrefs,
+  agentType: string
+): SelectorPrefs | undefined {
+  if (!isInstanceAgentType(agentType)) return undefined
+  const base = instanceBaseAgent(agentType)
+  if (!base) return undefined
+  const inherited = all[base]
+  if (!inherited) return undefined
+  if (!inherited.configValues?.model) return inherited
+  const rest = { ...inherited.configValues }
+  delete rest.model
+  return { ...inherited, configValues: rest }
+}
+
 function prefsOf(all: AllPrefs, agentType: string): SelectorPrefs | undefined {
   const own = all[agentType]
   if (own) return own
   const retired = RETIRED_CUSTOM_AGENTS.get(agentType)
-  return retired ? all[retired] : undefined
+  if (retired) return all[retired]
+  return instanceFallbackPrefs(all, agentType)
 }
 
 function updatePrefs(

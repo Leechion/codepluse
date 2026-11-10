@@ -130,6 +130,11 @@ func resolveWorkdir(input string) (string, error) {
 		rel, _ := filepath.Rel(ancestor, candidate)
 		resolved = filepath.Join(resolved, rel)
 	}
+	// 显式开关：允许把服务根之外的任意文件夹添加为工作空间。默认关闭，
+	// 保持 Web 部署「只暴露服务目录」的安全边界。
+	if os.Getenv("HARNESS_HUB_ALLOW_ANY_PATH") == "1" {
+		return resolved, nil
+	}
 	rel, err := filepath.Rel(realRoot, resolved)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return "", fmt.Errorf("工作目录必须位于 %s 之内", root)

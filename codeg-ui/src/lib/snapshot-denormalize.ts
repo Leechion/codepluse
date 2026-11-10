@@ -9,6 +9,7 @@ import type {
   LiveSessionSnapshot,
   PendingPlanApprovalState,
   PendingQuestionState,
+  PendingTaskSplitState,
   PromptCapabilitiesInfo,
   RemoteControlInfo,
   SessionConfigOptionInfo,
@@ -24,6 +25,7 @@ import type {
   LiveContentBlock as LocalLiveContentBlock,
   LiveMessage as LocalLiveMessage,
   PendingPermission,
+  PendingTaskSplit,
   PendingUserMessage,
   ToolCallInfo,
 } from "@/contexts/acp-connections-context"
@@ -61,6 +63,10 @@ export interface SnapshotPatch {
   remoteControl: RemoteControlInfo | null
   liveMessage: LocalLiveMessage | null
   pendingPermission: PendingPermission | null
+  /** Task-split card awaiting the user, carried by the snapshot so a reload
+   *  re-raises the exact card the main bot proposed (the proposal tool never
+   *  parks the turn). `null` when none is pending. */
+  pendingSplit: PendingTaskSplit | null
   /** Awaiting-answer multiple-choice `ask_user_question` carried by the
    *  snapshot, so a client attaching mid-turn re-renders the card. `null` when
    *  no question is pending. (Distinct from the frontend-only free-text
@@ -161,6 +167,20 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
           // So a client attaching mid-turn sees the same "N more waiting" hint
           // as one that was live for the original event.
           queued: wire.pending_permission.queued,
+        }
+      : null,
+    // The snapshot shape already matches PendingTaskSplit; pass through. A
+    // malformed row (tasks missing) reads as no card rather than a broken one.
+    pendingSplit: wire.pending_split
+      ? {
+          split_id: wire.pending_split.split_id,
+          parent_connection_id: wire.pending_split.parent_connection_id,
+          root_connection_id: wire.pending_split.root_connection_id,
+          parent_tool_use_id: wire.pending_split.parent_tool_use_id,
+          tasks: Array.isArray(wire.pending_split.tasks)
+            ? wire.pending_split.tasks
+            : [],
+          created_at: wire.pending_split.created_at,
         }
       : null,
     // The snapshot shape already matches PendingQuestionState; pass through.

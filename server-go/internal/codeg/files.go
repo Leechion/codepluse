@@ -14,6 +14,30 @@ import (
 
 var ignoredDirs = map[string]bool{"node_modules": true, ".git": true, ".next": true, ".data": true, "dist": true, "target": true}
 
+// readableRoots 返回允许读写的根：服务根 + 所有已打开的工作空间文件夹。
+// 外部文件夹被「添加为工作空间」后必须能读写，否则选了也打不开文件。
+func (s *Server) readableRoots() []string {
+	roots := []string{s.Root}
+	if s.store != nil {
+		s.store.mu.Lock()
+		for _, f := range s.store.Folders {
+			if p := text(f["path"]); p != "" {
+				roots = append(roots, p)
+			}
+		}
+		s.store.mu.Unlock()
+	}
+	return roots
+}
+
+func withinRoot(base, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." {
+		return false
+	}
+	return !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func (s *Server) resolveFile(root, input string) (string, error) {
 	if root == "" {
 		root = s.Root
@@ -21,19 +45,20 @@ func (s *Server) resolveFile(root, input string) (string, error) {
 	if !filepath.IsAbs(input) {
 		input = filepath.Join(root, input)
 	}
-	base, err := s.Resolve(root)
-	if err != nil {
-		return "", err
-	}
 	resolved, err := s.Resolve(input)
 	if err != nil {
 		return "", err
 	}
-	rel, err := filepath.Rel(base, resolved)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("文件超出工作区目录")
+	for _, base := range s.readableRoots() {
+		b, err := s.Resolve(base)
+		if err != nil {
+			continue
+		}
+		if withinRoot(b, resolved) {
+			return resolved, nil
+		}
 	}
-	return resolved, nil
+	return "", fmt.Errorf("文件超出工作区目录")
 }
 func (s *Server) files(command string, a Row) (any, error) {
 	root := text(a["rootPath"])
@@ -41,7 +66,25 @@ func (s *Server) files(command string, a Row) (any, error) {
 	if command == "get_home_directory" {
 		return s.Resolve("")
 	}
-	path, err := s.resolveFile(root, input)
+	var path string
+	var err error
+	if command == "list_directory_entries" || command == "list_directory_with_files" {
+		// 目录浏览是只读的，放开到任意路径：要能把服务根之外的文件夹
+		// 添加为工作空间，先得能看见并进得去。
+		target := input
+		if target == "" {
+			target = root
+		}
+		if target == "" {
+			target = s.Root
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(s.Root, target)
+		}
+		path, err = s.Resolve(target)
+	} else {
+		path, err = s.resolveFile(root, input)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -1,9 +1,9 @@
 "use client"
 
-import { memo, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { Check, ChevronDown, Folder, MessageSquare } from "lucide-react"
+import { Check, ChevronDown, Folder, FolderPlus, MessageSquare } from "lucide-react"
 import type { OverlayScrollbarsComponentRef } from "overlayscrollbars-react"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useTabActions, useTabStore } from "@/contexts/tab-context"
@@ -34,6 +34,7 @@ import {
 import { FolderAliasLabel } from "@/components/conversations/folder-alias-label"
 import { FolderOptionItem } from "@/components/shared/folder-select"
 import { BranchDropdown } from "@/components/layout/branch-dropdown"
+import { pickDirectory } from "@/lib/api"
 
 interface ConversationContextBarProps {
   extraContent?: React.ReactNode
@@ -274,7 +275,7 @@ export const ConversationFolderBranchPicker = memo(
     const t = useTranslations("Folder.conversationContextBar")
     const tabs = useTabStore((s) => s.tabs)
     const activeTabId = useTabStore((s) => s.activeTabId)
-    const { openNewConversationTab, openChatModeTab } = useTabActions()
+    const { openNewConversationTab } = useTabActions()
     const folders = useAppWorkspaceStore((s) => s.folders)
     const allFolders = useAppWorkspaceStore((s) => s.allFolders)
 
@@ -305,6 +306,32 @@ export const ConversationFolderBranchPicker = memo(
       [folders]
     )
 
+    /** 直接弹系统文件夹选择窗口，选完把该文件夹绑定为当前会话的工作空间。 */
+    const pickWorkspaceFolder = useCallback(async () => {
+      try {
+        const picked = await pickDirectory()
+        if (!picked) return
+        const folder = await useAppWorkspaceStore.getState().openFolder(picked)
+        if (override) {
+          override.onSelectFolder(folder.id, folder.path)
+        } else if (ownTab) {
+          openNewConversationTab(folder.id, folder.path, {
+            inheritFromActive: true,
+            ...(ownTab.conversationId == null
+              ? { retargetTabId: ownTab.id }
+              : {}),
+          })
+        }
+        toast.success(t("toasts.folderChanged", { name: folder.name }))
+      } catch (err) {
+        console.error(
+          "[ConversationFolderBranchPicker] system picker failed:",
+          err
+        )
+        toast.error("无法打开系统文件夹选择器")
+      }
+    }, [override, ownTab, openNewConversationTab, t])
+
     if (!override && !ownTab) return null
     // Chat mode: either a draft flagged `isChat` (no folder yet) or a bound
     // conversation whose folder is a hidden chat folder. Show the folder
@@ -321,8 +348,10 @@ export const ConversationFolderBranchPicker = memo(
     // Worktree folders surface their parent (root repo) name here; the picker's
     // own list below keeps real folder names/paths for selection, and every
     // git/path operation still uses `ownFolder` (the worktree) unchanged.
+    // 底部这一行不再展示「聊天模式」这个内部概念：无工作文件夹时直接把它
+    // 读作「添加工作空间」入口，点开后在列表底部选择/添加文件夹。
     const displayFolderName = isChatMode
-      ? t("chatModeLabel")
+      ? "添加工作空间"
       : resolveFolderDisplayName(ownFolder!, allFolders)
     // When the conversation lives in a worktree, the picker highlights its
     // parent repo (the worktree itself isn't listed). Display-only — the tab's
@@ -333,6 +362,21 @@ export const ConversationFolderBranchPicker = memo(
 
     return (
       <>
+        {isChatMode ? (
+          // 聊天模式（未绑定工作文件夹）下不再展示「聊天模式」和不可用的
+          // 文件夹下拉，直接给一个可点的「添加工作空间」入口。
+          <Button
+            variant="ghost"
+            size="xs"
+            title="添加文件夹作为工作空间"
+            aria-label="添加文件夹作为工作空间"
+            className="min-w-0 gap-0.5 px-1.5"
+            onClick={pickWorkspaceFolder}
+          >
+            <FolderPlus className="size-3 shrink-0 text-muted-foreground" />
+            <span className="max-w-[8.75rem] truncate">添加工作空间</span>
+          </Button>
+        ) : (
         <FolderPicker
           folders={topLevelFolders}
           currentFolderId={pickerSelectedId}
@@ -376,32 +420,12 @@ export const ConversationFolderBranchPicker = memo(
           }}
           labelEmpty={t("noFolders")}
           labelSearch={t("searchFolder")}
-          labelChatMode={t("chatModeLabel")}
+          labelChatMode="添加文件夹作为工作空间"
+          chatModeIcon="addFolder"
           isChatMode={isChatMode}
-          onSelectChatMode={() => {
-            if (override) {
-              override.onSelectChatMode()
-              toast.success(t("toasts.switchedToChatMode"))
-              return
-            }
-            try {
-              // Like the folder switch: this draft itself moves (see
-              // `retargetTabId`), whatever the global scope already holds.
-              openChatModeTab(
-                ownTab!.conversationId == null
-                  ? { retargetTabId: ownTab!.id }
-                  : undefined
-              )
-              toast.success(t("toasts.switchedToChatMode"))
-            } catch (err) {
-              console.error(
-                "[ConversationFolderBranchPicker] switch to chat mode failed:",
-                err
-              )
-              toast.error(t("toasts.openFolderFailed"))
-            }
-          }}
+          onSelectChatMode={pickWorkspaceFolder}
         />
+        )}
 
         {/* Branch selector — the rich BranchDropdown (pull / commit / push /
             new branch / worktree / stash / merge / rebase / … + branch tree).
@@ -468,6 +492,9 @@ interface FolderPickerProps {
   isChatMode: boolean
   /** Select folderless chat mode. */
   onSelectChatMode: () => void
+  /** 底部固定项的图标：默认是聊天模式的对话气泡；主对话输入框把它换成
+   *  文件夹图标，让这一项读作「添加文件夹作为工作空间」。 */
+  chatModeIcon?: "chat" | "addFolder"
   /** Trigger appearance. `"chip"` (default) = folder icon + name + chevron, the
    *  compact below-input row (mobile). `"header"` = bare text sized to the
    *  conversation title, alias-aware, themed while editable — the desktop
@@ -490,10 +517,12 @@ const FolderPicker = memo(function FolderPicker({
   labelChatMode,
   isChatMode,
   onSelectChatMode,
+  chatModeIcon = "chat",
   variant = "chip",
   alias = null,
 }: FolderPickerProps) {
   const [open, setOpen] = useState(false)
+  const ChatModeIcon = chatModeIcon === "addFolder" ? FolderPlus : MessageSquare
 
   // Header variant: no icons, `alias [ name ]` inline (matching the sidebar
   // folder header), sized to the neighbouring conversation title. A new/editable
@@ -591,7 +620,7 @@ const FolderPicker = memo(function FolderPicker({
                     onSelectChatMode()
                   }}
                 >
-                  <MessageSquare className="h-4 w-4" />
+                  <ChatModeIcon className="h-4 w-4" />
                   <span className="flex-1 truncate font-medium">
                     {labelChatMode}
                   </span>

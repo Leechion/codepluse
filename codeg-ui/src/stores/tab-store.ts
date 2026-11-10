@@ -14,6 +14,7 @@ import {
   saveOpenedTabs,
 } from "@/lib/api"
 import { resolveDefaultAgent } from "@/lib/resolve-default-agent"
+import { mainBotAgentFor } from "@/lib/main-bot"
 import { formatConversationTitle } from "@/lib/conversation-title"
 import {
   firstLeafId,
@@ -1436,6 +1437,9 @@ function resolveAgentForFolder(
           ?.default_agent_type ?? null)
   return resolveDefaultAgent({
     folderDefault,
+    // The main bot (Settings → 主 bot) wins over inherit: every new
+    // conversation lands on it unless the folder pinned its own default.
+    mainBot: mainBotAgentFor(runtime.sortedAvailableAgents),
     inherit,
     sortedTypes: runtime.sortedAvailableAgents,
     fresh: runtime.agentsFresh,

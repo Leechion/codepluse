@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { useShallow } from "zustand/react/shallow"
 import {
@@ -28,6 +28,7 @@ import {
   type ConversationChange,
   type TabsChanged,
 } from "@/lib/types"
+import { loadMainBot } from "@/lib/main-bot"
 
 export type { OpenedDraftTarget, TabItem }
 export { useTabStore, useTabActions } from "@/stores/tab-store"
@@ -118,6 +119,32 @@ export function TabProvider({ children }: TabProviderProps) {
       .setAgentAvailability(sortedAvailableAgents, agentsFresh)
   }, [sortedAvailableAgents, agentsFresh])
 
+  // The main bot is read once per session into a module cache; draft tabs
+  // resolve it synchronously through `mainBotAgentFor` when they are created,
+  // so a settings save takes effect on the next new conversation without
+  // re-rendering any existing tab.
+  //
+  // The read is awaited by the correction gate below: a cold start that ran
+  // the correction first would seed the session's first draft from the pre-
+  // main-bot order and then never revisit it (the pass is one-shot), silently
+  // ignoring a configured bot for the whole window. It settles even when the
+  // backend is unreachable or slow — `loadMainBot` swallows its own errors, and
+  // the timeout covers a request that hangs without answering, so the gate can
+  // only ever delay, never strand, the correction.
+  const [mainBotSettled, setMainBotSettled] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    const settle = () => {
+      if (!cancelled) setMainBotSettled(true)
+    }
+    const timeout = setTimeout(settle, 3000)
+    void loadMainBot().then(settle, settle)
+    return () => {
+      cancelled = true
+      clearTimeout(timeout)
+    }
+  }, [])
+
   // Sync the active tab's folderId up to the app-workspace store so derived
   // consumers (useActiveFolder, branch polling) reflect the focused folder.
   useEffect(() => {
@@ -201,22 +228,26 @@ export function TabProvider({ children }: TabProviderProps) {
     }
   }, [])
 
-  // Correction must wait for the fresh agent list, hydrated tabs, and hydrated
-  // folders (so folder defaults resolve). One-shot per session via the store.
+  // Correction must wait for the fresh agent list, hydrated tabs, hydrated
+  // folders (so folder defaults resolve), and a settled main-bot read (so a
+  // configured bot wins the session's first draft). One-shot per session via
+  // the store.
   useEffect(() => {
     if (!agentsFresh) return
     if (!tabsHydrated) return
     if (!foldersHydrated) return
+    if (!mainBotSettled) return
     runCorrectionOnce()
-  }, [agentsFresh, tabsHydrated, foldersHydrated])
+  }, [agentsFresh, tabsHydrated, foldersHydrated, mainBotSettled])
 
   // Once tabs AND folders are in: drop restored drafts whose folder is gone
   // (hydration is deliberately folder-blind), then — only if that leaves nothing
   // at all — recover a draft so the workspace is never blank. Order matters: an
   // orphaned draft must not suppress recovery. State is re-read after the prune
-  // because the closure's `rawTabs` predates it.
+  // because the closure's `rawTabs` predates it. Recovery seeds a draft tab the
+  // same way correction does, so it waits for the main-bot read to settle too.
   useEffect(() => {
-    if (!tabsHydrated || !foldersHydrated) return
+    if (!tabsHydrated || !foldersHydrated || !mainBotSettled) return
     pruneOrphanDraftsOnce()
     if (
       !shouldSeedConversation(
@@ -226,7 +257,7 @@ export function TabProvider({ children }: TabProviderProps) {
     )
       return
     runRecoveryOnce()
-  }, [tabsHydrated, foldersHydrated, rawTabs, tabsFollowFolder])
+  }, [tabsHydrated, foldersHydrated, rawTabs, tabsFollowFolder, mainBotSettled])
 
   // Persist the active draft's context for the next cold start.
   useEffect(() => {

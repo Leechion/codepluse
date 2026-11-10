@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next"
 import "katex/dist/katex.min.css"
 import "./globals.css"
+/* ZCode 工作区复刻样式（scoped 在 .zw-root 内，仅 /workspace 生效） */
+import "./zcode-workspace.css"
 import { NextIntlClientProvider } from "next-intl"
 import { AppI18nProvider } from "@/components/i18n-provider"
 import { getMessagesForLocale } from "@/i18n/messages"

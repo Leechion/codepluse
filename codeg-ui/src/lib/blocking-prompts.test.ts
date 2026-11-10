@@ -22,10 +22,26 @@ const PLAN = {
   plan_markdown: "1. migrate",
   created_at: "2026-10-18T00:00:00Z",
 }
+const SPLIT = {
+  split_id: "sp-1",
+  parent_connection_id: "c-parent",
+  root_connection_id: "c-root",
+  tasks: [
+    {
+      index: 0,
+      title: "audit",
+      prompt: "audit the auth flow",
+      agent_type: "claude_code",
+      model: "fixture-v1",
+    },
+  ],
+  created_at: "2026-10-18T00:00:00Z",
+}
 const NONE = {
   pendingPermission: null,
   pendingAskQuestion: null,
   pendingPlanApproval: null,
+  pendingSplit: null,
 }
 
 describe("blockingPrompts", () => {
@@ -40,6 +56,12 @@ describe("blockingPrompts", () => {
         ...NONE,
         pendingAskQuestion: { ...QUESTION, questions: [] },
       })
+    ).toBeNull()
+  })
+
+  it("does not count a split with no tasks — it renders no card", () => {
+    expect(
+      blockingPrompts({ ...NONE, pendingSplit: { ...SPLIT, tasks: [] } })
     ).toBeNull()
   })
 
@@ -58,16 +80,19 @@ describe("blockingPrompts", () => {
       pendingPermission: PERMISSION,
       pendingAskQuestion: QUESTION,
       pendingPlanApproval: PLAN,
+      pendingSplit: SPLIT,
     })
     expect(all).toMatchObject({
       permission: PERMISSION,
       askQuestion: QUESTION,
       planApproval: PLAN,
+      split: SPLIT,
     })
     expect(all?.ids).toEqual([
       "permission:req-1",
       "question:q-1",
       "plan:plan-1",
+      "split:sp-1",
     ])
   })
 })

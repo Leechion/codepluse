@@ -20,7 +20,6 @@ import (
 	"harnesshub/internal/hub"
 	"harnesshub/internal/mcpserver"
 	"harnesshub/internal/orch"
-	"harnesshub/internal/providers"
 )
 
 // ----------------------------- small helpers -----------------------------
@@ -234,7 +233,7 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 	if err != nil {
 		return nil, fmt.Errorf("未找到 node，无法启动 ACP 适配器")
 	}
-	env, err := buildEnv(tool)
+	env, err := buildEnv(agent)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +249,9 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 	}
 	args := []string{pkg}
 	if tool == "claude" {
-		provider, configured, err := providers.Active(ROOT, tool)
+		// An instance may pin its own provider; resolveProvider falls back to
+		// the global active selection, which is what the built-in follows.
+		provider, configured, err := resolveProvider(agent)
 		if err != nil {
 			return nil, fmt.Errorf("读取 API 供应商失败: %w", err)
 		}
@@ -432,7 +433,7 @@ func main() {
 		customAcp: map[string]map[string]any{}, agentLocks: map[string]*sync.Mutex{},
 		sseClients: map[chan []byte]bool{}}
 	rt.LaunchFn = srv.launchFn
-	rt.LaunchVersion = func(agent *hub.Agent) string { return providerVersion(agent.RealTool) }
+	rt.LaunchVersion = func(agent *hub.Agent) string { return providerVersion(agent) }
 
 	logFn := func(level, source, text string) { h.Log(level, source, text) }
 	orchestrator := &orch.Orchestrator{Hub: h, Invoke: srv.invoke,

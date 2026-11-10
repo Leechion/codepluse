@@ -31,8 +31,12 @@ type Delegation struct {
 	Executing                                                       bool   `json:"-"`
 	Depth                                                           int
 	ParentToolUseID                                                 string        `json:"parent_tool_use_id"`
-	Updated                                                         chan struct{} `json:"-"`
-	Inbox                                                           []Row         `json:"inbox,omitempty"`
+	// SplitID marks a child launched by a confirmed task-split card; Title is
+	// the card's label for it. Empty on a direct delegate_to_agent.
+	SplitID string `json:"split_id,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Updated chan struct{} `json:"-"`
+	Inbox   []Row         `json:"inbox,omitempty"`
 }
 
 func (s *Server) extraMCP(agent *hub.Agent, o acp.Options, runtimeID string) []map[string]any {
@@ -97,10 +101,118 @@ func (s *Server) companionRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, 200, result)
 }
+// delegateScope resolves the launch scope for one child delegation: the
+// working dir and permission inherited from the caller's parent connection,
+// re-checked against the parent's live native mode (a model can switch modes
+// mid-turn, and the child must not outrank it). Returns (cwd, permission,
+// level, err). Shared by delegate_to_agent and the task-split fan-out so both
+// inherit identical rules.
+func (s *Server) delegateScope(caller *Caller, agentType, requestedDir string) (string, string, string, error) {
+	s.mu.Lock()
+	parent := s.connections[caller.ConnectionID]
+	if parent == nil {
+		s.mu.Unlock()
+		return "", "", "", fmt.Errorf("父会话已断开")
+	}
+	cwd, permission := parent.Options.Workdir, parent.Options.Permission
+	level := acp.ModeLevel(parent.Options.Mode)
+	runtimeID := parent.RuntimeID
+	if level == "" {
+		level = permission
+	}
+	s.mu.Unlock()
+	agent := s.pick(agentType)
+	if agent == nil {
+		return "", "", "", fmt.Errorf("执行端不可用：%s", agentType)
+	}
+	if current := text(s.runtimeView(runtimeID)["nativeMode"]); current != "" {
+		if actual := acp.ModeLevel(current); actual != "" {
+			level = actual
+		}
+	}
+	if level == "full" || level == "workspace" {
+		permission = "workspace"
+	} else if level == "readonly" {
+		permission = "readonly"
+	}
+	if agent.RealTool == "dsh" && permission != "workspace" {
+		return "", "", "", fmt.Errorf("DSH 不支持继承只读权限，请先将负责人切换到工作区模式再委派")
+	}
+	if requestedDir != "" {
+		var err error
+		cwd, err = s.Resolve(requestedDir)
+		if err != nil {
+			return "", "", "", err
+		}
+	}
+	return cwd, permission, level, nil
+}
+
+// launchDelegations registers children for a confirmed task split and launches
+// them in parallel. The caller has already left s.mu and retired the split
+// card; scope resolution (delegateScope locks) runs unlocked, registration is
+// one locked pass, and a persistence failure rolls the registrations back.
+// Returns the launched task ids; a nil slice means nothing was registered.
+func (s *Server) launchDelegations(sp *taskSplit, parentDepth, parentConv int, parentAgentType string) []string {
+	type launch struct {
+		d       *Delegation
+		scopeOK bool
+	}
+	innerCaller := &Caller{ConnectionID: sp.Parent, RootID: sp.Root, Depth: parentDepth}
+	launches := make([]launch, 0, len(sp.Tasks))
+	for _, task := range sp.Tasks {
+		agentType := text(task["agent_type"])
+		if s.pick(agentType) == nil {
+			agentType = parentAgentType
+		}
+		cwd, permission, level, err := s.delegateScope(innerCaller, agentType, text(task["working_dir"]))
+		d := &Delegation{ID: id(), Parent: sp.Parent, Root: sp.Root, AgentType: agentType, Task: text(task["prompt"]), Workdir: cwd, Model: text(task["model"]), Permission: permission, Status: "running",
+			Depth: parentDepth + 1, Updated: make(chan struct{}), Inbox: []Row{}, ParentConversationID: parentConv, SplitID: sp.ID, Title: text(task["title"])}
+		d.Mode = acp.DelegatedMode(s.pick(agentType), level)
+		d.Executing = true
+		d.ParentToolUseID = d.ID
+		if err != nil {
+			d.Status, d.Error, d.Executing = "failed", err.Error(), false
+		}
+		launches = append(launches, launch{d: d, scopeOK: err == nil})
+	}
+	s.mu.Lock()
+	ids := []string{}
+	for _, l := range launches {
+		s.tasks[l.d.ID] = l.d
+		ids = append(ids, l.d.ID)
+	}
+	errSave := s.saveDelegationsLocked()
+	s.mu.Unlock()
+	if errSave != nil {
+		s.mu.Lock()
+		for _, l := range launches {
+			delete(s.tasks, l.d.ID)
+		}
+		_ = s.saveDelegationsLocked()
+		s.mu.Unlock()
+		return nil
+	}
+	for _, l := range launches {
+		if l.scopeOK {
+			go s.runDelegation(l.d)
+			continue
+		}
+		// A subtask the parent's permission or the target's availability
+		// refused at dispatch time still needs its row: emit the same event
+		// pair so the card shows a failed task rather than an orphaned one.
+		s.event(sp.Parent, Row{"type": "delegation_started", "parent_connection_id": sp.Parent, "parent_tool_use_id": l.d.ParentToolUseID, "split_id": sp.ID, "child_connection_id": "", "child_conversation_id": 0, "agent_type": l.d.AgentType, "task_id": l.d.ID, "task_preview": l.d.Task})
+		s.event(sp.Parent, Row{"type": "delegation_completed", "parent_connection_id": sp.Parent, "parent_tool_use_id": l.d.ParentToolUseID, "split_id": sp.ID, "child_connection_id": "", "child_conversation_id": 0, "agent_type": l.d.AgentType, "task_id": l.d.ID, "result": Row{"kind": "err", "error_code": "subagent_error"}})
+	}
+	return ids
+}
+
 func (s *Server) tool(ctx context.Context, caller *Caller, name string, a Row) (any, error) {
 	switch name {
 	case "list_agents":
 		return Row{"agents": s.agents()}, nil
+	case "propose_task_split":
+		return s.proposeTaskSplit(caller, a)
 	case "resume_delegation":
 		return s.resumeDelegation(caller, text(a["task_id"]), text(a["task"]))
 	case "delegate_to_agent":
@@ -114,39 +226,18 @@ func (s *Server) tool(ctx context.Context, caller *Caller, name string, a Row) (
 		if task == "" || len(task) > 120000 {
 			return nil, fmt.Errorf("子任务必须包含完整目标，且不超过 120000 字节")
 		}
+		cwd, permission, mode, err := s.delegateScope(caller, agentType, text(a["working_dir"]))
+		if err != nil {
+			return nil, err
+		}
 		s.mu.Lock()
 		parent := s.connections[caller.ConnectionID]
 		if parent == nil {
 			s.mu.Unlock()
 			return nil, fmt.Errorf("父会话已断开")
 		}
-		cwd, permission := parent.Options.Workdir, parent.Options.Permission
-		level := acp.ModeLevel(parent.Options.Mode)
-		runtimeID := parent.RuntimeID
-		if level == "" {
-			level = permission
-		}
+		parentConv := parent.ConversationID
 		s.mu.Unlock()
-		if current := text(s.runtimeView(runtimeID)["nativeMode"]); current != "" {
-			if actual := acp.ModeLevel(current); actual != "" {
-				level = actual
-			}
-		}
-		if level == "full" || level == "workspace" {
-			permission = "workspace"
-		} else if level == "readonly" {
-			permission = "readonly"
-		}
-		if s.pick(agentType).RealTool == "dsh" && permission != "workspace" {
-			return nil, fmt.Errorf("DSH 不支持继承只读权限，请先将负责人切换到工作区模式再委派")
-		}
-		if requested := text(a["working_dir"]); requested != "" {
-			var err error
-			cwd, err = s.Resolve(requested)
-			if err != nil {
-				return nil, err
-			}
-		}
 		if taskID := text(a["task_id"]); taskID != "" {
 			return s.resumeDelegation(caller, taskID, task)
 		}
@@ -154,7 +245,7 @@ func (s *Server) tool(ctx context.Context, caller *Caller, name string, a Row) (
 		candidates := []string{}
 		if a["new_task"] != true {
 			for _, old := range s.tasks {
-				if old.Root != caller.RootID || old.AgentType != agentType || old.Workdir != cwd || (old.ParentConversationID != parent.ConversationID && old.Parent != caller.ConnectionID) {
+				if old.Root != caller.RootID || old.AgentType != agentType || old.Workdir != cwd || (old.ParentConversationID != parentConv && old.Parent != caller.ConnectionID) {
 					continue
 				}
 				if old.Status == "running" && (old.Task == task || old.NextPrompt == task) {
@@ -174,8 +265,8 @@ func (s *Server) tool(ctx context.Context, caller *Caller, name string, a Row) (
 		if len(candidates) > 1 {
 			return nil, fmt.Errorf("存在多个未完成的原子任务 %v，请用 resume_delegation 指定 task_id 继续；确需新任务时传 new_task=true", candidates)
 		}
-		d := &Delegation{ID: id(), Parent: caller.ConnectionID, Root: caller.RootID, AgentType: agentType, Task: task, Workdir: cwd, Model: text(a["model"]), Permission: permission, Status: "running", Depth: caller.Depth + 1, Updated: make(chan struct{}), Inbox: []Row{}, ParentConversationID: parent.ConversationID}
-		d.Mode = acp.DelegatedMode(s.pick(agentType), level)
+		d := &Delegation{ID: id(), Parent: caller.ConnectionID, Root: caller.RootID, AgentType: agentType, Task: task, Workdir: cwd, Model: text(a["model"]), Permission: permission, Status: "running", Depth: caller.Depth + 1, Updated: make(chan struct{}), Inbox: []Row{}, ParentConversationID: parentConv}
+		d.Mode = acp.DelegatedMode(s.pick(agentType), mode)
 		d.Executing = true
 		s.mu.Lock()
 		if a["new_task"] != true {
@@ -339,6 +430,11 @@ func (s *Server) taskStatus(caller *Caller, ids []string) ([]Row, bool) {
 // belong to the broker and should not appear in model context or tool cards.
 func taskReport(d *Delegation) Row {
 	row := Row{"task_id": d.ID, "status": d.Status, "agent_type": d.AgentType, "task_preview": d.Task}
+	if d.SplitID != "" {
+		// Tells the main bot a task came off a confirmed split card; it can
+		// still poll or resume it like any delegation.
+		row["split_id"] = d.SplitID
+	}
 	if d.Status == "interrupted" {
 		row["status"] = "failed"
 		row["error_code"] = "interrupted"
@@ -443,13 +539,15 @@ func (s *Server) runDelegation(d *Delegation) {
 	c.FolderID = folder
 	c.Busy = true
 	c.Status = "prompting"
+	c.RunSeq++
+	c.RunAccepted = time.Now()
 	d.ConversationID = conv
 	d.NativeSessionID = text(view["nativeSessionId"])
 	d.ParentConversationID = parentConv
 	_ = s.saveDelegationsLocked()
 	s.mu.Unlock()
 	s.bindConversation(c, conv)
-	s.event(d.Parent, Row{"type": "delegation_started", "parent_connection_id": d.Parent, "parent_tool_use_id": d.ParentToolUseID, "child_connection_id": cid, "child_conversation_id": conv, "agent_type": d.AgentType, "task_id": d.ID, "task_preview": d.Task})
+	s.event(d.Parent, Row{"type": "delegation_started", "parent_connection_id": d.Parent, "parent_tool_use_id": d.ParentToolUseID, "child_connection_id": cid, "child_conversation_id": conv, "agent_type": d.AgentType, "task_id": d.ID, "task_preview": d.Task, "split_id": d.SplitID})
 	s.event(cid, Row{"type": "status_changed", "status": "prompting"})
 	res := s.run(c, input)
 	s.mu.Lock()
@@ -469,5 +567,5 @@ func (s *Server) runDelegation(d *Delegation) {
 	if status != "completed" {
 		summary = Row{"kind": "err", "error_code": status}
 	}
-	s.event(d.Parent, Row{"type": "delegation_completed", "parent_connection_id": d.Parent, "parent_tool_use_id": d.ParentToolUseID, "child_connection_id": cid, "child_conversation_id": conv, "agent_type": d.AgentType, "task_id": d.ID, "result": summary})
+	s.event(d.Parent, Row{"type": "delegation_completed", "parent_connection_id": d.Parent, "parent_tool_use_id": d.ParentToolUseID, "child_connection_id": cid, "child_conversation_id": conv, "agent_type": d.AgentType, "task_id": d.ID, "result": summary, "split_id": d.SplitID})
 }
