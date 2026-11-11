@@ -143,6 +143,7 @@ type Turn struct {
 	StopReason    string           `json:"stopReason,omitempty"`
 	Error         string           `json:"error,omitempty"`
 	ReceivedChars int              `json:"receivedChars,omitempty"`
+	Usage         map[string]any   `json:"usage,omitempty"`
 	lastActivity  time.Time
 }
 
@@ -500,12 +501,16 @@ func (r *Runtime) startDriver(agent *hub.Agent, permission, cwd string) (*Driver
 		r.save()
 	}()
 	// initialize handshake
+	// A cold Claude driver can take well over 30s to answer initialize on
+	// first spawn (large native binary plus antivirus scanning), which read as
+	// "连接不上"; a dead process still errors out immediately, so the longer
+	// deadline only buys slow startups, not hangs.
 	result, err := d.call("initialize", map[string]any{
 		"protocolVersion": 1,
 		"clientInfo":      map[string]any{"name": "harness-hub-go", "version": "2.0.0"},
 		"clientCapabilities": map[string]any{"fs": map[string]any{
 			"readTextFile": true, "writeTextFile": permission == "workspace"}, "terminal": false, "session": map[string]any{"notices": map[string]any{}}},
-	}, 30*time.Second)
+	}, 90*time.Second)
 	if err != nil {
 		d.Kill()
 		select {
@@ -707,6 +712,38 @@ func truncate(s string, n int) string {
 		return s[:n]
 	}
 	return s
+}
+
+// normalizeUsage converts the per-turn usage the adapters attach to the
+// session/prompt reply (claude-agent-acp: inputTokens/cachedReadTokens/
+// cachedWriteTokens; codex-acp: cachedInputTokens/cacheWriteInputTokens) into
+// the persisted TurnUsage wire shape. A reply without usage yields nil.
+func normalizeUsage(u map[string]any) map[string]any {
+	if u == nil {
+		return nil
+	}
+	num := func(keys ...string) float64 {
+		for _, k := range keys {
+			if f, ok := u[k].(float64); ok {
+				return f
+			}
+		}
+		return 0
+	}
+	out := map[string]any{
+		"input_tokens":                num("inputTokens", "input_tokens"),
+		"output_tokens":               num("outputTokens", "output_tokens"),
+		"cache_creation_input_tokens": num("cachedWriteTokens", "cacheWriteInputTokens", "cache_creation_input_tokens"),
+		"cache_read_input_tokens":     num("cachedReadTokens", "cachedInputTokens", "cache_read_input_tokens"),
+	}
+	total := 0.0
+	for _, v := range out {
+		total += v.(float64)
+	}
+	if total <= 0 {
+		return nil
+	}
+	return out
 }
 
 // --- permission cards ---
@@ -1037,6 +1074,8 @@ func (r *Runtime) ensure(agent *hub.Agent, o Options) (*SessionRecord, *Driver, 
 	if r.ExtraMCP != nil {
 		mcpServers = append(mcpServers, r.ExtraMCP(agent, o, rec.ID)...)
 	}
+	// Same cold-start allowance as the initialize handshake above: the first
+	// session/new on a fresh driver can exceed 30s while the CLI initializes.
 	if rec.NativeSessionID != "" {
 		caps, _ := d.Info["agentCapabilities"].(map[string]any)
 		method := "session/load"
@@ -1050,9 +1089,9 @@ func (r *Runtime) ensure(agent *hub.Agent, o Options) (*SessionRecord, *Driver, 
 			r.setState(rec, "error", "该 Harness 不支持恢复旧会话，请新建对话")
 			return nil, nil, fmt.Errorf("该 Harness 不支持恢复旧会话，请新建对话")
 		}
-		result, callErr = d.call(method, map[string]any{"sessionId": rec.NativeSessionID, "cwd": o.Workdir, "mcpServers": mcpServers}, 30*time.Second)
+		result, callErr = d.call(method, map[string]any{"sessionId": rec.NativeSessionID, "cwd": o.Workdir, "mcpServers": mcpServers}, 90*time.Second)
 	} else {
-		result, callErr = d.call("session/new", map[string]any{"cwd": o.Workdir, "mcpServers": mcpServers}, 30*time.Second)
+		result, callErr = d.call("session/new", map[string]any{"cwd": o.Workdir, "mcpServers": mcpServers}, 90*time.Second)
 	}
 	if callErr != nil {
 		r.setState(rec, "error", callErr.Error())
@@ -1608,10 +1647,12 @@ clock:
 			var result struct {
 				StopReason string         `json:"stopReason"`
 				Meta       map[string]any `json:"_meta"`
+				Usage      map[string]any `json:"usage"`
 			}
 			if promptErr == nil {
 				promptErr = json.Unmarshal(reply.Raw, &result)
 				stopReason = result.StopReason
+				turn.Usage = normalizeUsage(result.Usage)
 				if stopReason == "refusal" {
 					message := "执行端拒绝了本次请求"
 					if raw, ok := result.Meta["codebuddy.ai/errorMessage"].(string); ok {
@@ -1698,6 +1739,9 @@ clock:
 	meta := map[string]any{"sessionId": rec.NativeSessionID, "runtimeSessionId": rec.ID,
 		"model": model, "permission": rec.Permission, "tool": agent.RealTool,
 		"durationMs": turn.FinishedAt - turn.StartedAt, "stopReason": stopReason}
+	if turn.Usage != nil {
+		meta["usage"] = turn.Usage
+	}
 	if hardKilled {
 		return Result{OK: false, Output: turn.Output, Error: "ACP 会话超时", Meta: meta}
 	}

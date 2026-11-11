@@ -68,7 +68,8 @@
       "browser": "Utilisation du navigateur",
       "computer_use": "Utilisation de l'ordinateur",
       "quick_messages": "Messages rapides",
-      "logs": "Journaux d'exécution"
+      "logs": "Journaux d'exécution",
+      "api_providers": "Fournisseurs d’API"
     }
   },
   "AppearanceSettings": {
@@ -2496,7 +2497,8 @@
           "more": "Plus"
         },
         "browserTab": "Ouvrir un onglet de navigateur",
-        "showPet": "Afficher la mascotte"
+        "showPet": "Afficher la mascotte",
+        "openSettings": "Paramètres"
       },
       "mcp": {
         "title": "Service codeg-mcp",

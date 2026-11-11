@@ -68,7 +68,8 @@
       "browser": "ブラウザ操作",
       "computer_use": "コンピューター操作",
       "quick_messages": "クイックメッセージ",
-      "logs": "実行ログ"
+      "logs": "実行ログ",
+      "api_providers": "API プロバイダー"
     }
   },
   "AppearanceSettings": {
@@ -2496,7 +2497,8 @@
           "more": "その他"
         },
         "browserTab": "ブラウザータブを開く",
-        "showPet": "ペットを表示"
+        "showPet": "ペットを表示",
+        "openSettings": "設定"
       },
       "mcp": {
         "title": "codeg-mcp サービス",

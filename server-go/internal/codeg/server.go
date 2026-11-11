@@ -287,6 +287,14 @@ func (s *Server) command(command string, a Row) (any, error) {
 		return nil, providers.Delete(s.Root, text(a["id"]))
 	case "acp_list_agents":
 		return s.agents(), nil
+	case "token_usage_report":
+		return s.tokenUsageReport(a)
+	case "token_usage_facets":
+		return s.tokenUsageFacets()
+	case "token_usage_status":
+		return s.tokenUsageStatus()
+	case "token_usage_sync":
+		return s.tokenUsageSync(a)
 	case "experts_list", "science_list", "experts_read_content", "science_read_content", "experts_list_all_install_statuses", "science_list_all_install_statuses", "officecli_skill_list_all_install_statuses", "acp_list_agent_runtime_skills", "acp_list_agent_skills":
 		return s.skills(command, a)
 	case "pick_directory":

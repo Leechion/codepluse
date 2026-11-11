@@ -68,7 +68,8 @@
       "browser": "瀏覽器操作",
       "computer_use": "電腦操作",
       "quick_messages": "快捷訊息",
-      "logs": "執行日誌"
+      "logs": "執行日誌",
+      "api_providers": "API 供應商"
     }
   },
   "AppearanceSettings": {
@@ -2496,7 +2497,8 @@
           "more": "更多"
         },
         "browserTab": "開啟瀏覽器",
-        "showPet": "顯示寵物"
+        "showPet": "顯示寵物",
+        "openSettings": "設定"
       },
       "mcp": {
         "title": "codeg-mcp 服務",

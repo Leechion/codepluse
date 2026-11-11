@@ -68,7 +68,8 @@
       "browser": "브라우저 사용",
       "computer_use": "컴퓨터 사용",
       "quick_messages": "빠른 메시지",
-      "logs": "실행 로그"
+      "logs": "실행 로그",
+      "api_providers": "API 공급자"
     }
   },
   "AppearanceSettings": {
@@ -2496,7 +2497,8 @@
           "more": "기타"
         },
         "browserTab": "브라우저 탭 열기",
-        "showPet": "펫 표시"
+        "showPet": "펫 표시",
+        "openSettings": "설정"
       },
       "mcp": {
         "title": "codeg-mcp 서비스",

@@ -3536,6 +3536,7 @@ const zhCN: Record<string, string> = {
   "settings.previewBadge.light": "浅色",
   "settings.previewBadge.dark": "深色",
   "settings.modelProviderTitle": "模型设置",
+  "settings.apiProviders.title": "API 供应商",
   "settings.mcpTitle": "MCP 服务器",
   "settings.mcp.trust.action": "信任",
   "settings.mcp.trust.revoke": "撤销信任",

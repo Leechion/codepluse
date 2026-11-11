@@ -174,7 +174,36 @@ func resolveBin(tool string) string {
 			return p
 		}
 	}
-	return ""
+	return runtimeBin(tool)
+}
+
+// runtimeBin covers npm installs whose global prefix is not %APPDATA%\npm
+// (custom prefixes such as a user-selected node_global directory): npm drops
+// its shim (claude.cmd / codex.cmd) in the prefix root, and the package with
+// the native CLI sits under <prefix>\node_modules.
+func runtimeBin(tool string) string {
+	shim, err := exec.LookPath(tool + ".cmd")
+	if err != nil {
+		return ""
+	}
+	prefix := filepath.Dir(shim)
+	var pkg string
+	switch tool {
+	case "codex":
+		pkg = filepath.Join("@openai", "codex", "bin", "codex.js")
+	case "claude":
+		pkg = filepath.Join("@anthropic-ai", "claude-code", "bin", "claude.exe")
+		if _, err := os.Stat(filepath.Join(prefix, "node_modules", pkg)); err != nil {
+			pkg = filepath.Join("@anthropic-ai", "claude-code", "bin", "claude")
+		}
+	default:
+		return ""
+	}
+	p := filepath.Join(prefix, "node_modules", pkg)
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	return p
 }
 
 func acpInstalled(tool string) string {

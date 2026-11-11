@@ -1,9 +1,7 @@
 "use client"
 
-import { useCallback } from "react"
-import { PanelRight, Settings, SquareTerminal } from "lucide-react"
+import { PanelRight, SquareTerminal } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { openSettingsWindow } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
@@ -44,12 +42,6 @@ export function RightEdgeChrome() {
   const isMac = useIsMac()
   const { shortcuts } = useShortcutSettings()
   const { zoomLevel } = useZoomLevel()
-
-  const handleOpenSettings = useCallback(() => {
-    openSettingsWindow().catch((err) => {
-      console.error("[RightEdgeChrome] failed to open settings:", err)
-    })
-  }, [])
 
   return (
     <div
@@ -96,18 +88,6 @@ export function RightEdgeChrome() {
           buttonClassName="h-6 w-6 hover:bg-foreground/10 hover:text-foreground/80 dark:hover:bg-foreground/10"
           iconClassName="h-3.5 w-3.5"
         />
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 hover:bg-foreground/10 hover:text-foreground/80 dark:hover:bg-foreground/10"
-          onClick={handleOpenSettings}
-          title={tTitleBar("withShortcut", {
-            label: tTitleBar("openSettings"),
-            shortcut: formatShortcutLabel(shortcuts.open_settings, isMac),
-          })}
-        >
-          <Settings className="h-3.5 w-3.5" />
-        </Button>
       </div>
     </div>
   )

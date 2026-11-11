@@ -3752,6 +3752,7 @@ export type SettingsSection =
   | "computer-use"
   | "version-control"
   | "shortcuts"
+  | "api-providers"
   | "system"
 
 interface OpenSettingsWindowOptions {
@@ -3771,14 +3772,18 @@ export async function openSettingsWindow(
       remoteConnectionId: getActiveRemoteConnectionId(),
     })
   }
-  // Web mode: open in new window
-  return openAppWindow(`settings-${section ?? "general"}`, () =>
-    getTransport().call<{ path: string }>("open_settings_window", {
-      section: section ?? null,
-      agentType: options?.agentType ?? null,
-      locale,
-    })
-  )
+  // Web mode already knows the static settings route. Resolving it through the
+  // Go API made the popup fail because that desktop-only window command is not
+  // implemented by the web backend.
+  const params = new URLSearchParams({ locale })
+  if (options?.agentType) params.set("agentType", options.agentType)
+  const remoteConnectionId = getActiveRemoteConnectionId()
+  if (remoteConnectionId != null) {
+    params.set("remoteConnectionId", String(remoteConnectionId))
+  }
+  const query = params.toString()
+  const path = `/settings/${section ?? "general"}${query ? `?${query}` : ""}`
+  return openAppWindow(`settings-${section ?? "general"}`, async () => ({ path }))
 }
 
 export interface OpenImportSessionsWindowOptions {

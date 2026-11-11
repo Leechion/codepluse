@@ -74,6 +74,7 @@ import {
 } from "./project-sidebar";
 import { resolveRecentRemoteProjectPreference } from "./project-sidebar/remote-project-connection";
 import { ModelProviderSection } from "./settings/ModelProviderSection";
+import { ApiProvidersSection } from "@/components/settings/api-providers-section";
 import { useCodingPlanUpgradeDialog } from "./settings/CodingPlanUpgradeDialogProvider";
 import { useEnterpriseCodingPlanProducts } from "./settings/model-provider-section/useEnterpriseCodingPlanProducts";
 import { UsageStatsSection, type UsageStatsSectionTab } from "./settings/UsageStatsSection";
@@ -2095,6 +2096,8 @@ export function SettingsPage({
                                 }
                               />
                             </ServiceProvider>
+                          ) : activeSection === "apiProviders" ? (
+                            <ApiProvidersSection />
                           ) : activeSection === "personalization" ? (
                             // 个性化指令编辑的是本机 ~/.zcode/AGENTS.md（Agent 实际读取的文件）。
                             // 仅桌面本地入口可编辑：手机远控的 base services 可能归属远程

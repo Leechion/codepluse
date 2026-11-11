@@ -21,6 +21,7 @@ import {
   HardDrive,
   Keyboard,
   FileSearch,
+  PlugZap,
   RefreshCw,
   User,
 } from "lucide-react";
@@ -76,6 +77,13 @@ const BASE_SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
     id: "modelProvider",
     icon: Package,
     titleId: "settings.modelProviderTitle",
+    groupId: "basics",
+  },
+  // codepluse 的 API 供应商（CC Switch / Anthropic 兼容网关）从工作台入口迁入设置页。
+  {
+    id: "apiProviders",
+    icon: PlugZap,
+    titleId: "settings.apiProviders.title",
     groupId: "basics",
   },
   // 个性化（用户自定义指令）是 Agent 能力组的第一项：编辑 ~/.zcode/AGENTS.md，

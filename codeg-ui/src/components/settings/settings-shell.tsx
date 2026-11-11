@@ -17,6 +17,7 @@ import {
   GitBranch,
   Globe,
   Keyboard,
+  KeyRound,
   Layers,
   Menu,
   MessageSquareText,
@@ -50,6 +51,7 @@ interface SettingsNavItem {
     | "appearance"
     | "agents"
     | "model_providers"
+    | "api_providers"
     | "harness_instances"
     | "mcp"
     | "skills"
@@ -107,6 +109,11 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
     href: "/settings/model-providers",
     labelKey: "model_providers",
     icon: Server,
+  },
+  {
+    href: "/settings/api-providers",
+    labelKey: "api_providers",
+    icon: KeyRound,
   },
   {
     href: "/settings/harness-instances",

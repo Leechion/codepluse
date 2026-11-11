@@ -12,7 +12,6 @@ import {
   Monitor,
   MonitorCloud,
   PawPrint,
-  Rocket,
   Settings,
   Zap,
 } from "lucide-react"
@@ -35,7 +34,7 @@ import { useTasksView } from "@/contexts/tasks-view-context"
 import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
 import { useOptionalWorkspaceActions } from "@/contexts/workspace-context"
 import { useRemoteWorkspaceConnections } from "@/hooks/use-remote-workspace-connections"
-import { openProjectBootWindow } from "@/lib/api"
+import { openSettingsWindow } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
 import { BLANK_PAGE_URL } from "@/lib/browser/browser-url"
 import { useBrowserCapabilities } from "@/lib/browser/use-browser-capabilities"
@@ -103,9 +102,11 @@ export function QuickActionsDropdown() {
   // local one the row would just focus the window it was picked from.
   const remoteWindow = isRemoteDesktopWindow()
 
-  const handleProjectBoot = useCallback(() => {
-    openProjectBootWindow().catch((err) => {
-      console.error("[QuickActionsDropdown] failed to open project boot:", err)
+  // 左下角原「API 供应商」入口：功能已并入设置站（/settings/api-providers），
+  // 这里直接打开设置站并落到该分区；桌面端走壳的 settings 窗口命令。
+  const handleOpenSettings = useCallback(() => {
+    openSettingsWindow("api-providers").catch((err) => {
+      console.error("[QuickActionsDropdown] failed to open settings:", err)
     })
   }, [])
 
@@ -177,9 +178,9 @@ export function QuickActionsDropdown() {
             <FolderGit2 />
             {tFolderDropdown("cloneRepository")}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={handleProjectBoot}>
-            <Rocket />
-            {tFolderDropdown("projectBoot")}
+          <DropdownMenuItem onSelect={handleOpenSettings}>
+            <Settings />
+            {t("openSettings")}
           </DropdownMenuItem>
           {remoteWindow && (
             <DropdownMenuItem onSelect={handleOpenLocal}>

@@ -685,6 +685,15 @@ func (s *Server) runWithContent(c *Connection, prompt string, content []map[stri
 			if sourceTurnID != "" {
 				turns[len(turns)-1]["source_turn_id"] = sourceTurnID
 			}
+			if usage, ok := result.Meta["usage"].(map[string]any); ok && len(usage) > 0 {
+				turns[len(turns)-1]["usage"] = usage
+			}
+			if m := text(result.Meta["model"]); m != "" {
+				turns[len(turns)-1]["model"] = m
+			}
+			if dm, ok := result.Meta["durationMs"]; ok {
+				turns[len(turns)-1]["duration_ms"] = dm
+			}
 			row["status"] = "pending_review"
 		} else {
 			row["status"] = "cancelled"

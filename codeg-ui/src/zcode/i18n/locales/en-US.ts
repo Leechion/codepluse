@@ -3780,6 +3780,7 @@ const enUS: Record<string, string> = {
   "settings.previewBadge.light": "Light",
   "settings.previewBadge.dark": "Dark",
   "settings.modelProviderTitle": "Model settings",
+  "settings.apiProviders.title": "API providers",
   "settings.mcpTitle": "MCP Servers",
   "settings.mcp.trust.action": "Trust",
   "settings.mcp.trust.revoke": "Revoke trust",

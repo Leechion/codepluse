@@ -10,7 +10,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "../components/ui/dropdown-menu";
-import "./composer-thought-slider.css";
 
 // 固定种子避免重渲染重新随机，让最高档气泡错峰流动而不影响模型选择状态。
 const EFFORT_BUBBLES = [
