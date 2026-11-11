@@ -5,12 +5,10 @@ import {
   Menu,
   PanelRight,
   Search,
-  Settings,
   SquarePen,
   SquareTerminal,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { openSettingsWindow } from "@/lib/api"
 import { isDesktop } from "@/lib/platform"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useIsActiveChatMode } from "@/hooks/use-is-active-chat-mode"
@@ -58,15 +56,6 @@ export function FolderTitleBar() {
   const { isMac } = usePlatform()
   const showMacInset = isMac && isDesktop()
 
-  const handleOpenSettings = useCallback(() => {
-    openSettingsWindow().catch((err) => {
-      console.error("[FolderTitleBar] failed to open settings:", err)
-    })
-  }, [])
-
-  // Mirror the sidebar's "New chat": return to the conversation workspace, then
-  // start a new conversation in the active folder — or folderless chat mode when
-  // there's none, so this entry point is never a dead end.
   const handleNewConversation = useCallback(() => {
     openConversations()
     if (!activeFolder) {
@@ -171,16 +160,6 @@ export function FolderTitleBar() {
           buttonClassName="h-8 w-8 shrink-0"
           iconClassName="h-4 w-4"
         />
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 shrink-0"
-          onClick={handleOpenSettings}
-          title={tTitleBar("openSettings")}
-          aria-label={tTitleBar("openSettings")}
-        >
-          <Settings className="h-4 w-4" />
-        </Button>
       </div>
       {/* Windows/Linux caption buttons; self-nulls on macOS / web. */}
       <WindowControls />
