@@ -8,6 +8,7 @@
     "desktop": "node desktop.js",
     "check": "node --check desktop/main.js && node --check desktop/backend.js && node --check scripts/build-desktop.js && node --check desktop.js && node --check scripts/make-icons.js && node --check public/app.js && node --check public/chat.js && node --check public/missions.js",
     "test": "node --test test/desktop.test.js",
+    "icons": "node scripts/make-icons.js",
     "desktop:build": "node scripts/build-desktop.js",
     "codeg:build": "pnpm --dir codeg-ui build",
     "codeg:start": "powershell -NoProfile -File scripts/start-codeg.ps1",

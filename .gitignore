@@ -14,3 +14,4 @@ codeg-ui/out/
 .zcode/
 .swc-cache/
 *.tsbuildinfo
+public/icon-preview/
