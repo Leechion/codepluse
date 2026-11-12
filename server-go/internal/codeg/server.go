@@ -137,6 +137,18 @@ func wireAgent(a *hub.Agent) string {
 }
 func (s *Server) agents() []Row {
 	out := []Row{}
+	// Snapshot the settings-page overlay under the store lock, then release it:
+	// agents() runs on the pre-store-lock dispatch path (acp_list_agents), and
+	// the per-agent installedVersion/AgentAvailable probes do file I/O that must
+	// not run while holding st.mu. Cloning each overlay Row also means the loop
+	// below never touches the live map a concurrent acp_update_agent_env may
+	// mutate.
+	s.store.mu.Lock()
+	overlay := make(map[string]Row, len(s.store.Agents))
+	for wire, ov := range s.store.Agents {
+		overlay[wire] = clone(ov)
+	}
+	s.store.mu.Unlock()
 	for _, a := range s.Hub.Agents() {
 		if !a.Real {
 			continue
@@ -150,7 +162,7 @@ func (s *Server) agents() []Row {
 			available = s.AgentAvailable(a)
 		}
 		row := Row{"agent_type": wireAgent(a), "name": a.Name, "description": "ACP · " + a.Name, "available": available, "enabled": a.Enabled, "registry_id": wireAgent(a), "registry_version": nil, "skills_capable": true, "supports_custom_version": false, "distribution_type": "system", "is_acp_adapter": a.RealTool != "", "custom_source": nil, "installed_version": s.installedVersion(a), "sort_order": len(out), "env": Row{}, "config_json": nil, "config_file_path": nil, "codex_auth_json": nil, "codex_config_toml": nil, "codex_model_catalog": nil, "system_instructions_content": nil, "system_instructions_file_path": nil, "model_provider_id": nil, "host_tools_agent_mode": true, "instance": a.Wire != "", "real_tool": a.RealTool, "provider_id": a.ProviderID, "default_model": a.DefaultModel}
-		mergeAgentOverlay(s.store.Agents, wireAgent(a), row)
+		mergeAgentOverlay(overlay, wireAgent(a), row)
 		out = append(out, row)
 	}
 	return out
