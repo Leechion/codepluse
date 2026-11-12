@@ -43,6 +43,10 @@ type Connection struct {
 	// Like Pending it is published through events and the snapshot, and cleared
 	// when the split resolves or the connection goes.
 	PendingSplit    Row
+	// PendingQuestion is a blocking ask_user_question card waiting on the user
+	// (see question.go). Published through events and the snapshot, cleared when
+	// the question resolves or the turn/session goes.
+	PendingQuestion Row
 	Busy            bool
 	SeenPermissions map[string]string
 	Depth                    int
@@ -711,6 +715,9 @@ func (s *Server) runWithContent(c *Connection, prompt string, content []map[stri
 	c.Live = nil
 	c.Pending = nil
 	s.mu.Unlock()
+	// A cancelled/ended turn can strand a blocking ask_user_question; settle it
+	// so the parked companion call returns and the card clears everywhere.
+	s.releaseQuestionsForConnection(c.ID)
 	if !result.OK {
 		s.event(c.ID, Row{"type": "error", "message": result.Error})
 	}
@@ -739,6 +746,7 @@ func (s *Server) disconnect(cid string) error {
 	}
 	// The card can no longer be answered once the session is gone.
 	s.dropConnectionSplits(cid)
+	s.releaseQuestionsForConnection(cid)
 	if c.Busy {
 		_ = s.Runtime.Cancel(c.RuntimeID)
 	}
@@ -804,7 +812,7 @@ func (s *Server) snapshot(cid string) Row {
 		s.mu.Unlock()
 		return nil
 	}
-	out := Row{"connection_id": cid, "conversation_id": c.ConversationID, "folder_id": c.FolderID, "status": c.Status, "event_seq": c.Seq, "live_message": clone(c.Live), "active_tool_calls": toolStateWire(c.Tools), "pending_permission": nilIfEmpty(clone(c.Pending)), "pending_split": nilIfEmpty(clone(c.PendingSplit)), "active_delegations": []Row{}, "feedback": clone(c.Feedback), "feedback_tool_available": true, "fork_supported": false, "available_commands": []Row{}, "selectors_ready": true, "config_options": []Row{}, "prompt_capabilities": Row{"image": false, "audio": false, "embedded_context": false}}
+	out := Row{"connection_id": cid, "conversation_id": c.ConversationID, "folder_id": c.FolderID, "status": c.Status, "event_seq": c.Seq, "live_message": clone(c.Live), "active_tool_calls": toolStateWire(c.Tools), "pending_permission": nilIfEmpty(clone(c.Pending)), "pending_split": nilIfEmpty(clone(c.PendingSplit)), "pending_question": nilIfEmpty(clone(c.PendingQuestion)), "active_delegations": []Row{}, "feedback": clone(c.Feedback), "feedback_tool_available": true, "fork_supported": false, "available_commands": []Row{}, "selectors_ready": true, "config_options": []Row{}, "prompt_capabilities": Row{"image": false, "audio": false, "embedded_context": false}}
 	active := []Row{}
 	for _, d := range s.tasks {
 		if d.Parent == cid && d.Status == "running" && d.ConnectionID != "" {

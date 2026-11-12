@@ -58,8 +58,8 @@
       "system": "Sistema",
       "chat_channels": "Canales de chat",
       "web_service": "Servicio Web",
+      "providers": "Proveedores",
       "model_providers": "Proveedores de Modelos",
-      "harness_instances": "Instancias de harness",
       "experts": "Expertos",
       "science": "Ciencia",
       "office_tools": "Herramientas de oficina",
@@ -803,6 +803,7 @@
       "saveFailed": "Error al guardar la configuración de delegación",
       "loadFailed": "Error al cargar la configuración de delegación: {detail}",
       "tabGeneral": "General",
+      "tabMainAgent": "Configuración del agente principal",
       "tabAgentDefaults": "Valores por defecto del agente",
       "agentDefaultsDescription": "Anulaciones por agente que se aplican cuando Colaboración multiagente inicia un subagente para una llamada de delegación. Las opciones mostradas provienen de un sondeo en vivo: lo que selecciones es exactamente lo que el agente aceptará.",
       "agentDefaultsAgentHint": "Las opciones que dejes en Predeterminado conservan el valor del propio agente.",
@@ -1568,6 +1569,7 @@
     "authModeModelProvider": "Proveedor de modelo",
     "modelProvider": "Proveedor de modelo",
     "modelProviderHint": "Usar la URL de API, la clave API y el modelo de un proveedor de modelo configurado.",
+    "modelProviderLoadFailed": "Error al cargar la configuración de CC Switch: {message}",
     "selectModelProvider": "Seleccionar proveedor de modelo",
     "noModelProviderAvailable": "No hay proveedor de modelo configurado para este agente. Vaya a la configuración de proveedores de modelo para agregar uno.",
     "claude": {
@@ -4669,6 +4671,7 @@
   "HarnessInstanceSettings": {
     "sectionTitle": "Instancias de harness",
     "sectionDescription": "Copias con nombre de Claude Code / Codex que fijan su propio proveedor y modelo predeterminado, más el bot principal de los chats nuevos.",
+    "instancesDescription": "Copias con nombre de Claude Code / Codex que fijan su propio proveedor y modelo predeterminado, para ejecutar varios entornos en paralelo sin tocar la selección global.",
     "loadFailed": "No se pudieron cargar las instancias de harness",
     "refresh": "Actualizar",
     "newInstance": "Nueva instancia",

@@ -58,8 +58,8 @@
       "system": "النظام",
       "chat_channels": "قنوات المحادثة",
       "web_service": "خدمة الويب",
+      "providers": "المزودون",
       "model_providers": "مزودو النماذج",
-      "harness_instances": "مثيلات Harness",
       "experts": "الخبراء",
       "science": "البحث العلمي",
       "office_tools": "أدوات المكتب",
@@ -803,6 +803,7 @@
       "saveFailed": "فشل حفظ إعدادات التفويض",
       "loadFailed": "فشل تحميل إعدادات التفويض: {detail}",
       "tabGeneral": "عام",
+      "tabMainAgent": "إعدادات الوكيل الرئيسي",
       "tabAgentDefaults": "إعدادات الوكيل الفرعي",
       "agentDefaultsDescription": "تجاوزات لكل وكيل تُطبَّق عندما يقوم التعاون متعدد الوكلاء بتشغيل وكيل فرعي لاستدعاء تفويض. تأتي الخيارات المعروضة هنا من فحص حي، لذا فإن ما تختاره هو بالضبط ما سيقبله الوكيل.",
       "agentDefaultsAgentHint": "الخيارات المتروكة على «افتراضي» تبقى على قيمة الوكيل نفسه.",
@@ -1568,6 +1569,7 @@
     "authModeModelProvider": "مزود النموذج",
     "modelProvider": "مزود النموذج",
     "modelProviderHint": "استخدم عنوان API ومفتاح API والنموذج من مزود نموذج مُعدّ.",
+    "modelProviderLoadFailed": "فشل تحميل إعدادات CC Switch: {message}",
     "selectModelProvider": "اختر مزود النموذج",
     "noModelProviderAvailable": "لا يوجد مزود نموذج مُعدّ لهذا الوكيل. انتقل إلى إعدادات مزود النموذج لإضافة واحد.",
     "claude": {
@@ -4669,6 +4671,7 @@
   "HarnessInstanceSettings": {
     "sectionTitle": "مثيلات Harness",
     "sectionDescription": "نسخ مسماة من Claude Code / Codex تثبّت مزودها ونموذجها الافتراضي، إضافةً إلى البوت الرئيسي الذي تبدأ المحادثات الجديدة عليه.",
+    "instancesDescription": "نسخ مسماة من Claude Code / Codex تثبّت مزودها ونموذجها الافتراضي، لتشغيل عدة بيئات جنبًا إلى جنب دون المساس بالاختيار العام.",
     "loadFailed": "تعذر تحميل مثيلات Harness",
     "refresh": "تحديث",
     "newInstance": "مثيل جديد",

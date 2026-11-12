@@ -54,9 +54,11 @@ func (s *Server) officeCommand(command string, a Row) (any, error) {
 	case "officecli_skill_read_content":
 		return s.officeSkillContent(text(a["skillId"]))
 	case "officecli_skill_list_all_install_statuses", "officecli_skill_get_install_status":
-		// Skill installation status follows skill sync; without the binary the
-		// skills exist as content only.
-		return Row{}, nil
+		// Frontend contract is ExpertInstallStatus[] (an array). Without the
+		// OfficeCLI binary no office skill is linked to an agent, so an empty
+		// array is the honest "no install-status rows" answer. Returning an
+		// object made the caller's spread (`[...statuses]`) throw "not iterable".
+		return []Row{}, nil
 	case "officecli_skill_link_to_agent", "officecli_skill_unlink_from_agent", "officecli_skill_apply_links":
 		return nil, fmt.Errorf("OfficeCLI 未安装，技能无法关联到执行端")
 	case "officecli_render_html", "start_office_watch", "stop_office_watch":

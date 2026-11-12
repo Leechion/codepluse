@@ -1,12 +1,15 @@
 "use client"
 
 /**
- * Collaboration settings: the two panels that decide how much of codeg an
- * agent may reach beyond its own conversation.
+ * Collaboration settings: every panel that decides how agents are staffed and
+ * how far an agent may reach beyond its own conversation.
  *
- *   * "Multi-Agent Collaboration" — whether an agent may hand a sub-task to
- *     another agent at all, how deep the chain may go, and what each agent is
- *     spawned with (`delegation-settings.tsx`).
+ *   * "Multi-Agent Collaboration" (`delegation-settings.tsx`) — whether an
+ *     agent may hand a sub-task to another agent at all and how deep the chain
+ *     may go; its "子智能体配置" tab hosts the main agent's default harness +
+ *     model and the named harness instances (`harness-instance-settings.tsx`),
+ *     each pinned to its own provider/model so every sub-agent can run its own
+ *     model.
  *   * "In-conversation tools" — the tool groups codeg-mcp injects when an
  *     agent starts: feedback, ask-user-question, session info, the built-in
  *     browser, computer use and the create-from-chat writers
@@ -14,10 +17,9 @@
  *     permissions, sharing — have a page of their own
  *     (`computer-use-settings.tsx`).
  *
- * They used to sit at the bottom of `/settings/general`, which is how that
- * page grew to twice the length of what "general" describes — and why the
- * browser panel below them shipped folded. Both are injected by the same
- * companion process at agent start, so they read as one page.
+ * The harness section used to be its own `/settings/harness-instances` page;
+ * merging it here keeps all agent staffing on one page. One ScrollArea wraps
+ * the whole page.
  */
 
 import { useTranslations } from "next-intl"

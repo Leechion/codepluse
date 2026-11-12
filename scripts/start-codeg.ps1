@@ -20,16 +20,20 @@ try {
     $previousMode = $env:HARNESS_HUB_CODEG
     $previousPort = $env:PORT
     $previousAnyPath = $env:HARNESS_HUB_ALLOW_ANY_PATH
+    $previousWarm = $env:HARNESS_HUB_WARM
     try {
         $env:HARNESS_HUB_CODEG = '1'
         $env:PORT = "$Port"
         # 允许把服务根之外的文件夹添加为工作空间（目录浏览器可浏览整机）。
         $env:HARNESS_HUB_ALLOW_ANY_PATH = '1'
+        # 默认关闭连接预热，避免低内存机器启动时 "out of memory" 崩溃；已显式设置则尊重其值。
+        if ([string]::IsNullOrEmpty($env:HARNESS_HUB_WARM)) { $env:HARNESS_HUB_WARM = '0' }
         Set-Location -LiteralPath $workspaceRoot
         & $backend
     } finally {
         $env:HARNESS_HUB_CODEG = $previousMode
         $env:PORT = $previousPort
         $env:HARNESS_HUB_ALLOW_ANY_PATH = $previousAnyPath
+        $env:HARNESS_HUB_WARM = $previousWarm
     }
 } finally { Pop-Location }

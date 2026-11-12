@@ -58,8 +58,8 @@
       "system": "Sistema",
       "chat_channels": "Canais de chat",
       "web_service": "Serviço Web",
+      "providers": "Provedores",
       "model_providers": "Provedores de Modelos",
-      "harness_instances": "Instâncias de harness",
       "experts": "Especialistas",
       "science": "Ciência",
       "office_tools": "Ferramentas de escritório",
@@ -803,6 +803,7 @@
       "saveFailed": "Falha ao salvar configurações de delegação",
       "loadFailed": "Falha ao carregar configurações de delegação: {detail}",
       "tabGeneral": "Geral",
+      "tabMainAgent": "Config. do agente principal",
       "tabAgentDefaults": "Padrões do subagente",
       "agentDefaultsDescription": "Substituições por agente aplicadas quando a Colaboração multiagente inicia um subagente para uma chamada de delegação. As opções mostradas vêm de uma sondagem ao vivo: o que você escolhe é exatamente o que o agente aceitará.",
       "agentDefaultsAgentHint": "As opções deixadas em Padrão mantêm o valor do próprio agente.",
@@ -1568,6 +1569,7 @@
     "authModeModelProvider": "Provedor de modelo",
     "modelProvider": "Provedor de modelo",
     "modelProviderHint": "Usar URL da API, chave API e modelo de um provedor de modelo configurado.",
+    "modelProviderLoadFailed": "Falha ao carregar a configuração do CC Switch: {message}",
     "selectModelProvider": "Selecionar provedor de modelo",
     "noModelProviderAvailable": "Nenhum provedor de modelo configurado para este agente. Vá para as configurações de provedores de modelo para adicionar um.",
     "claude": {
@@ -4669,6 +4671,7 @@
   "HarnessInstanceSettings": {
     "sectionTitle": "Instâncias de harness",
     "sectionDescription": "Cópias nomeadas de Claude Code / Codex que fixam seu próprio provedor e modelo padrão, além do bot principal das novas conversas.",
+    "instancesDescription": "Cópias nomeadas de Claude Code / Codex que fixam seu próprio provedor e modelo padrão, para executar vários ambientes lado a lado sem mexer na seleção global.",
     "loadFailed": "Falha ao carregar instâncias de harness",
     "refresh": "Atualizar",
     "newInstance": "Nova instância",

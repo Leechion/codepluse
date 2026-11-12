@@ -237,6 +237,26 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 	if err != nil {
 		return nil, err
 	}
+	// Layer the settings-page overlay (stored in codeg's own data, not the
+	// vendor files) onto the launch environment, and materialize codex's
+	// config.toml / auth.json into its ISOLATED CODEX_HOME (already under
+	// .data, so this never touches the user's real ~/.codex).
+	if s.codeg != nil {
+		overlayEnv, codexToml, codexAuth := s.codeg.LaunchOverlay(agent)
+		for k, v := range overlayEnv {
+			env = append(dropEnvKey(env, k), k+"="+v)
+		}
+		if agent.RealTool == "codex" && (codexToml != "" || codexAuth != "") {
+			if dir, err := codexHome(agent.Wire); err == nil {
+				if codexToml != "" {
+					_ = os.WriteFile(filepath.Join(dir, "config.toml"), []byte(codexToml), 0o600)
+				}
+				if codexAuth != "" {
+					_ = os.WriteFile(filepath.Join(dir, "auth.json"), []byte(codexAuth), 0o600)
+				}
+			}
+		}
+	}
 	if tool == "codex" {
 		mode := "read-only"
 		if permission == "workspace" {
@@ -293,6 +313,35 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 		args = append(args, "--serve", "--acp", "--host", "127.0.0.1")
 	}
 	return &acp.Launch{Command: node, Args: args, Env: env}, nil
+}
+
+// agentAvailable reports whether one registered agent can actually launch on
+// this machine, by probing the local environment rather than trusting its
+// registration flag.
+//
+// A built-in ACP harness is available when its adapter entry resolves: the
+// adapter npm package either bundles the native CLI or declares it as a
+// dependency (@openai/codex, @anthropic-ai/claude-agent-sdk), so a present
+// adapter entry is the reliable evidence that the harness is installed. A
+// custom ACP instance is available when its pinned launch command still exists.
+func (s *server) agentAvailable(a *hub.Agent) bool {
+	s.mu.Lock()
+	custom := s.customAcp[a.ID]
+	s.mu.Unlock()
+	if custom != nil {
+		command, _ := custom["command"].(string)
+		if command == "" {
+			return false
+		}
+		if _, err := os.Stat(command); err != nil {
+			return false
+		}
+		return true
+	}
+	if a.RealTool == "" {
+		return false
+	}
+	return acpInstalled(a.RealTool) != ""
 }
 
 // ----------------------------- single tasks -----------------------------
@@ -526,6 +575,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		// Drive the agents' "available" flag from a live probe of the local
+		// environment so the new-conversation page lists only harnesses that
+		// are actually installed on this machine.
+		srv.codeg.AgentAvailable = srv.agentAvailable
 		srv.codeg.Start()
 	}
 	mux.HandleFunc("/", srv.handle)

@@ -23,7 +23,6 @@ import { ServiceWorkerInit } from "@/components/service-worker-init"
 import { WebConnectionGuard } from "@/components/connection/web-connection-guard"
 import { WebVersionNotice } from "@/components/connection/web-version-notice"
 import { WindowResizeGrips } from "@/components/layout/window-resize-grips"
-import { CloseRequestDialog } from "@/components/workspace/close-request-dialog"
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -112,7 +111,6 @@ export default async function RootLayout({
                 <WebConnectionGuard />
                 <WebVersionNotice />
                 <WindowResizeGrips />
-                <CloseRequestDialog />
                 {children}
               </AppearanceProvider>
             </ThemeProvider>

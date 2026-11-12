@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => {
     setRoute: vi.fn(),
     openConversations: vi.fn(),
     openBrowserTab: vi.fn(() => "browser:new"),
+    openSettingsWindow: vi.fn(() => Promise.resolve()),
     toastError: vi.fn(),
   }
 })
@@ -41,6 +42,7 @@ vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }))
 
 vi.mock("@/lib/api", () => ({
   openProjectBootWindow: mocks.openProjectBootWindow,
+  openSettingsWindow: mocks.openSettingsWindow,
 }))
 
 vi.mock("@/lib/pet/api", () => ({ openPetWindow: mocks.openPetWindow }))
@@ -317,5 +319,14 @@ describe("QuickActionsDropdown", () => {
     await reopen()
     await clickItem("Clone Repository")
     expect(await screen.findByText("CLONE-DIALOG")).toBeVisible()
+  })
+
+  it("opens the default settings page, not the API providers section", async () => {
+    await mountAndOpen()
+    await clickItem("Settings")
+    // No section argument: the settings window lands on its own default rather
+    // than forcing the API providers page to pop up first.
+    expect(mocks.openSettingsWindow).toHaveBeenCalledOnce()
+    expect(mocks.openSettingsWindow).toHaveBeenCalledWith()
   })
 })

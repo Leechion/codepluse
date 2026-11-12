@@ -111,7 +111,13 @@ func ensureBackend(root, base string, port int) error {
 	}
 	cmd := exec.Command(backend)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "HARNESS_HUB_CODEG=1", "PORT="+strconv.Itoa(port), "HOST=127.0.0.1")
+	env := append(os.Environ(), "HARNESS_HUB_CODEG=1", "PORT="+strconv.Itoa(port), "HOST=127.0.0.1")
+	// 默认关闭连接预热：预热会在启动时并行拉起多个 agent 适配器进程，内存紧张的机器
+	// 上会触发 "fatal error: out of memory" 崩溃。外部已显式设置 HARNESS_HUB_WARM 时尊重其值。
+	if _, ok := os.LookupEnv("HARNESS_HUB_WARM"); !ok {
+		env = append(env, "HARNESS_HUB_WARM=0")
+	}
+	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 	if err := cmd.Start(); err != nil {

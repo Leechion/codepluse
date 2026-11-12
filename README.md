@@ -4,9 +4,10 @@ codepluse 使用 Codeg 0.42.0 的 Next.js 界面、Go ACP 后台和 Windows WebV
 
 ## 安装与启动
 
-需要 Node.js 22+、pnpm 11、Go 1.27 和 Windows WebView2 Runtime。执行端需要单独安装并配置模型服务。
+需要 Node.js 22+、pnpm 11、Go 1.27 和 Windows WebView2 Runtime。执行端模型服务需单独安装并配置；ACP 适配器（claude/codex）作为**全局** npm 包安装，不再随仓库 `npm ci` 落本地 `node_modules`——Go 后台按 `%APPDATA%\npm\node_modules` → 仓库 `node_modules` 的顺序查找适配器。
 
 ```powershell
+npm i -g @agentclientprotocol/claude-agent-acp @agentclientprotocol/codex-acp
 npm ci
 pnpm --dir codeg-ui install --frozen-lockfile
 npm run codepluse:build

@@ -66,9 +66,9 @@ func (s *Server) skills(command string, a Row) (any, error) {
 		return nil, fmt.Errorf("技能不存在")
 	}
 	if strings.HasSuffix(command, "_list_all_install_statuses") {
-		if command == "officecli_skill_list_all_install_statuses" {
-			return nil, fmt.Errorf("Go 版尚未接入 Office CLI，未报告虚假安装状态")
-		}
+		// NB: officecli_skill_list_all_install_statuses never reaches here —
+		// server.go routes the officecli_* prefix to officeCommand first, which
+		// returns an empty array. This branch handles experts/science only.
 		list, err := s.bundledSkills(group)
 		if err != nil {
 			return nil, err

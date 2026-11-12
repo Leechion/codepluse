@@ -277,6 +277,19 @@ func codexHome(name ...string) (string, error) {
 	return dir, nil
 }
 
+// dropEnvKey removes every existing KEY=... entry from an env slice so a later
+// append is the single authoritative value (the child would otherwise see a
+// duplicate and pick an implementation-defined one).
+func dropEnvKey(env []string, key string) []string {
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, key+"=") {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 func buildEnv(agent *hub.Agent) ([]string, error) {
 	tool := agent.RealTool
 	env := os.Environ()

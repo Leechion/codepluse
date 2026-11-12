@@ -12,6 +12,11 @@
    让 ZCode v4 的对话时间线 / composer 恢复原生 ZCode 视觉。
    =========================================================================== */
 
+/* zw-* 色板同时挂在 .zw-shell 上：壳层 chrome（分割条、终端条、文件列、
+   浮动 dock）位于 .zw-root 之外，缺了这些变量会整条规则落到回退链。
+   只共享 zw-* 命名——下方 .zw-root 单独块里的 shadcn token 重映射绝不
+   外溢（Sidebar 需要保持 codepluse 原色板）。 */
+.zw-shell,
 .zw-root {
   /* ZCode text-ui-* 字号体系（默认 --ui-font-size: 14px） */
   --zw-ui-size: 14px;
@@ -53,7 +58,9 @@
   --zw-destructive-surface: rgba(224, 49, 49, 0.12);
   --zw-user-bubble: rgba(13, 13, 13, 0.05);
   --zw-shadow: 0 1px 3px rgb(0 0 0 / 4%), 0 6px 18px rgb(0 0 0 / 4%);
+}
 
+.zw-root {
   /* 把 codeg-ui 的 @theme inline 变量重映射到 ZCode 色板：ZCodeChatPage 里
      bg-background / border-border / text-muted-foreground 等类会跟着切换。 */
   --background: var(--zw-bg);
@@ -81,6 +88,7 @@
 }
 
 /* Zai Dark */
+.dark .zw-shell,
 .dark .zw-root {
   --zw-bg: #161616;
   --zw-bg-alt: #202020;
@@ -149,9 +157,79 @@
    --------------------------------------------------------------------------- */
 .zw-shell {
   display: flex;
+  /* 纵向总容器：上行内容（.zw-body）+ 底部状态栏（窗口级全宽，对齐上游） */
+  flex-direction: column;
   width: 100%;
-  height: 100%;
+  /* /workspace 的 Provider 布局不给祖先任何显式高度，height:100% 会塌成内容高度
+     （下方大片空白）。像其它整页路由那样直接钉到视口高度。 */
+  height: 100dvh;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  /* 供左上角浮动 dock（.zw-float-dock）定位 */
+  position: relative;
+}
+
+/* 行内容区：侧栏 + 工作处理 + 对话列 / 全屏路由页 */
+.zw-body {
+  display: flex;
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 左列：codeg 经典会话侧栏（宽度由 sidebar-context 的 width inline 注入，
+   不要包进 .zw-root —— 那会把 shadcn token 重映射成 ZCode 色板）。 */
+.zw-side {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--sidebar);
+  border-right: 1px solid var(--sidebar-border);
+}
+
+/* 右列：codeg 辅助面板（文件树/Git/会话详情等 tab），宽度由
+   aux-panel-context 的 width inline 注入，.zw-side 的镜像。 */
+.zw-aux {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--background);
+  border-left: 1px solid var(--sidebar-border);
+}
+
+/* 文件工作区列：fusion 模式（有文件 tab）时显示，对齐上游默认 [56,44] 布局。
+   底色比对话列深一档、tab 条带下边线，三列之间靠色阶分层而不是靠粗边框。 */
+.zw-files-col {
+  display: flex;
+  flex: 0 0 44%;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--zw-bg-alt, var(--background));
+  border-left: 1px solid var(--sidebar-border);
+}
+.zw-files-strip {
+  display: flex;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  align-items: stretch;
+  border-bottom: 1px solid var(--zw-border, var(--sidebar-border));
+  background: var(--zw-bg, var(--background));
+}
+.zw-files-body {
+  flex: 1 1 0;
   min-height: 0;
   overflow: hidden;
 }
@@ -180,11 +258,15 @@
   position: absolute;
   inset: var(--zw-radius-xl) 1px;
   border-radius: 999px;
-  background: transparent;
-  transition: background-color 120ms ease;
+  background: var(--zw-border);
+  opacity: 0.55;
+  transition:
+    background-color 120ms ease,
+    opacity 120ms ease;
 }
 .zw-divider:hover::after {
-  background: var(--zw-fg-subtlest, var(--border, rgba(128, 128, 128, 0.4)));
+  background: var(--zw-icon-blue, var(--zw-fg-subtlest, var(--border)));
+  opacity: 1;
 }
 
 .zw-chat {
@@ -196,6 +278,63 @@
   overflow: hidden;
 }
 .zw-chat > div { flex: 1 1 0; min-width: 0; }
+
+/* 对话列：对话区 + 可选终端条（终端只在会话路由渲染） */
+.zw-chat-col {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 终端条：高度由 terminal-context 的 height inline 注入。底色比对话列
+   深一档（light #f0f0f0 / dark #202020），让「输出区」与「对话区」一眼分层。 */
+.zw-term {
+  flex: 0 0 auto;
+  overflow: hidden;
+  border-top: 1px solid var(--zw-border, var(--border));
+  background: var(--zw-bg-alt, var(--background));
+}
+
+/* 终端高度拖拽条（.zw-divider 的水平版） */
+.zw-term-resize {
+  position: relative;
+  flex: 0 0 4px;
+  height: 4px;
+  cursor: row-resize;
+  background: transparent;
+}
+.zw-term-resize::after {
+  content: "";
+  position: absolute;
+  inset: 1px var(--zw-radius-xl);
+  border-radius: 999px;
+  background: var(--zw-border);
+  opacity: 0.55;
+  transition:
+    background-color 120ms ease,
+    opacity 120ms ease;
+}
+.zw-term-resize:hover::after {
+  background: var(--zw-icon-blue, var(--zw-fg-subtlest, var(--border)));
+  opacity: 1;
+}
+
+/* 非会话全屏路由（自动化/待办任务/forge/画布/用量）：占满侧栏右侧，
+   内部页面自行管理滚动与标题条。 */
+.zw-route {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--background);
+}
+.zw-route > * { flex: 1 1 0; min-width: 0; min-height: 0; }
 
 /* ---------------------------------------------------------------------------
    Panel header / tabs / search
@@ -329,6 +468,97 @@
   background-clip: padding-box;
   background-color: var(--zw-border-hover);
 }
+
+/* ---------------------------------------------------------------------------
+   工作区切换（按项目过滤任务）
+   --------------------------------------------------------------------------- */
+.zw-workspaces {
+  flex: 0 0 auto;
+  max-height: 168px;
+  margin: 0 0 4px;
+  padding: 0 0 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--zw-border-hover) transparent;
+}
+.zw-workspaces::-webkit-scrollbar { width: 8px; }
+.zw-workspaces::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: var(--zw-border-hover);
+}
+.zw-workspaces .zw-section-label { padding: 8px 18px 4px; }
+.zw-workspace-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0 8px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: var(--zw-radius-md);
+  background: transparent;
+  text-align: left;
+  color: var(--zw-fg-subtle);
+  font-family: inherit;
+  font-size: var(--zw-text-sm);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.zw-workspace-row:hover { background: var(--zw-surface-hover); color: var(--zw-fg); }
+.zw-workspace-row[data-active="true"] {
+  background: var(--zw-selected);
+  color: var(--zw-fg);
+  font-weight: 500;
+}
+.zw-workspace-row:focus-visible { outline: 2px solid var(--zw-icon-blue); outline-offset: -2px; }
+.zw-workspace-leading {
+  display: flex;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: var(--zw-fg-subtlest);
+}
+.zw-workspace-row[data-active="true"] .zw-workspace-leading { color: var(--zw-icon-blue); }
+.zw-workspace-name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   设置入口（照上游 TaskList footer：列表底部整宽按钮）
+   --------------------------------------------------------------------------- */
+.zw-footer {
+  flex: 0 0 auto;
+  margin-top: auto;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--zw-border);
+  background: var(--zw-panel);
+}
+.zw-settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--zw-border);
+  border-radius: var(--zw-radius-lg);
+  background: var(--zw-card);
+  color: var(--zw-fg);
+  font-family: inherit;
+  font-size: var(--zw-text-sm);
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.zw-settings-btn:hover { background: var(--zw-surface-hover); }
+.zw-settings-btn:focus-visible { outline: 2px solid var(--zw-icon-blue); outline-offset: -2px; }
 
 /* ---------------------------------------------------------------------------
    任务列表（TaskList / TaskListItem 形态）
@@ -646,8 +876,65 @@
   box-shadow: var(--zw-shadow);
   font-size: var(--zw-text-sm);
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
 }
-.zw-float-toggle:hover { color: var(--zw-fg); background: var(--zw-surface-hover); }
+.zw-float-toggle:hover {
+  color: var(--zw-fg);
+  background: var(--zw-surface-hover);
+  border-color: var(--zw-border-hover);
+  box-shadow:
+    var(--zw-shadow),
+    0 2px 6px rgb(0 0 0 / 6%);
+  transform: translateY(-1px);
+}
+.zw-float-toggle:active {
+  transform: translateY(0) scale(0.97);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+.zw-float-toggle:focus-visible {
+  outline: 2px solid var(--zw-icon-blue);
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .zw-float-toggle,
+  .zw-float-toggle:hover,
+  .zw-float-toggle:active {
+    transform: none;
+    transition: none;
+  }
+}
+
+/* 常驻左上角 dock：会话侧栏折叠/展开 + 工作处理展开。侧栏展开时按钮正好
+   落在 Sidebar header 左侧的 leftChromeReserve 预留空白上（浏览器下为死空间）。 */
+.zw-float-dock {
+  position: absolute;
+  z-index: 6;
+  top: 9px;
+  left: 10px;
+  display: flex;
+  gap: 6px;
+}
+.zw-float-dock .zw-float-toggle { position: static; }
+.zw-float-toggle--icon {
+  width: 28px;
+  justify-content: center;
+  padding: 0;
+}
+
+/* 收起侧栏后对话列占据窗口左缘：头部条（h-10 + border-b 的
+   ConversationDetailHeader）必须为浮动 dock 预留宽度，否则「聊天模式 / 标题」
+   被 dock 按钮盖住。--zw-dock-w 由 ZCodeWorkspacePage 的 ResizeObserver 实测
+   写到 shell 上（随语言标签宽度变化），12px 是头部条自带的 px-3 内边距。
+   未分层规则优先级高于 Tailwind 的 .px-3 工具类，能盖过它。 */
+.zw-shell[data-sidebar="closed"] .zw-chat .h-10.shrink-0.border-b {
+  padding-left: calc(var(--zw-dock-w, 133px) + 12px);
+  transition: padding-left 120ms ease;
+}
 
 @media (max-width: 1280px) {
   .zw-work { flex-basis: 268px; width: 268px; }
@@ -806,3 +1093,4 @@
   cursor: pointer;
 }
 .zw-send-error button:hover { background: var(--zw-surface-hover, var(--accent)); }
+

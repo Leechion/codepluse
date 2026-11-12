@@ -11,6 +11,11 @@ vi.mock("@/lib/api", () => ({
   })),
   setDelegationSettings: vi.fn(async (v: unknown) => v),
   acpListAgents: vi.fn(async () => []),
+  // The embedded harness section curates instances and the main bot; mock
+  // empty lists so it mounts without touching a real transport.
+  listHarnessInstances: vi.fn(async () => []),
+  listHarnessProviders: vi.fn(async () => ({ providers: [] })),
+  getMainBotSettings: vi.fn(async () => ({ agent_type: "", model: "" })),
   getFeedbackSettings: vi.fn(async () => ({ enabled: false })),
   setFeedbackSettings: vi.fn(async (v: unknown) => v),
   getQuestionSettings: vi.fn(async () => ({ enabled: true })),

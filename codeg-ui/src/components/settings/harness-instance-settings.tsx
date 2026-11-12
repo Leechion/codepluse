@@ -1,7 +1,26 @@
 "use client"
 
+/**
+ * The harness section embedded on the Collaboration page.
+ *
+ * It used to be its own `/settings/harness-instances` page; both concepts are
+ * about how agents are staffed, so they now live on one page in two cards:
+ *
+ *   * Main bot — the harness (built-in or instance) plus an optional model a
+ *     new conversation lands on when nothing else decides it. This is the
+ *     "main agent's model".
+ *   * Harness instances — named copies of a built-in tool that pin their own
+ *     provider and default model, so "Claude 2号" can sit on a DeepSeek
+ *     gateway while "Claude 3号" uses the official one. Each instance is a
+ *     delegation target with its own model, i.e. a per-sub-agent model.
+ *
+ * The component carries no page title or scroll area: CollaborationSettings
+ * owns the single ScrollArea, so the two cards just stack in the page flow.
+ * Backend commands and storage are unchanged.
+ */
+
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Layers, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { Bot, Layers, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -10,7 +29,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
@@ -36,6 +54,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { SettingsSection } from "@/components/shared/settings-section"
 import {
   acpListAgents,
   createHarnessInstance,
@@ -62,16 +81,14 @@ function errorMessage(err: unknown): string {
   return String(err)
 }
 
-/**
- * Harness instances + the main bot.
- *
- * An instance is a named copy of a built-in tool that pins its own provider
- * and default model, so "Claude 2号" can sit on a DeepSeek gateway while
- * "Claude 3号" uses the official one — three chats, three envs, no cc-switch
- * fiddling. The main bot is the harness a new conversation lands on when
- * nothing else decides it.
- */
-export function HarnessInstanceSettings() {
+export function HarnessInstanceSection({
+  mode = "all",
+}: {
+  /** Which card(s) to render: the combined section (default, for the standalone
+   *  route), the main agent only, or the harness instances only. Lets the
+   *  collaboration page split them across two tabs without duplicating logic. */
+  mode?: "all" | "main" | "instances"
+} = {}) {
   const t = useTranslations("HarnessInstanceSettings")
   const [instances, setInstances] = useState<HarnessInstance[]>([])
   const [providers, setProviders] = useState<HarnessProviderInfo[]>([])
@@ -120,7 +137,7 @@ export function HarnessInstanceSettings() {
 
   useEffect(() => {
     // The picker shows the persisted value even when the module cache loaded
-    // it before this page mounted.
+    // it before this section mounted.
     void loadMainBot()
       .then((bot) => {
         const value = bot?.agentType ?? NO_PIN
@@ -245,69 +262,6 @@ export function HarnessInstanceSettings() {
     [builtinTypes, instances]
   )
 
-  const mainBotRow = (
-    <section className="mt-4 space-y-2 px-3 pb-3 md:px-4 md:pb-4">
-      <div>
-        <h2 className="text-sm font-semibold">{t("mainBotTitle")}</h2>
-        <p className="text-xs text-muted-foreground">
-          {t("mainBotDescription")}
-        </p>
-      </div>
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">
-            {t("mainBotHarness")}
-          </Label>
-          <Select
-            value={mainBotType}
-            onValueChange={setMainBotType}
-            disabled={loading}
-          >
-            <SelectTrigger className="h-8 w-56 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NO_PIN}>{t("mainBotNone")}</SelectItem>
-              {botOptions.map((at) => (
-                <SelectItem key={at} value={at}>
-                  {getAgentLabel(at)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">
-            {t("mainBotModel")}
-          </Label>
-          <Input
-            className="h-8 w-56 text-xs"
-            value={mainBotModel}
-            onChange={(e) => setMainBotModel(e.target.value)}
-            placeholder={t("mainBotModelPlaceholder")}
-          />
-        </div>
-        <Button
-          size="sm"
-          className="h-8 text-xs"
-          onClick={saveBot}
-          disabled={
-            busy ||
-            (mainBotType === savedMainBot &&
-              mainBotModel.trim() === savedMainBotModel)
-          }
-        >
-          {t("save")}
-        </Button>
-      </div>
-      {mainBotType === NO_PIN && (
-        <p className="text-3xs text-muted-foreground">
-          {t("mainBotInactiveHint")}
-        </p>
-      )}
-    </section>
-  )
-
   const instanceRow = (row: HarnessInstance) => {
     const pinned = row.provider_id
       ? providerName(row.provider_id)
@@ -371,17 +325,77 @@ export function HarnessInstanceSettings() {
   }
 
   return (
-    <ScrollArea className="h-full">
-      <section className="space-y-3 px-3 pt-3 md:px-4 md:pt-4">
-        <div>
-          <h1 className="text-sm font-semibold">{t("sectionTitle")}</h1>
-          <p className="text-sm text-muted-foreground">
-            {t("sectionDescription")}
-          </p>
+    <div className="space-y-4">
+      {/* Main agent: the harness + model a new conversation starts on. */}
+      {mode !== "instances" && (
+      <SettingsSection
+        icon={Bot}
+        title={t("mainBotTitle")}
+        description={t("mainBotDescription")}
+      >
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">
+              {t("mainBotHarness")}
+            </Label>
+            <Select
+              value={mainBotType}
+              onValueChange={setMainBotType}
+              disabled={loading}
+            >
+              <SelectTrigger className="h-8 w-56 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_PIN}>{t("mainBotNone")}</SelectItem>
+                {botOptions.map((at) => (
+                  <SelectItem key={at} value={at}>
+                    {getAgentLabel(at)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">
+              {t("mainBotModel")}
+            </Label>
+            <Input
+              className="h-8 w-56 text-xs"
+              value={mainBotModel}
+              onChange={(e) => setMainBotModel(e.target.value)}
+              placeholder={t("mainBotModelPlaceholder")}
+            />
+          </div>
+          <Button
+            size="sm"
+            className="h-8 text-xs"
+            onClick={saveBot}
+            disabled={
+              busy ||
+              (mainBotType === savedMainBot &&
+                mainBotModel.trim() === savedMainBotModel)
+            }
+          >
+            {t("save")}
+          </Button>
         </div>
-      </section>
+        {mainBotType === NO_PIN && (
+          <p className="text-3xs text-muted-foreground">
+            {t("mainBotInactiveHint")}
+          </p>
+        )}
+      </SettingsSection>
+      )}
 
-      <section className="mt-4 space-y-2 px-3 md:px-4">
+      {/* Per-sub-agent execution ends: named, pinned instances. */}
+      {mode !== "main" && (
+      <>
+      <SettingsSection
+        icon={Layers}
+        title={t("sectionTitle")}
+        description={t("instancesDescription")}
+      >
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">
             {t("instancesCount", { count: instances.length })}
@@ -421,9 +435,7 @@ export function HarnessInstanceSettings() {
         ) : (
           <div className="space-y-2">{instances.map(instanceRow)}</div>
         )}
-      </section>
-
-      {mainBotRow}
+      </SettingsSection>
 
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
         <DialogContent className="max-w-md">
@@ -559,6 +571,8 @@ export function HarnessInstanceSettings() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </ScrollArea>
+      </>
+      )}
+    </div>
   )
 }

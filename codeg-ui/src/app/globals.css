@@ -4323,3 +4323,48 @@ div.monaco-diff-editor.side-by-side .editor.modified {
     padding-inline: 1.5rem;
   }
 }
+
+/* ===========================================================================
+   视觉精修（不改气质，只补质感）
+   ---------------------------------------------------------------------------
+   1) color-scheme：暗色模式下让原生控件（滚动条、表单控件、日期选择器）
+      跟随主题，不再是白底系统默认。
+   2) 选中色：primary 轻染，替换默认高饱和蓝，12 套主题预设自动跟随。
+   3) 设置壳细滚动条：只作用于 [data-settings-shell] 子树——全局 `*` 上设
+      scrollbar-width/color 会按规范禁用组件自绘的 ::-webkit-scrollbar
+      （.zw-scroll、消息区胶囊等），必须限定范围。Radix ScrollArea 用行内
+      样式隐藏原生条，优先级高于本规则，不受影响。
+   ========================================================================= */
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--primary) 22%, transparent);
+}
+
+[data-settings-shell] * {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--border) 85%, transparent)
+    transparent;
+}
+[data-settings-shell] *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+[data-settings-shell] *::-webkit-scrollbar-track,
+[data-settings-shell] *::-webkit-scrollbar-corner {
+  background: transparent;
+}
+[data-settings-shell] *::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: var(--border);
+}
+[data-settings-shell] *::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
+}

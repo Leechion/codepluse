@@ -79,8 +79,11 @@ export function AgentSelector({
 }: AgentSelectorProps) {
   const t = useTranslations("Folder.chat.agentSelector")
   const { agents: rawAgents } = useAcpAgents()
+  // List only locally available harnesses: the new-conversation page shows the
+  // harnesses actually installed on this machine. An enabled but unavailable
+  // agent is filtered out here rather than rendered as a greyed-out pill.
   const agents = useMemo<AcpAgentInfo[]>(
-    () => rawAgents.filter((a) => a.enabled),
+    () => rawAgents.filter((a) => a.enabled && a.available),
     [rawAgents]
   )
   const onSelectRef = useRef(onSelect)

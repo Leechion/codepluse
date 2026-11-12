@@ -102,10 +102,11 @@ export function QuickActionsDropdown() {
   // local one the row would just focus the window it was picked from.
   const remoteWindow = isRemoteDesktopWindow()
 
-  // 左下角原「API 供应商」入口：功能已并入设置站（/settings/api-providers），
-  // 这里直接打开设置站并落到该分区；桌面端走壳的 settings 窗口命令。
+  // 打开设置的默认分区（与顶部 chrome 的设置入口一致）。这里曾写死落到
+  // api-providers，导致每次点「设置」都先蹦出供应商页；供应商切换仍可从
+  // 底部状态栏的专用入口或设置导航到达。
   const handleOpenSettings = useCallback(() => {
-    openSettingsWindow("api-providers").catch((err) => {
+    openSettingsWindow().catch((err) => {
       console.error("[QuickActionsDropdown] failed to open settings:", err)
     })
   }, [])

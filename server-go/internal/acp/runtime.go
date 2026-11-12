@@ -1571,6 +1571,72 @@ func (r *Runtime) Configure(sessionID, configID string, value any) error {
 	return nil
 }
 
+// SetMode switches the session's permission/mode via ACP `session/set_mode`.
+// Mirrors Configure's turn guard so a mode flip can't race an in-flight call.
+func (r *Runtime) SetMode(sessionID, modeID string) error {
+	r.mu.Lock()
+	rec := r.record(sessionID)
+	d := r.bindings[sessionID]
+	r.mu.Unlock()
+	if rec == nil || d == nil {
+		return fmt.Errorf("原生会话未连接")
+	}
+	if !rec.turnMu.TryLock() {
+		return fmt.Errorf("请等待当前调用结束后切换模式")
+	}
+	defer rec.turnMu.Unlock()
+	if _, err := d.call("session/set_mode", map[string]any{"sessionId": rec.NativeSessionID, "modeId": modeID}, 20*time.Second); err != nil {
+		return err
+	}
+	rec.activeMu.Lock()
+	rec.NativeMode = modeID
+	if rec.Modes != nil {
+		rec.Modes.CurrentModeID = modeID
+	}
+	rec.activeMu.Unlock()
+	r.changed(rec)
+	r.save()
+	return nil
+}
+
+// GoalControl pauses or clears the session's active goal (codex-acp `_session/goal`).
+// The adapter sources the goal from the live session, so only the action is sent.
+func (r *Runtime) GoalControl(sessionID, action string) error {
+	r.mu.Lock()
+	rec := r.record(sessionID)
+	d := r.bindings[sessionID]
+	r.mu.Unlock()
+	if rec == nil || d == nil {
+		return fmt.Errorf("原生会话未连接")
+	}
+	if _, err := d.call("_session/goal", map[string]any{"sessionId": rec.NativeSessionID, "action": action}, 20*time.Second); err != nil {
+		return err
+	}
+	return nil
+}
+
+// StopAsyncTask asks the adapter to stop one AIR async task
+// (`_session/async_task/stop`). Returns the adapter's own verdict verbatim —
+// the frontend treats it as a boolean and does not claim success on `false`.
+func (r *Runtime) StopAsyncTask(sessionID, taskID string) (any, error) {
+	r.mu.Lock()
+	rec := r.record(sessionID)
+	d := r.bindings[sessionID]
+	r.mu.Unlock()
+	if rec == nil || d == nil {
+		return nil, fmt.Errorf("原生会话未连接")
+	}
+	result, err := d.call("_session/async_task/stop", map[string]any{"sessionId": rec.NativeSessionID, "taskId": taskID}, 20*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	var v any
+	if err := json.Unmarshal(result, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
 func (r *Runtime) Prompt(agent *hub.Agent, text string, o Options) Result {
 	return r.PromptBlocks(agent, []map[string]any{{"type": "text", "text": text}}, o)
 }

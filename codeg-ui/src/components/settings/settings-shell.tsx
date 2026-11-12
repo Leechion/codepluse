@@ -17,15 +17,12 @@ import {
   GitBranch,
   Globe,
   Keyboard,
-  KeyRound,
-  Layers,
   Menu,
   MessageSquareText,
   MonitorCog,
   SendHorizontal,
   Palette,
   PlugZap,
-  Server,
   Settings,
   SlidersHorizontal,
 } from "lucide-react"
@@ -52,7 +49,6 @@ interface SettingsNavItem {
     | "agents"
     | "model_providers"
     | "api_providers"
-    | "harness_instances"
     | "mcp"
     | "skills"
     | "skill_packs"
@@ -101,24 +97,10 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
     icon: Boxes,
   },
   {
+    // 供应商设置已并入「智能体」页底部的折叠区，不再单设导航项。
     href: "/settings/agents",
     labelKey: "agents",
     icon: Bot,
-  },
-  {
-    href: "/settings/model-providers",
-    labelKey: "model_providers",
-    icon: Server,
-  },
-  {
-    href: "/settings/api-providers",
-    labelKey: "api_providers",
-    icon: KeyRound,
-  },
-  {
-    href: "/settings/harness-instances",
-    labelKey: "harness_instances",
-    icon: Layers,
   },
   {
     href: "/settings/quick-messages",
@@ -263,7 +245,12 @@ export function SettingsShell({ children }: SettingsShellProps) {
                 key={item.href}
                 variant={active ? "secondary" : "ghost"}
                 size="sm"
-                className={cn("w-full justify-start px-2")}
+                className={cn(
+                  "relative w-full justify-start px-2 transition-colors",
+                  // 激活项：左侧 2px 主色圆角指示条 + 中字重，扫一眼就能定位当前页。
+                  active &&
+                    "font-medium before:absolute before:bottom-1.5 before:left-0 before:top-1.5 before:w-0.5 before:rounded-full before:bg-primary"
+                )}
                 type="button"
                 onClick={() => navigateTo(item.href)}
                 aria-current={active ? "page" : undefined}
@@ -281,7 +268,10 @@ export function SettingsShell({ children }: SettingsShellProps) {
   )
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-background text-foreground">
+    <div
+      data-settings-shell=""
+      className="h-screen flex flex-col overflow-hidden bg-background text-foreground"
+    >
       <AppTitleBar
         left={
           isMobile ? (

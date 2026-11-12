@@ -58,8 +58,8 @@
       "system": "系統",
       "chat_channels": "訊息頻道",
       "web_service": "Web 服務",
+      "providers": "供應商",
       "model_providers": "模型供應商",
-      "harness_instances": "執行端實例",
       "experts": "專家",
       "science": "科學研究",
       "office_tools": "辦公工具",
@@ -803,6 +803,7 @@
       "saveFailed": "委派設定儲存失敗",
       "loadFailed": "載入委派設定失敗：{detail}",
       "tabGeneral": "一般",
+      "tabMainAgent": "主智慧體設定",
       "tabAgentDefaults": "子智慧體設定",
       "agentDefaultsDescription": "多智慧體協同在為委派呼叫啟動子智慧體時使用這些覆寫項。下方選項透過即時探測取得，所選即所用。",
       "agentDefaultsAgentHint": "保持「預設」的選項沿用智慧體自己的設定。",
@@ -1568,6 +1569,7 @@
     "authModeModelProvider": "模型供應商",
     "modelProvider": "模型供應商",
     "modelProviderHint": "使用已配置的模型供應商的 API URL、API Key 和模型。",
+    "modelProviderLoadFailed": "載入 CC Switch 設定失敗：{message}",
     "selectModelProvider": "選擇模型供應商",
     "noModelProviderAvailable": "該代理未配置模型供應商。請前往模型供應商設定添加。",
     "claude": {
@@ -4669,6 +4671,7 @@
   "HarnessInstanceSettings": {
     "sectionTitle": "執行端實例",
     "sectionDescription": "為 Claude Code / Codex 建立命名副本，各自釘住自己的供應商與預設模型；並指定新建對話使用的主 bot。",
+    "instancesDescription": "為 Claude Code / Codex 建立命名副本，各自釘住自己的供應商與預設模型，無需變更全域選擇即可並行執行多套環境。",
     "loadFailed": "載入執行端實例失敗",
     "refresh": "重新整理",
     "newInstance": "新增實例",

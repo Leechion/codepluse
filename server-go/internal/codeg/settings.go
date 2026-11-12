@@ -7,8 +7,8 @@ var settingDefaults = map[string]Row{
 	"get_feedback_settings":         {"enabled": true},
 	"get_question_settings":         {"enabled": false},
 	"get_session_info_settings":     {"enabled": false},
-	"get_browser_tools_settings":    {"enabled": false, "eval_enabled": false},
-	"get_chat_authoring_settings":   {"enabled": false},
+	"get_browser_tools_settings":    {"enabled": false, "eval": false},
+	"get_chat_authoring_settings":   {"automations_enabled": false, "work_tasks_enabled": false},
 	"get_conversation_branch_tag":   {"enabled": false, "color": "default"},
 	"get_delegation_settings":       {"enabled": true, "depth_limit": 4, "completed_cache_max_mb": 32, "agent_defaults": Row{}},
 	// The main bot: the harness + model a new conversation starts on when the
@@ -20,4 +20,10 @@ var settingUpdates = map[string]string{
 	"update_system_rendering_settings": "get_system_rendering_settings",
 	"update_system_terminal_settings":  "get_system_terminal_settings",
 	"update_main_bot_settings":         "get_main_bot_settings",
+	// These tool-gating toggles are read through get_* and written through the
+	// set_* verb the panel uses, so the setters ride the same generic store.
+	"set_question_settings":       "get_question_settings",
+	"set_session_info_settings":   "get_session_info_settings",
+	"set_browser_tools_settings":  "get_browser_tools_settings",
+	"set_chat_authoring_settings": "get_chat_authoring_settings",
 }

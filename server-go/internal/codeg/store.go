@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -27,11 +29,34 @@ type Store struct {
 	CanvasBoards   []Row            `json:"canvasBoards"`
 	CanvasNodes    []Row            `json:"canvasNodes"`
 	CanvasRevision int              `json:"canvasRevision"`
+	FolderGroups   []Row            `json:"folderGroups"`
+	// P1 sidebar entities: conversation tags, assistants (tombstones kept), and
+	// quick messages. Each is a flat list persisted in codeg-workspace.json.
+	ConversationTags []Row `json:"conversationTags"`
+	Assistants       []Row `json:"assistants"`
+	QuickMessages    []Row `json:"quickMessages"`
+	// Agents holds the per-agent settings overlay written by the harness
+	// settings page (env / native config / enabled / provider binding), keyed by
+	// wire agent type. It is deliberately kept in codeg's own store rather than
+	// written back to the vendor files (~/.claude, real ~/.codex) so saving a
+	// config never mutates the user's global CLI setup; the launch path merges
+	// this overlay on top of the ambient environment instead.
+	Agents map[string]Row `json:"agents"`
 }
 
 func timestamp() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 func id() string        { b := make([]byte, 16); _, _ = rand.Read(b); return hex.EncodeToString(b) }
 func text(v any) string { s, _ := v.(string); return s }
+
+// optStr 可空字符串字段：缺省/null → nil，否则指向去空白后的值。
+func optStr(v any) *string {
+	s, ok := v.(string)
+	if !ok {
+		return nil
+	}
+	t := strings.TrimSpace(s)
+	return &t
+}
 func number(v any) int {
 	switch n := v.(type) {
 	case int:
@@ -48,7 +73,7 @@ func clone[T any](value T) T {
 	return out
 }
 func newStore(file string) (*Store, error) {
-	s := &Store{file: file, Next: 1, Folders: []Row{}, Conversations: []Row{}, Turns: map[string][]Row{}, Settings: map[string]any{}, Tabs: []Row{}}
+	s := &Store{file: file, Next: 1, Folders: []Row{}, Conversations: []Row{}, Turns: map[string][]Row{}, Settings: map[string]any{}, Tabs: []Row{}, FolderGroups: []Row{}, ConversationTags: []Row{}, Assistants: []Row{}, QuickMessages: []Row{}, Agents: map[string]Row{}}
 	if file == ":memory:" {
 		return s, nil
 	}
@@ -103,6 +128,33 @@ func (s *Store) folderLocked(n int) Row {
 	}
 	return nil
 }
+func (s *Store) groupLocked(n int) Row {
+	for _, g := range s.FolderGroups {
+		if number(g["id"]) == n {
+			return g
+		}
+	}
+	return nil
+}
+
+// groupsLocked returns every folder group deep-cloned in sort_order. Always a
+// non-nil slice: the frontend filters the result, and a JSON null would throw.
+func (s *Store) groupsLocked() []Row {
+	out := []Row{}
+	for _, g := range s.FolderGroups {
+		out = append(out, clone(g))
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return number(out[i]["sort_order"]) < number(out[j]["sort_order"])
+	})
+	return out
+}
+func groupColor(v any) string {
+	if s := text(v); s != "" {
+		return s
+	}
+	return "default"
+}
 func (s *Store) conversationLocked(n int) Row {
 	for _, r := range s.Conversations {
 		if number(r["id"]) == n {
@@ -115,10 +167,11 @@ func (s *Store) openFolderLocked(path, kind string) Row {
 	for _, r := range s.Folders {
 		if text(r["path"]) == path {
 			r["last_opened_at"] = timestamp()
+			r["open"] = true
 			return r
 		}
 	}
-	r := Row{"id": s.allocate(), "name": filepath.Base(path), "path": path, "git_branch": nil, "default_agent_type": nil, "last_opened_at": timestamp(), "sort_order": len(s.Folders), "color": "default", "parent_id": nil, "kind": kind, "alias": nil, "group_id": nil}
+	r := Row{"id": s.allocate(), "name": filepath.Base(path), "path": path, "git_branch": nil, "default_agent_type": nil, "last_opened_at": timestamp(), "sort_order": len(s.Folders), "color": "default", "parent_id": nil, "kind": kind, "alias": nil, "group_id": nil, "open": true}
 	s.Folders = append(s.Folders, r)
 	return r
 }

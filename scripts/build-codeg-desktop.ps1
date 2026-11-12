@@ -28,7 +28,24 @@ $workspaceConfig = @{ root = $workspaceRoot } | ConvertTo-Json
 [System.IO.File]::WriteAllText((Join-Path $bundleRoot 'workspace.json'), $workspaceConfig, (New-Object System.Text.UTF8Encoding($false)))
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'THIRD_PARTY_NOTICES.md') -Destination $bundleRoot
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'codeg-ui\LICENSE') -Destination (Join-Path $bundleRoot 'licenses\codeg-Apache-2.0.txt')
-Copy-Item -LiteralPath (Join-Path $workspaceRoot 'public\codepluse.ico') -Destination (Join-Path $bundleRoot 'codepluse.ico')
+# codepluse.ico 供可选桌面快捷方式取图标。旧的 public/codepluse.ico 已随 Node/Electron 栈删除，
+# 改由应用图标 PNG 现场生成，避免依赖已删文件。
+Add-Type -AssemblyName System.Drawing
+$iconSource = Join-Path $workspaceRoot 'codeg-ui\public\icon-512x512.png'
+if (Test-Path -LiteralPath $iconSource) {
+    $iconBmp = [System.Drawing.Image]::FromFile($iconSource)
+    $iconHandle = $iconBmp.GetHicon()
+    try {
+        $icon = [System.Drawing.Icon]::FromHandle($iconHandle)
+        $iconStream = [System.IO.File]::Create((Join-Path $bundleRoot 'codepluse.ico'))
+        try { $icon.Save($iconStream) } finally { $iconStream.Dispose() }
+        $icon.Dispose()
+    } finally {
+        $iconBmp.Dispose()
+    }
+} else {
+    Write-Warning "缺少图标源 $iconSource，未生成 codepluse.ico（快捷方式将无自定义图标）"
+}
 if ($InstallShortcut) {
     $shortcutShell = New-Object -ComObject WScript.Shell
     $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'codepluse.lnk'

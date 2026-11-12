@@ -20,16 +20,19 @@ import {
   CircleCheck,
   Clock3,
   FileCode2,
+  Folder,
   GitBranch,
   ListTodo,
   PanelLeftClose,
   RefreshCw,
   Search,
+  Settings,
   Terminal,
   Wrench,
   X,
 } from "lucide-react"
-import { workTaskEvents, workTaskList } from "@/lib/api"
+import { openSettingsWindow, workTaskEvents, workTaskList } from "@/lib/api"
+import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import type { WorkTask, WorkTaskEvent, WorkTaskStatus } from "@/lib/types"
 
 type StepState = "done" | "active" | "pending" | "error"
@@ -129,13 +132,13 @@ function defaultSteps(task: WorkTask): StepView[] {
   return steps
 }
 
-function fromApi(task: WorkTask): WorkView {
+function fromApi(task: WorkTask, folderName: string | null): WorkView {
   return {
     id: task.id,
     title: task.title || "未命名任务",
     status: task.status,
     agent: task.agent_type ?? null,
-    workspace: task.work_branch ?? task.base_branch ?? "工作区",
+    workspace: task.work_branch ?? task.base_branch ?? folderName ?? "工作区",
     time: formatTime(task.updated_at ?? task.created_at),
     additions: task.additions ?? null,
     deletions: task.deletions ?? null,
@@ -203,15 +206,38 @@ export function ZCodeWorkPanel({ onCollapse }: { onCollapse?: () => void }) {
   const [query, setQuery] = useState("")
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [eventSteps, setEventSteps] = useState<Record<number, StepView[]>>({})
+  // 工作区（文件夹）即任务所属的项目。左侧按工作区分组展示，切换后只列该工作区的任务。
+  const folders = useAppWorkspaceStore((s) => s.folders)
+  const [workspaceId, setWorkspaceId] = useState<number | null>(null)
+
+  const folderNames = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const f of folders) map.set(f.id, f.alias ?? f.name)
+    return map
+  }, [folders])
+
+  // 工作树分支也归属到它所属的仓库，否则工作树任务会在列表里凭空多出一个工作区。
+  const workspaceFolders = useMemo(
+    () => folders.filter((f) => f.parent_id == null && f.kind === "regular"),
+    [folders],
+  )
+
+  // 选中的工作区可能已被移除，回退到「全部」而不是留一个空列表。
+  const activeWorkspaceId =
+    workspaceId != null && !workspaceFolders.some((f) => f.id === workspaceId)
+      ? null
+      : workspaceId
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     void (async () => {
       try {
-        const rows = await workTaskList()
+        const rows = await workTaskList(activeWorkspaceId)
         if (cancelled) return
-        const mapped = Array.isArray(rows) ? rows.map(fromApi) : []
+        const mapped = Array.isArray(rows)
+          ? rows.map((task) => fromApi(task, folderNames.get(task.folder_id) ?? null))
+          : []
         setItems(mapped)
         setSelectedId((current) =>
           mapped.some((item) => item.id === current) ? current : (mapped[0]?.id ?? null),
@@ -230,7 +256,7 @@ export function ZCodeWorkPanel({ onCollapse }: { onCollapse?: () => void }) {
       }
     })()
     return () => { cancelled = true }
-  }, [reloadKey])
+  }, [reloadKey, activeWorkspaceId, folderNames])
 
   const selected = useMemo(
     () => items.find((item) => item.id === selectedId) ?? items[0] ?? null,
@@ -295,6 +321,37 @@ export function ZCodeWorkPanel({ onCollapse }: { onCollapse?: () => void }) {
             </button>
           ) : null}
         </div>
+      </div>
+
+      <div className="zw-workspaces" aria-label="工作区">
+        <div className="zw-section-label">
+          <span>工作区</span>
+        </div>
+        <button
+          type="button"
+          className="zw-workspace-row"
+          data-active={activeWorkspaceId === null}
+          onClick={() => setWorkspaceId(null)}
+        >
+          <span className="zw-workspace-leading">
+            <Activity size={13} strokeWidth={2} />
+          </span>
+          <span className="zw-workspace-name">全部工作区</span>
+        </button>
+        {workspaceFolders.map((folder) => (
+          <button
+            key={folder.id}
+            type="button"
+            className="zw-workspace-row"
+            data-active={activeWorkspaceId === folder.id}
+            onClick={() => setWorkspaceId(folder.id)}
+          >
+            <span className="zw-workspace-leading">
+              <Folder size={13} strokeWidth={2} />
+            </span>
+            <span className="zw-workspace-name">{folder.alias ?? folder.name}</span>
+          </button>
+        ))}
       </div>
 
       <div className="zw-tabs" role="tablist" aria-label="任务筛选">
@@ -475,6 +532,22 @@ export function ZCodeWorkPanel({ onCollapse }: { onCollapse?: () => void }) {
           </div>
         </div>
       ) : null}
+
+      {/* 设置入口：照上游 ZCode TaskList 的 footer 位置（列表底部整宽按钮）。 */}
+      <div className="zw-footer">
+        <button
+          type="button"
+          className="zw-settings-btn"
+          onClick={() => {
+            void openSettingsWindow("general").catch((error) => {
+              console.error("[ZCodeWorkPanel] failed to open settings:", error)
+            })
+          }}
+        >
+          <Settings size={14} strokeWidth={2} />
+          <span>设置</span>
+        </button>
+      </div>
     </section>
   )
 }

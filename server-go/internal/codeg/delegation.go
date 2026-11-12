@@ -209,6 +209,8 @@ func (s *Server) launchDelegations(sp *taskSplit, parentDepth, parentConv int, p
 
 func (s *Server) tool(ctx context.Context, caller *Caller, name string, a Row) (any, error) {
 	switch name {
+	case "ask_user_question":
+		return s.askUserQuestion(ctx, caller, a)
 	case "list_agents":
 		return Row{"agents": s.agents()}, nil
 	case "propose_task_split":

@@ -11,37 +11,47 @@ import (
 
 	"harnesshub/internal/acp"
 	"harnesshub/internal/hub"
+	"harnesshub/internal/modelproviders"
 	"harnesshub/internal/providers"
 )
 
 type Server struct {
-	Runtime     *acp.Runtime
-	Hub         *hub.Hub
-	Root, Base  string
-	Resolve     func(string) (string, error)
-	store       *Store
-	mu          sync.Mutex
-	connections map[string]*Connection
-	subscribers map[chan Row]bool
-	tasks       map[string]*Delegation
-	callers     map[string]*Caller
+	Runtime    *acp.Runtime
+	Hub        *hub.Hub
+	Root, Base string
+	Resolve    func(string) (string, error)
+	// AgentAvailable reports whether an agent's backing adapter/executable is
+	// actually present on this machine. It is injected by the wiring layer,
+	// which owns the binary-resolution logic. When nil, every enabled agent is
+	// treated as available (the prior behavior).
+	AgentAvailable func(a *hub.Agent) bool
+	store          *Store
+	mu             sync.Mutex
+	connections    map[string]*Connection
+	subscribers    map[chan Row]bool
+	tasks          map[string]*Delegation
+	callers        map[string]*Caller
 	// splits are the task-split cards waiting for the user (see split.go).
 	splits map[string]*taskSplit
-	terminalMu  sync.Mutex
-	terminals   map[string]*TerminalSession
-	watchMu     sync.Mutex
-	watches     map[string]*WorkspaceWatch
-	auto        *autoStore
-	forge       *forgeStore
-	tasks2      *taskStore
-	browser     *browserManager
-	computer    *computerState
+	// questions are blocking ask_user_question tool calls waiting on the user
+	// (see question.go).
+	questions      map[string]*parkedQuestion
+	terminalMu     sync.Mutex
+	terminals      map[string]*TerminalSession
+	watchMu        sync.Mutex
+	watches        map[string]*WorkspaceWatch
+	auto           *autoStore
+	forge          *forgeStore
+	tasks2         *taskStore
+	folderCommands *folderCommandStore
+	browser        *browserManager
+	computer       *computerState
 	// Warm pool: pre-connected, unused sessions that acp_connect can claim
 	// without paying the 15-25s session/new cost on every harness switch.
-	warmMu      sync.Mutex
-	warm        map[string][]warmEntry
-	warming     map[string]bool
-	started     bool // guarded by warmMu; prewarming is a runtime-only behavior
+	warmMu  sync.Mutex
+	warm    map[string][]warmEntry
+	warming map[string]bool
+	started bool // guarded by warmMu; prewarming is a runtime-only behavior
 }
 
 func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (string, error)) (*Server, error) {
@@ -49,10 +59,11 @@ func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (s
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{Runtime: rt, Hub: h, Root: root, Base: base, Resolve: resolve, store: st, connections: map[string]*Connection{}, subscribers: map[chan Row]bool{}, tasks: map[string]*Delegation{}, callers: map[string]*Caller{}, splits: map[string]*taskSplit{}, terminals: map[string]*TerminalSession{}, warm: map[string][]warmEntry{}, warming: map[string]bool{}}
+	s := &Server{Runtime: rt, Hub: h, Root: root, Base: base, Resolve: resolve, store: st, connections: map[string]*Connection{}, subscribers: map[chan Row]bool{}, tasks: map[string]*Delegation{}, callers: map[string]*Caller{}, splits: map[string]*taskSplit{}, questions: map[string]*parkedQuestion{}, terminals: map[string]*TerminalSession{}, warm: map[string][]warmEntry{}, warming: map[string]bool{}}
 	s.auto = newAutoStore(root)
 	s.forge = newForgeStore(root)
 	s.tasks2 = newTaskStore(root)
+	s.folderCommands = newFolderCommandStore(root)
 	s.tasks2.onChange = func(taskID int) { s.emit("task://changed", Row{"id": taskID}) }
 	s.browser = &browserManager{console: map[string][]Row{}}
 	s.computer = &computerState{}
@@ -61,6 +72,7 @@ func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (s
 	}
 	s.loadInstances()
 	s.loadSplits()
+	s.applyEnabledOverrides()
 	rt.OnUpdate = s.nativeUpdate
 	rt.ExtraMCP = s.extraMCP
 	rt.AllowInternalTool = s.allowInternalTool
@@ -129,7 +141,17 @@ func (s *Server) agents() []Row {
 		if !a.Real {
 			continue
 		}
-		out = append(out, Row{"agent_type": wireAgent(a), "name": a.Name, "description": "ACP · " + a.Name, "available": a.Enabled, "enabled": a.Enabled, "registry_id": wireAgent(a), "registry_version": nil, "skills_capable": true, "supports_custom_version": false, "distribution_type": "system", "is_acp_adapter": a.RealTool != "", "custom_source": nil, "installed_version": s.installedVersion(a), "sort_order": len(out), "env": Row{}, "config_json": nil, "host_tools_agent_mode": true, "instance": a.Wire != "", "real_tool": a.RealTool, "provider_id": a.ProviderID, "default_model": a.DefaultModel})
+		// "available" is a live probe of the local environment, not the
+		// registration flag: the agent is available only when its backing
+		// adapter/executable is actually present on this machine. "enabled"
+		// stays the user/config switch, so the two are no longer the same value.
+		available := a.Enabled
+		if s.AgentAvailable != nil {
+			available = s.AgentAvailable(a)
+		}
+		row := Row{"agent_type": wireAgent(a), "name": a.Name, "description": "ACP · " + a.Name, "available": available, "enabled": a.Enabled, "registry_id": wireAgent(a), "registry_version": nil, "skills_capable": true, "supports_custom_version": false, "distribution_type": "system", "is_acp_adapter": a.RealTool != "", "custom_source": nil, "installed_version": s.installedVersion(a), "sort_order": len(out), "env": Row{}, "config_json": nil, "config_file_path": nil, "codex_auth_json": nil, "codex_config_toml": nil, "codex_model_catalog": nil, "system_instructions_content": nil, "system_instructions_file_path": nil, "model_provider_id": nil, "host_tools_agent_mode": true, "instance": a.Wire != "", "real_tool": a.RealTool, "provider_id": a.ProviderID, "default_model": a.DefaultModel}
+		mergeAgentOverlay(s.store.Agents, wireAgent(a), row)
+		out = append(out, row)
 	}
 	return out
 }
@@ -252,6 +274,11 @@ func (s *Server) command(command string, a Row) (any, error) {
 	if strings.HasPrefix(command, "work_task_") {
 		return s.workTaskCommand(command, a)
 	}
+	if command == "list_folder_commands" || command == "create_folder_command" ||
+		command == "update_folder_command" || command == "delete_folder_command" ||
+		command == "reorder_folder_commands" || command == "bootstrap_folder_commands_from_package_json" {
+		return s.folderCommandCommand(command, a)
+	}
 	if strings.HasPrefix(command, "officecli_") || strings.HasPrefix(command, "office_") ||
 		command == "start_office_watch" || command == "stop_office_watch" {
 		return s.officeCommand(command, a)
@@ -285,8 +312,49 @@ func (s *Server) command(command string, a Row) (any, error) {
 		return nil, providers.Activate(s.Root, text(a["agent"]), text(a["id"]))
 	case "codepluse_provider_delete":
 		return nil, providers.Delete(s.Root, text(a["id"]))
+	case "list_model_providers":
+		return modelproviders.List(s.Root)
+	case "list_provider_models":
+		return s.listProviderModels(a)
+	case "create_model_provider":
+		info, e := modelproviders.Create(s.Root, text(a["name"]), text(a["apiUrl"]), text(a["apiKey"]), text(a["agentType"]), optStr(a["model"]))
+		if e != nil {
+			return nil, e
+		}
+		return info, nil
+	case "update_model_provider":
+		info, affected, e := modelproviders.Update(s.Root, int64(number(a["id"])), optStr(a["name"]), optStr(a["apiUrl"]), optStr(a["apiKey"]), optStr(a["agentType"]), optStr(a["model"]))
+		if e != nil {
+			return nil, e
+		}
+		return Row{"provider": info, "affectedRunningSessions": affected}, nil
+	case "delete_model_provider":
+		return nil, modelproviders.Delete(s.Root, int64(number(a["id"])))
+	case "ccswitch_provider_config":
+		// 取回单个 CC Switch 供应商的明文配置（仅限 ccswitch: 前缀，防止借此读 store 密钥）。
+		id := text(a["id"])
+		if !strings.HasPrefix(id, "ccswitch:") {
+			return nil, fmt.Errorf("仅支持 CC Switch 供应商")
+		}
+		p, e := providers.Find(s.Root, id)
+		if e != nil {
+			return nil, e
+		}
+		key := p.Env["ANTHROPIC_AUTH_TOKEN"]
+		if key == "" {
+			key = p.Env["ANTHROPIC_API_KEY"]
+		}
+		return Row{"url": p.Env["ANTHROPIC_BASE_URL"], "apiKey": key, "model": p.Model, "hasKey": key != ""}, nil
 	case "acp_list_agents":
 		return s.agents(), nil
+	case "acp_detect_agent_local_version":
+		ag := s.pick(text(a["agentType"]))
+		if ag == nil {
+			return nil, nil
+		}
+		return s.installedVersion(ag), nil
+	case "acp_preflight":
+		return s.preflight(text(a["agentType"]))
 	case "token_usage_report":
 		return s.tokenUsageReport(a)
 	case "token_usage_facets":
@@ -406,8 +474,43 @@ func (s *Server) command(command string, a Row) (any, error) {
 	case "acp_respond_permission":
 		choice := text(a["optionId"])
 		return nil, s.Runtime.RespondPermission(text(a["requestId"]), &choice)
+	case "acp_answer_question":
+		s.answerQuestion(a)
+		return nil, nil
 	case "acp_respond_task_split":
 		return s.respondTaskSplit(a)
+	case "acp_set_mode":
+		s.mu.Lock()
+		c := s.connections[text(a["connectionId"])]
+		s.mu.Unlock()
+		if c == nil {
+			return nil, fmt.Errorf("连接不存在")
+		}
+		if err := s.Runtime.SetMode(c.RuntimeID, text(a["modeId"])); err != nil {
+			return nil, err
+		}
+		s.publishSession(c.ID)
+		return nil, nil
+	case "acp_goal_control":
+		s.mu.Lock()
+		c := s.connections[text(a["connectionId"])]
+		s.mu.Unlock()
+		if c == nil {
+			return nil, fmt.Errorf("连接不存在")
+		}
+		return nil, s.Runtime.GoalControl(c.RuntimeID, text(a["action"]))
+	case "acp_stop_async_task":
+		s.mu.Lock()
+		c := s.connections[text(a["connectionId"])]
+		s.mu.Unlock()
+		if c == nil {
+			return nil, fmt.Errorf("连接不存在")
+		}
+		return s.Runtime.StopAsyncTask(c.RuntimeID, text(a["taskId"]))
+	case "acp_update_agent_env":
+		return s.updateAgentSettings("acp_update_agent_env", a)
+	case "acp_update_agent_config":
+		return s.updateAgentSettings("acp_update_agent_config", a)
 	}
 	st := s.store
 	st.mu.Lock()
@@ -457,6 +560,29 @@ func (s *Server) command(command string, a Row) (any, error) {
 			return nil, fmt.Errorf("项目不存在")
 		}
 		return clone(f), nil
+	case "update_folder_color", "update_folder_alias", "update_folder_default_agent":
+		f := st.folderLocked(number(a["folderId"]))
+		if f == nil {
+			return nil, fmt.Errorf("项目不存在")
+		}
+		switch command {
+		case "update_folder_color":
+			f["color"] = text(a["color"])
+		case "update_folder_alias":
+			f["alias"] = a["alias"]
+		case "update_folder_default_agent":
+			f["default_agent_type"] = a["defaultAgentType"]
+		}
+		return clone(f), st.saveLocked()
+	case "remove_folder_from_workspace":
+		// Close the workspace: hide it from the open list but keep the row in
+		// allFolders so by-id cwd lookups (worktrees, history) still resolve.
+		f := st.folderLocked(number(a["folderId"]))
+		if f == nil {
+			return nil, fmt.Errorf("项目不存在")
+		}
+		f["open"] = false
+		return nil, st.saveLocked()
 	case "list_all_conversations", "list_conversations", "list_child_conversations":
 		out := []Row{}
 		for i := len(st.Conversations) - 1; i >= 0; i-- {
@@ -566,7 +692,176 @@ func (s *Server) command(command string, a Row) (any, error) {
 			}
 		}
 		return Row{"accepted": accepted, "version": st.TabsVersion, "tabs": clone(st.Tabs)}, nil
-	case "list_folder_groups", "list_conversation_tags", "list_assistants", "assistant_list", "list_remote_connections":
+	case "list_folder_groups":
+		return st.groupsLocked(), nil
+	case "create_folder_group":
+		g := Row{"id": st.allocate(), "name": text(a["name"]), "color": groupColor(a["color"]), "sort_order": len(st.FolderGroups)}
+		st.FolderGroups = append(st.FolderGroups, g)
+		return clone(g), st.saveLocked()
+	case "update_folder_group":
+		g := st.groupLocked(number(a["groupId"]))
+		if g == nil {
+			return nil, fmt.Errorf("分组不存在")
+		}
+		if n, ok := a["name"]; ok {
+			g["name"] = text(n)
+		}
+		if c, ok := a["color"]; ok {
+			g["color"] = text(c)
+		}
+		return clone(g), st.saveLocked()
+	case "delete_folder_group":
+		gid := number(a["groupId"])
+		kept := []Row{}
+		for _, g := range st.FolderGroups {
+			if number(g["id"]) != gid {
+				kept = append(kept, g)
+			}
+		}
+		st.FolderGroups = kept
+		for _, f := range st.Folders {
+			if number(f["group_id"]) == gid {
+				f["group_id"] = nil
+			}
+		}
+		return nil, st.saveLocked()
+	case "set_folder_group":
+		f := st.folderLocked(number(a["folderId"]))
+		if f == nil {
+			return nil, fmt.Errorf("项目不存在")
+		}
+		if a["groupId"] == nil {
+			f["group_id"] = nil
+		} else {
+			f["group_id"] = number(a["groupId"])
+		}
+		return nil, st.saveLocked()
+	case "apply_sidebar_layout":
+		entries, _ := a["entries"].([]any)
+		for i, e := range entries {
+			entry, _ := e.(map[string]any)
+			if entry == nil {
+				continue
+			}
+			eid := number(entry["id"])
+			if text(entry["kind"]) == "group" {
+				if g := st.groupLocked(eid); g != nil {
+					g["sort_order"] = i
+				}
+				continue
+			}
+			if f := st.folderLocked(eid); f != nil {
+				f["sort_order"] = i
+				if entry["groupId"] == nil {
+					f["group_id"] = nil
+				} else {
+					f["group_id"] = number(entry["groupId"])
+				}
+			}
+		}
+		return nil, st.saveLocked()
+	case "list_conversation_tags":
+		return st.tagsLocked(), nil
+	case "create_conversation_tag":
+		return st.createTagLocked(a["folderId"], text(a["name"]), text(a["color"])), st.saveLocked()
+	case "update_conversation_tag":
+		t := st.tagLocked(number(a["tagId"]))
+		if t == nil {
+			return nil, fmt.Errorf("标签不存在")
+		}
+		if v, ok := a["name"]; ok {
+			t["name"] = text(v)
+		}
+		if v, ok := a["color"]; ok {
+			t["color"] = text(v)
+		}
+		return clone(t), st.saveLocked()
+	case "delete_conversation_tag":
+		st.deleteTagLocked(number(a["tagId"]))
+		return nil, st.saveLocked()
+	case "reorder_conversation_tags":
+		st.reorderTagsLocked(ids(a["tagIds"]))
+		return nil, st.saveLocked()
+	case "get_conversation_branch_tag":
+		if saved, ok := st.Settings["conversation_branch_tag"]; ok {
+			return clone(saved), nil
+		}
+		return Row{"enabled": false, "color": "default"}, nil
+	case "update_conversation_branch_tag":
+		color := text(a["color"])
+		if color == "" {
+			color = "default"
+		}
+		setting := Row{"enabled": a["enabled"] == true, "color": color}
+		st.Settings["conversation_branch_tag"] = setting
+		return clone(setting), st.saveLocked()
+	case "update_conversation_tags":
+		row := st.conversationLocked(number(a["conversationId"]))
+		if row == nil {
+			return nil, fmt.Errorf("会话不存在")
+		}
+		// Delta merge: keep existing order, drop `remove`, append new `add`.
+		// Two windows toggling different tags both land.
+		cur, _ := row["tag_ids"].([]any)
+		remove := map[int]bool{}
+		for _, v := range ids(a["remove"]) {
+			remove[v] = true
+		}
+		present := map[int]bool{}
+		merged := []any{}
+		for _, v := range cur {
+			n := number(v)
+			if !remove[n] {
+				merged = append(merged, n)
+				present[n] = true
+			}
+		}
+		for _, v := range ids(a["add"]) {
+			if !present[v] && !remove[v] {
+				merged = append(merged, v)
+				present[v] = true
+			}
+		}
+		row["tag_ids"] = merged
+		s.changed(row)
+		return clone(row), st.saveLocked()
+	case "assistant_list":
+		return st.assistantsLocked(), nil
+	case "assistant_create":
+		draft, _ := a["draft"].(map[string]any)
+		return st.createAssistantLocked(draft), st.saveLocked()
+	case "assistant_update":
+		patch, _ := a["patch"].(map[string]any)
+		res := st.updateAssistantLocked(number(a["id"]), patch)
+		if res == nil {
+			return nil, fmt.Errorf("助手不存在")
+		}
+		return res, st.saveLocked()
+	case "assistant_delete":
+		res := st.deleteAssistantLocked(number(a["id"]))
+		if res == nil {
+			return nil, fmt.Errorf("助手不存在")
+		}
+		return res, st.saveLocked()
+	case "assistant_reorder":
+		return st.reorderAssistantsLocked(ids(a["ids"])), st.saveLocked()
+	case "quick_messages_list":
+		return st.quickMessagesLocked(), nil
+	case "quick_messages_create":
+		return st.createQuickMessageLocked(text(a["title"]), text(a["content"])), st.saveLocked()
+	case "quick_messages_update":
+		res := st.updateQuickMessageLocked(number(a["id"]), a["title"], a["content"])
+		if res == nil {
+			return nil, fmt.Errorf("快捷消息不存在")
+		}
+		return res, st.saveLocked()
+	case "quick_messages_delete":
+		st.deleteQuickMessageLocked(number(a["id"]))
+		return nil, st.saveLocked()
+	case "quick_messages_reorder":
+		st.reorderQuickMessagesLocked(ids(a["ids"]))
+		return nil, st.saveLocked()
+	case "list_remote_connections":
 		return []Row{}, nil
 	case "get_system_settings", "load_system_settings":
 		return clone(st.Settings), nil

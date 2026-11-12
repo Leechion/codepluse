@@ -58,8 +58,8 @@
       "system": "Systemeinstellungen",
       "chat_channels": "Chat-Kanäle",
       "web_service": "Webdienst",
+      "providers": "Anbieter",
       "model_providers": "Modellanbieter",
-      "harness_instances": "Harness-Instanzen",
       "experts": "Experten",
       "science": "Wissenschaft",
       "office_tools": "Office-Tools",
@@ -803,6 +803,7 @@
       "saveFailed": "Delegationseinstellungen konnten nicht gespeichert werden",
       "loadFailed": "Delegationseinstellungen konnten nicht geladen werden: {detail}",
       "tabGeneral": "Allgemein",
+      "tabMainAgent": "Main-Agent-Einstellungen",
       "tabAgentDefaults": "Subagent-Standards",
       "agentDefaultsDescription": "Pro-Agent-Überschreibungen, die angewendet werden, wenn die Multi-Agent-Zusammenarbeit einen Subagenten für einen Delegationsaufruf startet. Die hier gezeigten Optionen stammen aus einer Live-Abfrage – Ihre Auswahl ist exakt das, was der Agent akzeptiert.",
       "agentDefaultsAgentHint": "Optionen auf Standard behalten den eigenen Wert des Agenten.",
@@ -1568,6 +1569,7 @@
     "authModeModelProvider": "Modellanbieter",
     "modelProvider": "Modellanbieter",
     "modelProviderHint": "API-URL, API-Key und Modell eines konfigurierten Modellanbieters verwenden.",
+    "modelProviderLoadFailed": "CC-Switch-Konfiguration konnte nicht geladen werden: {message}",
     "selectModelProvider": "Modellanbieter auswählen",
     "noModelProviderAvailable": "Kein Modellanbieter für diesen Agent konfiguriert. Gehen Sie zu den Modellanbieter-Einstellungen, um einen hinzuzufügen.",
     "claude": {
@@ -4669,6 +4671,7 @@
   "HarnessInstanceSettings": {
     "sectionTitle": "Harness-Instanzen",
     "sectionDescription": "Benannte Kopien von Claude Code / Codex mit eigenem Anbieter und Standardmodell – plus der Main-Bot für neue Unterhaltungen.",
+    "instancesDescription": "Benannte Kopien von Claude Code / Codex mit eigenem Anbieter und Standardmodell, so dass mehrere Umgebungen nebeneinander laufen, ohne die globale Auswahl zu ändern.",
     "loadFailed": "Harness-Instanzen konnten nicht geladen werden",
     "refresh": "Aktualisieren",
     "newInstance": "Neue Instanz",

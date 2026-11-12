@@ -6,9 +6,11 @@
  *
  *   * "General" — feature kill switch + chain depth limit. Persisted as
  *     `delegation.enabled` / `delegation.depth_limit` on the Rust side.
- *   * "Agent defaults" — per-agent overrides (mode + config_values) that
- *     codeg-mcp uses when spawning a subagent for a `delegate_to_agent`
- *     call. Persisted as `delegation.agent_defaults` (one JSON blob).
+ *   * "Sub-agent config" (子智能体配置) — the main agent's default harness +
+ *     model and the named harness instances (执行端实例), each pinned to its own
+ *     provider/model. This hosts the relocated `HarnessInstanceSection`; the
+ *     per-agent `delegation.agent_defaults` blob it used to edit is now carried
+ *     through untouched on save, since the instances cover per-sub-agent staffing.
  *   * "Assistants" — the user's assistants. Each change is written at once,
  *     so the section's save bar does not apply to (and is hidden on) it.
  *
@@ -47,30 +49,9 @@ import { subscribe } from "@/lib/platform"
 import { DELEGATION_SETTINGS_CHANGED_EVENT } from "@/lib/types"
 import type { AgentDelegationDefaults, AgentType } from "@/lib/types"
 import { AssistantsPanel } from "./assistants-panel"
-import { DelegationAgentDefaultsPanel } from "./delegation-agent-defaults"
+import { HarnessInstanceSection } from "./harness-instance-settings"
 
-type DelegationTab = "general" | "agentDefaults" | "assistants"
-
-function sameDefaults(
-  a: Partial<Record<AgentType, AgentDelegationDefaults>>,
-  b: Partial<Record<AgentType, AgentDelegationDefaults>>
-): boolean {
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<AgentType>
-  for (const key of keys) {
-    const x = a[key]
-    const y = b[key]
-    if (!x || !y) {
-      if (x || y) return false
-      continue
-    }
-    if ((x.mode_id ?? null) !== (y.mode_id ?? null)) return false
-    const xv = x.config_values ?? {}
-    const yv = y.config_values ?? {}
-    const ids = new Set([...Object.keys(xv), ...Object.keys(yv)])
-    for (const id of ids) if (xv[id] !== yv[id]) return false
-  }
-  return true
-}
+type DelegationTab = "general" | "mainAgent" | "agentDefaults" | "assistants"
 
 const DEPTH_MIN = 1
 const DEPTH_MAX = 8
@@ -272,13 +253,9 @@ export function DelegationSettingsSection() {
     (enabled !== persisted.enabled ||
       clamp(depth, DEPTH_MIN, DEPTH_MAX) !== persisted.depth_limit ||
       clampCacheMb(cacheMb) !== persisted.completed_cache_max_mb)
-  const defaultsDirty =
-    persisted !== null &&
-    !sameDefaults(agentDefaults, persisted.agent_defaults ?? {})
-  const unsavedTabs = [
-    ...(generalDirty ? [t("tabGeneral")] : []),
-    ...(defaultsDirty ? [t("tabAgentDefaults")] : []),
-  ]
+  // The sub-agent-config tab now hosts self-saving panels (main agent + harness
+  // instances), so it never contributes to the delegation save bar's dirty set.
+  const unsavedTabs = [...(generalDirty ? [t("tabGeneral")] : [])]
   const unsavedDot = (
     <span
       role="img"
@@ -304,9 +281,9 @@ export function DelegationSettingsSection() {
             {t("tabGeneral")}
             {generalDirty ? unsavedDot : null}
           </TabsTrigger>
+          <TabsTrigger value="mainAgent">{t("tabMainAgent")}</TabsTrigger>
           <TabsTrigger value="agentDefaults">
             {t("tabAgentDefaults")}
-            {defaultsDirty ? unsavedDot : null}
           </TabsTrigger>
           <TabsTrigger value="assistants">{t("tabAssistants")}</TabsTrigger>
         </TabsList>
@@ -389,29 +366,27 @@ export function DelegationSettingsSection() {
           </SettingCard>
         </TabsContent>
 
+        <TabsContent value="mainAgent" className="pt-2">
+          {/* 主智能体：新建对话默认使用的执行端 + 模型。 */}
+          <HarnessInstanceSection mode="main" />
+        </TabsContent>
+
         <TabsContent value="agentDefaults" className="pt-2">
-          <DelegationAgentDefaultsPanel
-            value={agentDefaults}
-            onChange={setAgentDefaults}
-            disabled={loading || !enabled}
-            delegationEnabled={loading ? null : enabled}
-            onShowGeneral={() => setTab("general")}
-          />
+          {/* 执行端实例：为 Claude Code / Codex 建立命名副本。 */}
+          <HarnessInstanceSection mode="instances" />
         </TabsContent>
 
         <TabsContent value="assistants" className="pt-2">
           <AssistantsPanel
             delegationEnabled={persisted ? persisted.enabled : null}
             unsavedTabs={unsavedTabs}
-            onShowUnsaved={() =>
-              setTab(generalDirty ? "general" : "agentDefaults")
-            }
+            onShowUnsaved={() => setTab("general")}
             onShowGeneral={() => setTab("general")}
           />
         </TabsContent>
       </Tabs>
 
-      {tab !== "assistants" ? (
+      {tab === "general" ? (
         <SettingsSaveBar
           onSave={() => void save()}
           saving={saving}

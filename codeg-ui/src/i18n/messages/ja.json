@@ -58,8 +58,8 @@
       "system": "システム",
       "chat_channels": "チャットチャンネル",
       "web_service": "Webサービス",
+      "providers": "プロバイダー",
       "model_providers": "モデルプロバイダー",
-      "harness_instances": "ハーネスインスタンス",
       "experts": "エキスパート",
       "science": "科学研究",
       "office_tools": "Officeツール",
@@ -803,6 +803,7 @@
       "saveFailed": "委任設定の保存に失敗しました",
       "loadFailed": "委任設定の読み込みに失敗しました: {detail}",
       "tabGeneral": "一般",
+      "tabMainAgent": "メインエージェント設定",
       "tabAgentDefaults": "サブエージェント設定",
       "agentDefaultsDescription": "マルチエージェント連携が委任呼び出しのためにサブエージェントを起動するときに適用される上書き設定です。ここに表示されるオプションはライブプローブで取得しており、選択した内容がそのままエージェントに渡されます。",
       "agentDefaultsAgentHint": "「既定」のままのオプションは、エージェント自身の値を使います。",
@@ -1568,6 +1569,7 @@
     "authModeModelProvider": "モデルプロバイダー",
     "modelProvider": "モデルプロバイダー",
     "modelProviderHint": "設定済みモデルプロバイダーの API URL、API Key、モデルを使用します。",
+    "modelProviderLoadFailed": "CC Switch の設定の読み込みに失敗しました: {message}",
     "selectModelProvider": "モデルプロバイダーを選択",
     "noModelProviderAvailable": "このエージェントにはモデルプロバイダーが設定されていません。モデルプロバイダー設定で追加してください。",
     "claude": {
@@ -4669,6 +4671,7 @@
   "HarnessInstanceSettings": {
     "sectionTitle": "ハーネスインスタンス",
     "sectionDescription": "Claude Code / Codex の名前付きコピーそれぞれがプロバイダとデフォルトモデルを固定します。新しい会話の起点になるメインボットもここで指定します。",
+    "instancesDescription": "Claude Code / Codex の名前付きコピーそれぞれがプロバイダとデフォルトモデルを固定し、グローバル選択に触れずに複数環境を並行実行できます。",
     "loadFailed": "ハーネスインスタンスの読み込みに失敗しました",
     "refresh": "更新",
     "newInstance": "新規インスタンス",

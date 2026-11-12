@@ -58,8 +58,8 @@
       "system": "Système",
       "chat_channels": "Canaux de chat",
       "web_service": "Service Web",
+      "providers": "Fournisseurs",
       "model_providers": "Fournisseurs de Modèles",
-      "harness_instances": "Instances de harness",
       "experts": "Experts",
       "science": "Science",
       "office_tools": "Outils bureautiques",
@@ -803,6 +803,7 @@
       "saveFailed": "Échec de l’enregistrement des paramètres de délégation",
       "loadFailed": "Échec du chargement des paramètres de délégation : {detail}",
       "tabGeneral": "Général",
+      "tabMainAgent": "Config. de l'agent principal",
       "tabAgentDefaults": "Valeurs par défaut du sous-agent",
       "agentDefaultsDescription": "Remplacements par agent appliqués lorsque la Collaboration multi-agent démarre un sous-agent pour un appel de délégation. Les options affichées proviennent d’une sonde en direct : votre sélection correspond exactement à ce que l’agent acceptera.",
       "agentDefaultsAgentHint": "Les options laissées sur Par défaut gardent la valeur propre de l’agent.",
@@ -1568,6 +1569,7 @@
     "authModeModelProvider": "Fournisseur de modèle",
     "modelProvider": "Fournisseur de modèle",
     "modelProviderHint": "Utiliser l'URL API, la clé API et le modèle d'un fournisseur de modèle configuré.",
+    "modelProviderLoadFailed": "Échec du chargement de la config CC Switch : {message}",
     "selectModelProvider": "Sélectionner un fournisseur de modèle",
     "noModelProviderAvailable": "Aucun fournisseur de modèle configuré pour cet agent. Allez dans les paramètres des fournisseurs de modèle pour en ajouter un.",
     "claude": {
@@ -4669,6 +4671,7 @@
   "HarnessInstanceSettings": {
     "sectionTitle": "Instances de harness",
     "sectionDescription": "Copies nommées de Claude Code / Codex épinglant leur propre fournisseur et modèle par défaut, plus le bot principal des nouvelles conversations.",
+    "instancesDescription": "Copies nommées de Claude Code / Codex épinglant leur propre fournisseur et modèle par défaut, pour faire tourner plusieurs environnements côte à côte sans toucher à la sélection globale.",
     "loadFailed": "Échec du chargement des instances de harness",
     "refresh": "Actualiser",
     "newInstance": "Nouvelle instance",

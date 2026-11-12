@@ -40,7 +40,10 @@ import {
 } from "lucide-react"
 import { parse as parseTomlDocument } from "smol-toml"
 import { isDesktop, openUrl } from "@/lib/platform"
-import { getActiveRemoteConnectionId } from "@/lib/transport"
+import {
+  getActiveRemoteConnectionId,
+  getTransport,
+} from "@/lib/transport"
 import { toast } from "sonner"
 import {
   customAgentId,
@@ -250,6 +253,11 @@ interface AgentDraft {
   model: string
   claudeAuthMode: ClaudeAuthMode
   modelProviderId: number | null
+  /** A CC Switch provider picked in `model_provider` mode. Such a provider has
+   *  no numeric `modelproviders` row (its key lives in CC Switch's own store),
+   *  so `modelProviderId` stays null and this id is what marks "a provider IS
+   *  chosen" — otherwise the save guard would block a valid direct selection. */
+  ccSwitchProviderId: string | null
   geminiAuthMode: GeminiAuthMode
   geminiApiKey: string
   googleApiKey: string
@@ -3980,6 +3988,7 @@ function buildAgentDraft(agent: AcpAgentInfo): AgentDraft {
           ? "custom"
           : "official_subscription",
     modelProviderId: agent.model_provider_id ?? null,
+    ccSwitchProviderId: null,
     geminiAuthMode:
       agent.agent_type === "gemini" && agent.model_provider_id != null
         ? "model_provider"
@@ -4915,6 +4924,18 @@ export function AcpAgentSettings() {
     Partial<Record<AgentType, boolean>>
   >({})
   const [modelProviders, setModelProviders] = useState<ModelProviderInfo[]>([])
+  // CC Switch 供应商（只读）：认证方式选「模型供应商」时并入下拉，选中即自动带出
+  // 其 API 地址 / 密钥 / 模型（密钥经后端命令取回，不在列表接口中出网）。
+  const [ccSwitchProviders, setCcSwitchProviders] = useState<
+    Array<{
+      id: string
+      name: string
+      url: string
+      model: string
+      hasKey: boolean
+      ccCurrent: boolean
+    }>
+  >([])
   const [uninstallConfirmAgent, setUninstallConfirmAgent] =
     useState<AcpAgentInfo | null>(null)
   const [removeConfirmAgent, setRemoveConfirmAgent] =
@@ -5067,6 +5088,26 @@ export function AcpAgentSettings() {
       setAgents(next)
       publishAgentDisplay(next)
       setModelProviders(providers)
+      // CC Switch 供应商列表同步刷新（失败静默：没有 CC Switch 时下拉里少一组）。
+      getTransport()
+        .call<{ providers?: Array<{ id: string; name: string; url: string; model: string; hasKey: boolean; ccCurrent: boolean; source?: string; agent?: string }> }>(
+          "codepluse_providers_list"
+        )
+        .then((d) => {
+          setCcSwitchProviders(
+            (d.providers ?? [])
+              .filter((p) => p.source === "ccswitch" && (p.hasKey || p.ccCurrent))
+              .map((p) => ({
+                id: p.id,
+                name: p.name,
+                url: p.url,
+                model: p.model,
+                hasKey: Boolean(p.hasKey),
+                ccCurrent: Boolean(p.ccCurrent),
+              }))
+          )
+        })
+        .catch(() => {})
       setDrafts((prev) => {
         const updated = { ...prev }
         for (const agent of next) {
@@ -5163,10 +5204,7 @@ export function AcpAgentSettings() {
             [agentType]: { result: resultState.value },
           }))
         } else {
-          const message =
-            resultState.reason instanceof Error
-              ? resultState.reason.message
-              : String(resultState.reason)
+          const message = toErrorMessage(resultState.reason)
           setCheckState((prev) => ({
             ...prev,
             [agentType]: { error: message },
@@ -6407,7 +6445,13 @@ export function AcpAgentSettings() {
   // token (`ANTHROPIC_AUTH_TOKEN`).
   const claudeProviderModels = useProviderModels(
     selectedAgent?.agent_type === "claude_code" &&
-      selectedDraft?.claudeAuthMode === "custom"
+      (selectedDraft?.claudeAuthMode === "custom" ||
+        // 认证方式=模型供应商（如 CC Switch 直选）时，配置里往往没有模型清单，
+        // 这里同样向网关拉取模型列表，供自动填好六个模型位。
+        (selectedDraft?.claudeAuthMode === "model_provider" &&
+          selectedDraft?.modelProviderId == null &&
+          !!selectedDraft?.apiBaseUrl &&
+          !!selectedDraft?.apiKey))
       ? {
           protocol: "anthropic",
           baseUrl: selectedDraft.apiBaseUrl,
@@ -6505,7 +6549,9 @@ export function AcpAgentSettings() {
   }, [selectedAgent, selectedDraft])
 
   const selectedMissingModelProvider =
-    selectedNeedsModelProvider && selectedDraft?.modelProviderId == null
+    selectedNeedsModelProvider &&
+    selectedDraft?.modelProviderId == null &&
+    !selectedDraft?.ccSwitchProviderId
   const selectedConfigText = selectedDraft?.configText ?? ""
   // Inline validation for `writable_roots`: codex would accept a relative entry
   // and resolve it against CODEX_HOME, so it is surfaced before the save throws.
@@ -6983,6 +7029,7 @@ export function AcpAgentSettings() {
           ...current,
           claudeAuthMode: nextMode,
           modelProviderId: null,
+          ccSwitchProviderId: null,
           apiBaseUrl: "",
           apiKey: "",
           envText: patchEnvText(current.envText, envPatch),
@@ -6997,21 +7044,26 @@ export function AcpAgentSettings() {
         claudeAuthMode: nextMode,
         modelProviderId:
           nextMode === "model_provider" ? current.modelProviderId : null,
+        ccSwitchProviderId:
+          nextMode === "model_provider" ? current.ccSwitchProviderId : null,
       }))
     },
     [selectedAgent, selectedDraft, updateSelectedDraft]
   )
 
-  const handleModelProviderSelect = useCallback(
-    (providerIdStr: string) => {
+  // 把选中供应商的配置套写到当前智能体的草稿与环境里。providerId 为 null 表示
+  // 没有本地 store 绑定（例如 CC Switch 直选），只落配置不写绑定。
+  const applyModelProviderSelection = useCallback(
+    (
+      providerId: number | null,
+      provider:
+        | { api_url?: string; api_key?: string; model?: string | null }
+        | null
+    ) => {
       if (!selectedAgent || !selectedDraft) return
-      const providerId = providerIdStr ? Number(providerIdStr) : null
       if (providerId != null) {
         lastBoundProviderRef.current[selectedAgent.agent_type] = providerId
       }
-      const provider = providerId
-        ? modelProviders.find((p) => p.id === providerId)
-        : null
       const apiUrl = provider?.api_url ?? ""
       const apiKey = provider?.api_key ?? ""
       const agentType = selectedAgent.agent_type
@@ -7217,8 +7269,151 @@ export function AcpAgentSettings() {
         }))
       }
     },
-    [selectedAgent, selectedDraft, modelProviders, updateSelectedDraft]
+    [selectedAgent, selectedDraft, updateSelectedDraft]
   )
+
+  const handleModelProviderSelect = useCallback(
+    (providerIdStr: string) => {
+      if (!selectedAgent || !selectedDraft) return
+      // CC Switch 供应商：密钥只在其本地库中，先经后端取回配置，再走同一填充链路。
+      if (providerIdStr.startsWith("ccswitch:")) {
+        getTransport()
+          .call<{ url: string; apiKey: string; model: string }>(
+            "ccswitch_provider_config",
+            { id: providerIdStr }
+          )
+          .then((cfg) => {
+            applyModelProviderSelection(null, {
+              api_url: cfg.url ?? "",
+              api_key: cfg.apiKey ?? "",
+              model: cfg.model
+                ? JSON.stringify({ main: cfg.model })
+                : null,
+            })
+            updateSelectedDraft((current) => ({
+              ...current,
+              ccSwitchProviderId: providerIdStr,
+            }))
+          })
+          .catch((err) => {
+            toast.error(
+              t("modelProviderLoadFailed", {
+                message: err instanceof Error ? err.message : String(err),
+              })
+            )
+          })
+        return
+      }
+      const providerId = providerIdStr ? Number(providerIdStr) : null
+      if (providerId != null) {
+        lastBoundProviderRef.current[selectedAgent.agent_type] = providerId
+      }
+      const provider = providerId
+        ? modelProviders.find((p) => p.id === providerId)
+        : null
+      applyModelProviderSelection(providerId, provider)
+      // A numeric store pick (or a clear) replaces any CC Switch direct select.
+      updateSelectedDraft((current) => ({ ...current, ccSwitchProviderId: null }))
+    },
+    [
+      selectedAgent,
+      selectedDraft,
+      modelProviders,
+      applyModelProviderSelection,
+      updateSelectedDraft,
+    ]
+  )
+
+  // 认证方式=模型供应商 且为 CC Switch 直选（无 store 绑定）时，配置里往往没有
+  // 模型清单——URL/密钥就位后自动向网关拉取一次模型列表，供下方自动填好模型位。
+  const claudeCcSwitchModelsKey = JSON.stringify([
+    selectedAgent?.agent_type,
+    selectedDraft?.claudeAuthMode,
+    selectedDraft?.modelProviderId,
+    claudeProviderModels.request,
+  ])
+  const claudeCcSwitchFetchedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (selectedAgent?.agent_type !== "claude_code") return
+    if (selectedDraft?.claudeAuthMode !== "model_provider") return
+    if (selectedDraft?.modelProviderId != null) return
+    if (!claudeProviderModels.request) return
+    if (claudeCcSwitchFetchedRef.current === claudeCcSwitchModelsKey) return
+    claudeCcSwitchFetchedRef.current = claudeCcSwitchModelsKey
+    void claudeProviderModels.fetchNow()
+  }, [
+    claudeProviderModels,
+    claudeCcSwitchModelsKey,
+    selectedAgent?.agent_type,
+    selectedDraft?.claudeAuthMode,
+    selectedDraft?.modelProviderId,
+  ])
+
+  // 网关模型列表一到就自动填好六个模型位（按名称特征挑槽位，主模型兜底第一个）。
+  // 每份新列表只填一次；此后用户仍可逐项手改（字段只读，但这里走的是供应商权威
+  // 回填路径），再次选择供应商时随新列表整体更新。
+  const claudeAutoFillModelsKey = JSON.stringify([
+    selectedAgent?.agent_type,
+    selectedDraft?.claudeAuthMode,
+    selectedDraft?.modelProviderId,
+    claudeProviderModels.models.map((m) => m.id),
+  ])
+  const claudeAutoFillDoneRef = useRef(claudeAutoFillModelsKey)
+  useEffect(() => {
+    if (selectedAgent?.agent_type !== "claude_code") return
+    if (selectedDraft?.claudeAuthMode !== "model_provider") return
+    const models = claudeProviderModels.models
+    if (models.length === 0) return
+    // 已为这份列表填过就不再动（同键内尊重用户手改）。
+    if (claudeAutoFillDoneRef.current === claudeAutoFillModelsKey) return
+    claudeAutoFillDoneRef.current = claudeAutoFillModelsKey
+    const ids = models.map((m) => m.id)
+    const lower = (id: string) => id.toLowerCase()
+    const pick = (re: RegExp) => ids.find((id) => re.test(lower(id))) ?? ""
+    // 六个模型位一次性合并写入：逐个调用会各自基于旧草稿快照互相覆盖。
+    const picks: Array<[ImportantConfigKey, string]> = [
+      ["claudeMainModel", pick(/sonnet/) || ids[0]],
+      ["claudeReasoningModel", pick(/reasoning|thinking/)],
+      ["claudeDefaultHaikuModel", pick(/haiku|lite|flash|mini/)],
+      ["claudeDefaultSonnetModel", pick(/sonnet/)],
+      ["claudeDefaultOpusModel", pick(/opus/)],
+      ["claudeDefaultFableModel", pick(/fable/)],
+    ]
+    updateSelectedDraft((current) => {
+      let envText = current.envText
+      const patch: Partial<Record<ImportantConfigKey, string>> = {}
+      for (const [key, value] of picks) {
+        patch[key] = value
+        envText = patchEnvByImportantKey(
+          selectedAgent.agent_type,
+          envText,
+          key,
+          value
+        )
+      }
+      const nextJson = patchImportantConfigText(
+        selectedAgent.agent_type,
+        current.configText,
+        patch as Parameters<typeof patchImportantConfigText>[2]
+      )
+      return {
+        ...current,
+        envText,
+        configText: nextJson.configText,
+        claudeMainModel: picks[0][1],
+        claudeReasoningModel: picks[1][1],
+        claudeDefaultHaikuModel: picks[2][1],
+        claudeDefaultSonnetModel: picks[3][1],
+        claudeDefaultOpusModel: picks[4][1],
+        claudeDefaultFableModel: picks[5][1],
+      }
+    })
+  }, [
+    claudeProviderModels.models,
+    claudeAutoFillModelsKey,
+    selectedAgent?.agent_type,
+    selectedDraft?.claudeAuthMode,
+  ])
 
   // Auto-select a provider when the user switches an agent to
   // "model_provider" auth mode and the draft holds no binding. If the list is
@@ -7230,6 +7425,9 @@ export function AcpAgentSettings() {
   useEffect(() => {
     if (!selectedNeedsModelProvider) return
     if (selectedDraft?.modelProviderId != null) return
+    // A CC Switch direct pick is a valid, intentional binding the user just
+    // made — never auto-rebind over it to a store provider.
+    if (selectedDraft?.ccSwitchProviderId) return
     if (!selectedAgent) return
     const target = providerToRebindTo(
       selectedModelProviders,
@@ -7242,6 +7440,7 @@ export function AcpAgentSettings() {
     selectedAgent,
     selectedNeedsModelProvider,
     selectedDraft?.modelProviderId,
+    selectedDraft?.ccSwitchProviderId,
     selectedModelProviders,
     handleModelProviderSelect,
   ])
@@ -12779,12 +12978,13 @@ base_url = "https://api.openai.com/v1"`}
                           <label className="text-2xs text-muted-foreground">
                             {t("selectModelProvider")}
                           </label>
-                          {selectedModelProviders.length > 0 ? (
+                          {(selectedModelProviders.length > 0 ||
+                            ccSwitchProviders.length > 0) ? (
                             <Select
                               value={
                                 selectedDraft.modelProviderId != null
                                   ? String(selectedDraft.modelProviderId)
-                                  : ""
+                                  : (selectedDraft.ccSwitchProviderId ?? "")
                               }
                               onValueChange={handleModelProviderSelect}
                             >
@@ -12800,6 +13000,18 @@ base_url = "https://api.openai.com/v1"`}
                                     value={String(provider.id)}
                                   >
                                     {provider.name}
+                                  </SelectItem>
+                                ))}
+                                {/* CC Switch 供应商：选中后自动带出其配置。 */}
+                                {ccSwitchProviders.map((provider) => (
+                                  <SelectItem
+                                    key={provider.id}
+                                    value={provider.id}
+                                    disabled={!provider.hasKey}
+                                  >
+                                    {provider.name}
+                                    {provider.ccCurrent && " · CC 当前"}
+                                    {!provider.hasKey && " · 无密钥"}
                                   </SelectItem>
                                 ))}
                               </SelectContent>

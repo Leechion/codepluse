@@ -137,7 +137,7 @@ func toolStateWire(tools []Row) []Row {
 func (s *Store) regularFoldersLocked() []Row {
 	out := []Row{}
 	for _, f := range s.Folders {
-		if f["kind"] != "chat" {
+		if f["kind"] != "chat" && f["open"] != false {
 			out = append(out, clone(f))
 		}
 	}

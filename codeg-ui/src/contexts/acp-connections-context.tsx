@@ -119,6 +119,7 @@ import {
   type AcpErrorLevel,
 } from "@/lib/acp-error-presentation"
 import { dismissNotification, notify, type NotifyAction } from "@/lib/notify"
+import { toErrorMessage } from "@/lib/app-error"
 import type { SnapshotPatch } from "@/lib/snapshot-denormalize"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
@@ -3826,11 +3827,6 @@ function getAffectedKey(action: Action): string | null {
   return null
 }
 
-function normalizeErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
-}
-
 type AlertedError = Error & { alerted: true }
 
 function createAlertedError(message: string): AlertedError {
@@ -7303,7 +7299,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           configuredAgent = await acpGetAgentStatus(agentType)
         } catch (error) {
           const reason = t("unableReadAgentConfig", {
-            message: normalizeErrorMessage(error),
+            message: toErrorMessage(error),
           })
           publishConnectError({
             agentType,
@@ -7716,7 +7712,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         const superseded =
           pendingRequest != null && !sameConnectRequest(pendingRequest, request)
         if (!superseded && !isAlertedError(err)) {
-          const message = normalizeErrorMessage(err)
+          const message = toErrorMessage(err)
           const agentLabel = getAgentLabel(agentType)
           // Backend safety net: if the agent turned out to be not
           // installed (e.g. the binary was removed between preflight

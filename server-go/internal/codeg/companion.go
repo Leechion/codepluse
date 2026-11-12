@@ -26,6 +26,23 @@ func ToolDefinitions() []Row {
 		tool("check_user_feedback", "在关键决策和阶段切换时读取新消息及本团队任务分工，及时响应用户和同僚。", []string{}, Row{}),
 		tool("propose_task_split", "把整体任务拆成 1–8 个子任务交给用户确认：返回 split_id 并在界面展示卡片，用户确认后由系统并行派发，无需你逐条调用 delegate_to_agent。每个子任务可指定 agent_type（list_agents 中的 agent_type；留空=自动选择）与 model（留空=该执行端钉住的默认模型）。调用后立即返回：卡片已在用户界面展示，用户确认后由系统自动派发全部子任务。本轮到此结束即可，不要结束前自行执行这些子任务，也禁止再调用 delegate_to_agent 重复派发；若用户随后发来新消息，先查看上方任务状态，切勿重复提案。无需用户挑选目标的单独立项仍用 delegate_to_agent。", []string{"tasks"}, Row{"tasks": Row{"type": "array", "minItems": 1, "maxItems": 8, "items": Row{"type": "object", "required": []string{"prompt"}, "properties": Row{"title": property("string", "一句话任务名，用于卡片展示"), "prompt": property("string", "完整、自包含的子任务指令（子代理没有你的上下文）"), "agent_type": property("string", "list_agents 返回的 agent_type；留空由系统自动选择"), "model": property("string", "可选，目标 Harness 支持的模型 ID；留空使用钉住的默认模型")}}}}),
 		tool("send_agent_message", "向同一团队的子任务发送消息；对方通过 check_user_feedback 收取。发送确认只代表入箱，不代表对方已经读取。", []string{"task_id", "message"}, Row{"task_id": property("string", "同一团队的目标任务 ID"), "message": property("string", "消息正文")}),
+		tool("ask_user_question", "向用户提出一个或多个选择题并阻塞等待作答，返回用户的选择。用于需要用户决策、澄清或确认方向时；每题给出若干选项（可单选或多选），用户也可自由作答或跳过。调用后会暂停本轮，直到用户应答。", []string{"questions"}, Row{"questions": Row{
+			"type": "array", "minItems": 1,
+			"items": Row{
+				"type":     "object",
+				"required": []string{"id", "question", "options"},
+				"properties": Row{
+					"id":           property("string", "问题唯一 ID"),
+					"question":     property("string", "问题正文"),
+					"header":       property("string", "简短标签"),
+					"multi_select": property("boolean", "是否允许多选"),
+					"options": Row{"type": "array", "minItems": 1, "items": Row{"type": "object", "properties": Row{
+						"label":       property("string", "选项文本"),
+						"description": property("string", "选项说明"),
+					}}},
+				},
+			},
+		}}),
 	}
 }
 
