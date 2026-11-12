@@ -36,7 +36,6 @@ import {
   MonitorCloud,
   MoreHorizontal,
   Palette,
-  Rocket,
   Settings,
   SquarePen,
   Tag,
@@ -55,7 +54,6 @@ import { OpenInSubContent } from "@/components/layout/open-in-menu"
 import {
   openImportSessionsWindow,
   openInCode,
-  openProjectBootWindow,
   updateConversationTitle,
   updateConversationStatus,
   updateConversationPinned,
@@ -2779,15 +2777,6 @@ export function SidebarConversationList({
     [cloneTargetGroupId, placeOpenedFolderInGroup]
   )
 
-  const handleProjectBoot = useCallback(() => {
-    openProjectBootWindow().catch((err) => {
-      console.error(
-        "[SidebarConversationList] failed to open project boot:",
-        err
-      )
-    })
-  }, [])
-
   const showEmptyWorkspaceActions =
     folders.length === 0 && conversations.length === 0
 
@@ -3352,15 +3341,6 @@ export function SidebarConversationList({
             variant="outline"
             size="sm"
             className="w-full max-w-[14rem] justify-start"
-            onClick={handleProjectBoot}
-          >
-            <Rocket className="h-3.5 w-3.5 mr-1.5" />
-            {tFolderDropdown("projectBoot")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full max-w-[14rem] justify-start"
             onClick={handleOpenImportWindow}
           >
             <Download className="h-3.5 w-3.5 mr-1.5" />
@@ -3538,10 +3518,6 @@ export function SidebarConversationList({
             <ContextMenuItem onSelect={handleOpenCloneDialog}>
               <FolderGit2 className="h-4 w-4" />
               {tFolderDropdown("cloneRepository")}
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={handleProjectBoot}>
-              <Rocket className="h-4 w-4" />
-              {tFolderDropdown("projectBoot")}
             </ContextMenuItem>
             {/* The trigger wraps the whole scroll area, so this is also the menu
                 a right-click on the "Folders" heading (or on empty space below

@@ -1,5 +1,5 @@
-import { ComputerUseSettings } from "@/components/settings/computer-use-settings"
+import { SettingsRedirect } from "@/components/settings/settings-redirect"
 
 export default function SettingsComputerUsePage() {
-  return <ComputerUseSettings />
+  return <SettingsRedirect to="/settings/general" />
 }

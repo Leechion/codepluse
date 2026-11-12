@@ -25,6 +25,7 @@ export function SettingCard({
 }: React.ComponentProps<"div">) {
   return (
     <div
+      data-settings-card=""
       className={cn(
         "divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70 bg-muted/40",
         className

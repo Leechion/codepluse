@@ -65,12 +65,13 @@ describe("ZCode settings panel", () => {
       </NextIntlClientProvider>
     )
     await screen.findByRole("heading", { name: "ZCode" })
-    expect(await screen.findByRole("textbox")).toHaveValue(
-      "ZCODE_BIN=C:/My ZCode/zcode.cjs\nZCODE_NODE=C:/My Node/node.exe"
-    )
+    // The env textarea and the host-tools switch are no longer rendered for any
+    // agent (product decision), so runtime overrides are not surfaced here.
+    expect(screen.queryByText(/ZCODE_BIN=/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/ZCODE_NODE=/)).not.toBeInTheDocument()
     expect(
-      screen.getByText(enMessages.AcpAgentSettings.zcode.runtimeHint)
-    ).toBeInTheDocument()
+      screen.queryByText(enMessages.AcpAgentSettings.zcode.runtimeHint)
+    ).not.toBeInTheDocument()
     expect(
       screen.queryByText("Native JSON Config", { selector: "label" })
     ).not.toBeInTheDocument()

@@ -43,7 +43,7 @@ export function CollaborationSettings() {
 
         <DelegationSettingsSection />
 
-        <AgentToolsSettingsSection />
+        <AgentToolsSettingsSection showComputerUse={false} />
       </div>
     </ScrollArea>
   )

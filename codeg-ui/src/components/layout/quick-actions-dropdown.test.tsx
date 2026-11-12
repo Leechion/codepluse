@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => {
   ]
   return {
     connections,
-    openProjectBootWindow: vi.fn(() => Promise.resolve()),
     openPetWindow: vi.fn(() => Promise.resolve()),
     openLocalWorkspace: vi.fn(() => Promise.resolve()),
     openRemoteWorkspace: vi.fn(() => Promise.resolve()),
@@ -41,7 +40,6 @@ vi.mock("@/lib/platform", () => ({
 vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }))
 
 vi.mock("@/lib/api", () => ({
-  openProjectBootWindow: mocks.openProjectBootWindow,
   openSettingsWindow: mocks.openSettingsWindow,
 }))
 
@@ -139,7 +137,6 @@ describe("QuickActionsDropdown", () => {
     for (const label of [
       "Open Folder",
       "Clone Repository",
-      "Project Boot",
       "Open remote workspace",
       AUTOMATIONS_ROW,
       "To-dos",
@@ -264,10 +261,6 @@ describe("QuickActionsDropdown", () => {
 
     await clickItem(AUTOMATIONS_ROW)
     expect(mocks.setRoute).toHaveBeenCalledWith("automations")
-
-    await reopen()
-    await clickItem("Project Boot")
-    expect(mocks.openProjectBootWindow).toHaveBeenCalled()
 
     await reopen()
     await clickItem("To-dos")

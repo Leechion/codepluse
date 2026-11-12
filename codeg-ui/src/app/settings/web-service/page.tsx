@@ -1,5 +1,5 @@
-import { WebServiceSettings } from "@/components/settings/web-service-settings"
+import { SettingsRedirect } from "@/components/settings/settings-redirect"
 
 export default function SettingsWebServicePage() {
-  return <WebServiceSettings />
+  return <SettingsRedirect to="/settings/general" />
 }

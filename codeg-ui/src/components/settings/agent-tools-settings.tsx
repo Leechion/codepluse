@@ -132,7 +132,9 @@ const TOOL_ROWS = [
 const FIELD_OF_SLUG: Record<string, keyof AgentToolValues | undefined> =
   Object.fromEntries(TOOL_ROWS.map((row) => [row.slug, row.key]))
 
-export function AgentToolsSettingsSection() {
+export function AgentToolsSettingsSection({
+  showComputerUse = true,
+}: { showComputerUse?: boolean } = {}) {
   const t = useTranslations("AgentToolsSettings")
   const tools = useTranslations(AGENT_TOOLS_NAMESPACE)
   const [loading, setLoading] = useState(true)
@@ -468,6 +470,7 @@ export function AgentToolsSettingsSection() {
           on screen next to it. */}
       <SettingCard>
         {TOOL_ROWS.map((row) => {
+          if (row.key === "computer" && !showComputerUse) return null
           const meta = AGENT_TOOL_GROUPS[row.slug]
           if (!meta) return null
           // A row that only means anything while another is on: shown off and

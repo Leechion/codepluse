@@ -14,6 +14,7 @@ import {
 } from "./transport/web-auth"
 import { notifyWebUnauthorized } from "./transport/web-connection-store"
 import { getCurrentEffectiveAppLocale } from "./i18n"
+import { requestSettingsOverlay } from "./settings-overlay-bridge"
 import {
   DEFAULT_FORGE_COMMENT_PAGE_SIZE,
   DEFAULT_FORGE_FILES_PAGE_SIZE,
@@ -3763,6 +3764,10 @@ export async function openSettingsWindow(
   section?: SettingsSection,
   options?: OpenSettingsWindowOptions
 ): Promise<void> {
+  // 同窗口优先：workspace 窗口里挂着设置浮层时，就地打开它。Go 桌面壳下再往下走
+  // 就是 `openAppWindow` → `__codegGoOpenWindow` → 重新 exec 自己，会真的多出第二个
+  // WebView2 窗口。没有浮层接管（纯浏览器直接访问 /settings/…、宠物窗口）才开窗口。
+  if (requestSettingsOverlay(section, options?.agentType ?? null)) return
   const locale = getCurrentEffectiveAppLocale()
   if (isDesktop()) {
     return getShellTransport().call("open_settings_window", {
@@ -3808,22 +3813,6 @@ export async function openImportSessionsWindow(
       focusPath,
     })
   )
-}
-
-export async function openProjectBootWindow(source?: string): Promise<void> {
-  if (goDesktopBridge()) {
-    return openAppWindow("project-boot", async () => ({ path: "/project-boot" }))
-  }
-  if (isDesktop()) {
-    return getShellTransport().call("open_project_boot_window", {
-      source,
-      locale: getCurrentEffectiveAppLocale(),
-      remoteConnectionId: getActiveRemoteConnectionId(),
-    })
-  }
-  if (typeof window !== "undefined") {
-    window.open("/project-boot", "project-boot")
-  }
 }
 
 // Cross-window handoff for the project launcher, which lives in its own

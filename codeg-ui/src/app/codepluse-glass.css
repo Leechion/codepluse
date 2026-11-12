@@ -1,0 +1,192 @@
+/* Frosted workspace skin. Geometry remains owned by the original components:
+   no sizing, padding, positioning, flex/grid or font-metric overrides here. */
+.zw-shell,
+.dark .zw-shell,
+[data-settings-shell],
+.dark [data-settings-shell] {
+  --cp-glass-tint: 255 255 255;
+  --cp-glass-panel: rgb(255 255 255 / 28%);
+  --cp-glass-chrome: rgb(255 255 255 / 32%);
+  --cp-glass-card: rgb(255 255 255 / 54%);
+  --cp-glass-input: rgb(255 255 255 / 79%);
+  --cp-glass-edge: rgb(255 255 255 / 68%);
+  --cp-glass-shadow: 0 6px 24px rgb(30 56 89 / 6%);
+  --cp-glass-blur: 24px;
+  --cp-glass-backdrop:
+    radial-gradient(ellipse at 3% 92%, rgb(112 183 234 / 43%), transparent 52%),
+    radial-gradient(ellipse at 97% 0%, rgb(115 181 233 / 35%), transparent 46%),
+    radial-gradient(
+      ellipse at 54% 40%,
+      rgb(248 251 254 / 85%),
+      transparent 57%
+    ),
+    linear-gradient(135deg, #eaf0f5, #d9e8f3 52%, #e4e9f1);
+
+  --background: rgb(249 252 255 / 54%);
+  --foreground: #202d40;
+  --card: var(--cp-glass-card);
+  --card-foreground: var(--foreground);
+  --muted: rgb(255 255 255 / 35%);
+  --muted-foreground: #566479;
+  --accent: rgb(255 255 255 / 58%);
+  --accent-foreground: #163d6b;
+  --primary: #132d51;
+  --primary-foreground: #fff;
+  --secondary: rgb(255 255 255 / 46%);
+  --secondary-foreground: var(--foreground);
+  --border: rgb(255 255 255 / 60%);
+  --input: rgb(77 110 149 / 22%);
+  --ring: #1d4f88;
+  --sidebar: var(--cp-glass-panel);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-accent: rgb(255 255 255 / 65%);
+  --sidebar-accent-foreground: #163d6b;
+  --sidebar-border: var(--cp-glass-edge);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+
+  /* Shell chrome outside .zw-root also consumes these existing tokens. */
+  --zw-bg: var(--background);
+  --zw-bg-alt: var(--cp-glass-chrome);
+  --zw-header: var(--cp-glass-chrome);
+  --zw-panel: var(--cp-glass-card);
+  --zw-sidebar: var(--cp-glass-panel);
+  --zw-card: var(--cp-glass-card);
+  --zw-border: var(--cp-glass-edge);
+  --zw-fg: var(--foreground);
+  --zw-fg-subtle: var(--muted-foreground);
+  --zw-fg-subtlest: var(--muted-foreground);
+  --zw-brand: var(--primary);
+  --zw-shadow: var(--cp-glass-shadow);
+
+  color: var(--foreground);
+  background: var(--cp-glass-backdrop);
+}
+
+/* Keep the user's theme selection; dark glass has its own readable surfaces. */
+.dark .zw-shell,
+.dark [data-settings-shell] {
+  --cp-glass-tint: 18 33 52;
+  --cp-glass-panel: rgb(18 33 52 / 58%);
+  --cp-glass-chrome: rgb(21 39 61 / 56%);
+  --cp-glass-card: rgb(28 46 68 / 66%);
+  --cp-glass-input: rgb(28 45 65 / 87%);
+  --cp-glass-edge: rgb(193 219 248 / 16%);
+  --cp-glass-shadow: 0 6px 24px rgb(0 8 22 / 14%);
+  --cp-glass-backdrop:
+    radial-gradient(ellipse at 3% 92%, rgb(42 105 153 / 34%), transparent 52%),
+    radial-gradient(ellipse at 97% 0%, rgb(42 96 153 / 28%), transparent 46%),
+    linear-gradient(135deg, #142130, #192f45 52%, #152439);
+
+  --background: rgb(20 35 53 / 62%);
+  --foreground: #e5edf6;
+  --muted: rgb(187 214 245 / 7%);
+  --muted-foreground: #a6b7c9;
+  --accent: rgb(176 210 250 / 12%);
+  --accent-foreground: #e5edf6;
+  --primary: #c5ddfb;
+  --primary-foreground: #132d51;
+  --secondary: rgb(187 214 245 / 10%);
+  --border: rgb(193 219 248 / 16%);
+  --input: rgb(193 219 248 / 24%);
+  --ring: #96c3f5;
+  --sidebar-accent: rgb(187 214 245 / 12%);
+  --sidebar-accent-foreground: var(--foreground);
+}
+
+/* A chosen workspace image continues to supply the backdrop and blur setting. */
+[data-workspace-bg="on"] .zw-shell {
+  --cp-glass-panel: rgb(var(--cp-glass-tint) / var(--ws-surface-alpha, 0.6));
+  --cp-glass-chrome: var(--cp-glass-panel);
+  --cp-glass-blur: var(--ws-surface-blur, 24px);
+  background: transparent;
+}
+
+.zw-shell :is(.zw-side, .zw-aux, .zw-files-col) {
+  background-color: var(--cp-glass-panel);
+  border-color: var(--cp-glass-edge);
+  -webkit-backdrop-filter: blur(var(--cp-glass-blur)) saturate(115%);
+  backdrop-filter: blur(var(--cp-glass-blur)) saturate(115%);
+}
+
+.zw-shell :is(.ws-surface, .ws-surface-muted, .ws-surface-sidebar) {
+  background-color: var(--cp-glass-chrome);
+  border-color: var(--cp-glass-edge);
+  -webkit-backdrop-filter: blur(var(--cp-glass-blur));
+  backdrop-filter: blur(var(--cp-glass-blur));
+}
+
+.zw-shell :is(.zw-files-strip, .zw-term) {
+  background-color: var(--cp-glass-chrome);
+  border-color: var(--cp-glass-edge);
+  -webkit-backdrop-filter: blur(var(--cp-glass-blur));
+  backdrop-filter: blur(var(--cp-glass-blur));
+}
+
+/* The native composer and all its controls keep their original box metrics. */
+.zw-shell .codeg-composer-chrome,
+[data-workspace-bg="on"] .zw-shell .codeg-composer-chrome {
+  background-color: var(--cp-glass-input);
+  border-color: var(--cp-glass-edge);
+  box-shadow:
+    var(--cp-glass-shadow),
+    inset 0 1px 0 rgb(255 255 255 / 24%);
+  -webkit-backdrop-filter: blur(28px) saturate(115%);
+  backdrop-filter: blur(28px) saturate(115%);
+}
+
+.zw-shell .codeg-composer-chrome:focus-within {
+  border-color: color-mix(in srgb, var(--ring) 45%, transparent);
+}
+
+.zw-shell :is(.ws-msg-card, .is-user .ws-msg-secondary) {
+  background-color: var(--cp-glass-card);
+  border-color: var(--cp-glass-edge);
+  box-shadow: inset 0 0 0 1px var(--cp-glass-edge);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+}
+
+.zw-shell .zw-float-toggle {
+  background-color: var(--cp-glass-card);
+  border-color: var(--cp-glass-edge);
+  box-shadow: var(--cp-glass-shadow);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+}
+
+/* A solid, high-contrast fallback when translucency is unavailable/unwanted. */
+@supports not (backdrop-filter: blur(1px)) {
+  .zw-shell,
+  [data-settings-shell] {
+    --cp-glass-panel: #e8f0f7;
+    --cp-glass-chrome: #edf3f8;
+    --cp-glass-card: #f5f8fc;
+    --cp-glass-input: #fafcfe;
+  }
+  .dark .zw-shell,
+  .dark [data-settings-shell] {
+    --cp-glass-panel: #192c40;
+    --cp-glass-chrome: #20354b;
+    --cp-glass-card: #263b51;
+    --cp-glass-input: #253a50;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .zw-shell,
+  [data-settings-shell] {
+    --cp-glass-panel: #e8f0f7;
+    --cp-glass-chrome: #edf3f8;
+    --cp-glass-card: #f5f8fc;
+    --cp-glass-input: #fafcfe;
+    --cp-glass-blur: 0px;
+  }
+  .dark .zw-shell,
+  .dark [data-settings-shell] {
+    --cp-glass-panel: #192c40;
+    --cp-glass-chrome: #20354b;
+    --cp-glass-card: #263b51;
+    --cp-glass-input: #253a50;
+  }
+}

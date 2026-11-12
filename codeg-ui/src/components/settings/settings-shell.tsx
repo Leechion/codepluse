@@ -10,20 +10,14 @@ import {
 import {
   Bot,
   BookOpenText,
-  Boxes,
   Bubbles,
   Compass,
   FileSpreadsheet,
   GitBranch,
-  Globe,
   Keyboard,
   Menu,
-  MessageSquareText,
-  MonitorCog,
-  SendHorizontal,
   Palette,
   PlugZap,
-  Settings,
   SlidersHorizontal,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -40,6 +34,7 @@ import {
 import { AppTitleBar } from "@/components/layout/app-title-bar"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer"
+import { useSettingsCardMotion } from "./use-settings-card-motion"
 
 interface SettingsNavItem {
   href: string
@@ -48,7 +43,6 @@ interface SettingsNavItem {
     | "appearance"
     | "agents"
     | "model_providers"
-    | "api_providers"
     | "mcp"
     | "skills"
     | "skill_packs"
@@ -92,30 +86,15 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
     icon: BookOpenText,
   },
   {
-    href: "/settings/skill-packs",
-    labelKey: "skill_packs",
-    icon: Boxes,
-  },
-  {
     // 供应商设置已并入「智能体」页底部的折叠区，不再单设导航项。
     href: "/settings/agents",
     labelKey: "agents",
     icon: Bot,
   },
   {
-    href: "/settings/quick-messages",
-    labelKey: "quick_messages",
-    icon: MessageSquareText,
-  },
-  {
     href: "/settings/browser",
     labelKey: "browser",
     icon: Compass,
-  },
-  {
-    href: "/settings/computer-use",
-    labelKey: "computer_use",
-    icon: MonitorCog,
   },
   {
     href: "/settings/shortcuts",
@@ -128,47 +107,29 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
     icon: GitBranch,
   },
   {
-    href: "/settings/chat-channels",
-    labelKey: "chat_channels",
-    icon: SendHorizontal,
-  },
-  {
-    href: "/settings/web-service",
-    labelKey: "web_service",
-    icon: Globe,
-  },
-  {
     href: "/settings/logs",
     labelKey: "logs",
     icon: FileSpreadsheet,
-  },
-  {
-    href: "/settings/system",
-    labelKey: "system",
-    icon: Settings,
   },
 ]
 
 interface SettingsShellProps {
   children: ReactNode
+  /**
+   * 浮层用法：不读 URL，由调用方给出当前分区的 href（如 "/settings/mcp"）。
+   * 独立设置窗口仍不传，继续以 pathname 为准。
+   */
+  activeHref?: string
+  /** 浮层用法：给定时导航不再改 URL，而是回调给调用方。 */
+  onNavigate?: (href: string) => void
 }
 
-/**
- * The nav for one runtime. Only one entry is runtime-bound: the Web service
- * page configures the server a web client is already talking to, and there is
- * no such server to configure from inside it.
- *
- * The Browser page is deliberately not on that list. Most of what it holds is
- * a desktop browser engine, but site rules, what a server starting in a
- * terminal does and the terminal's link menu all still decide something in a
- * browser session, and that page is the only place they can be set.
- */
+/** Go runtime navigation: merged pages and unavailable services stay off the rail. */
 export function settingsNavItemsFor(
-  env: TransportEnvironment
+  _env: TransportEnvironment
 ): SettingsNavItem[] {
-  return SETTINGS_NAV_ITEMS.filter(
-    (item) => !(item.labelKey === "web_service" && env === "web")
-  )
+  void _env // The Go capability set is shared by browser and desktop windows.
+  return SETTINGS_NAV_ITEMS
 }
 
 function normalizePath(path: string): string {
@@ -184,23 +145,38 @@ function isWindowsRuntime(): boolean {
   return platform.includes("win") || userAgent.includes("windows")
 }
 
-export function SettingsShell({ children }: SettingsShellProps) {
+export function SettingsShell({
+  children,
+  activeHref,
+  onNavigate,
+}: SettingsShellProps) {
   const t = useTranslations("SettingsShell")
+  const navigation = useTranslations("SettingsNavigation")
   const pathname = usePathname()
   const router = useRouter()
-  const normalizedPathname = normalizePath(pathname)
+  const normalizedPathname = normalizePath(activeHref ?? pathname)
   const isMobile = useIsMobile()
   const [navOpen, setNavOpen] = useState(false)
+  const cardMotion = useSettingsCardMotion()
 
   useEffect(() => {
+    // 浮层里不改主窗口的标题：那是工作区窗口的标题，关掉浮层后没人负责还原它。
+    if (activeHref !== undefined) return
     document.title = `${t("title")} - codepluse`
-  }, [t])
+  }, [activeHref, t])
 
   const navigateTo = useCallback(
     (href: string) => {
       if (typeof window === "undefined") return
 
       const target = normalizePath(href)
+
+      if (onNavigate) {
+        onNavigate(target)
+        setNavOpen(false)
+        return
+      }
+
       const current = normalizePath(window.location.pathname)
       if (current === target) {
         setNavOpen(false)
@@ -222,7 +198,7 @@ export function SettingsShell({ children }: SettingsShellProps) {
       router.push(fullTarget)
       setNavOpen(false)
     },
-    [router, setNavOpen]
+    [onNavigate, router, setNavOpen]
   )
 
   const filteredNavItems = settingsNavItemsFor(detectEnvironment())
@@ -257,7 +233,9 @@ export function SettingsShell({ children }: SettingsShellProps) {
               >
                 <span className="inline-flex items-center gap-1">
                   <Icon className="h-3.5 w-3.5" />
-                  {t(translationKey)}
+                  {item.labelKey === "skills"
+                    ? navigation("skills")
+                    : t(translationKey)}
                 </span>
               </Button>
             )
@@ -272,7 +250,10 @@ export function SettingsShell({ children }: SettingsShellProps) {
       data-settings-shell=""
       className="h-screen flex flex-col overflow-hidden bg-background text-foreground"
     >
+      {/* Only settings documents opt into same-origin shared-element navigation. */}
+      <style>{"@view-transition { navigation: auto; }"}</style>
       <AppTitleBar
+        className="cp-settings-titlebar"
         left={
           isMobile ? (
             <Button
@@ -290,10 +271,10 @@ export function SettingsShell({ children }: SettingsShellProps) {
         }
       />
 
-      <div className="flex-1 min-h-0 flex">
+      <div className="cp-settings-layout flex-1 min-h-0 flex">
         {/* Desktop sidebar */}
         {!isMobile && (
-          <aside className="flex min-h-0 w-56 shrink-0 flex-col border-r px-2 py-3">
+          <aside className="cp-settings-sidebar flex min-h-0 w-56 shrink-0 flex-col border-r px-2 py-3">
             {navContent}
           </aside>
         )}
@@ -321,7 +302,10 @@ export function SettingsShell({ children }: SettingsShellProps) {
           </Drawer>
         )}
 
-        <section className="flex-1 min-w-0 min-h-0 overflow-hidden">
+        <section
+          className="cp-settings-content flex-1 min-w-0 min-h-0 overflow-hidden"
+          {...cardMotion}
+        >
           {children}
         </section>
       </div>

@@ -1,5 +1,5 @@
-import { SystemNetworkSettings } from "@/components/settings/system-network-settings"
+import { SettingsRedirect } from "@/components/settings/settings-redirect"
 
 export default function SettingsSystemPage() {
-  return <SystemNetworkSettings />
+  return <SettingsRedirect to="/settings/general" view="system" />
 }

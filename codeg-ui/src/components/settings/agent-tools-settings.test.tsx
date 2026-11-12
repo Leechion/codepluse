@@ -91,10 +91,10 @@ const LABELS = {
   workTasks: "Create to-do tasks",
 } as const
 
-function renderWithIntl() {
+function renderWithIntl(showComputerUse = true) {
   return render(
     <NextIntlClientProvider locale="en" messages={enMessages}>
-      <AgentToolsSettingsSection />
+      <AgentToolsSettingsSection showComputerUse={showComputerUse} />
     </NextIntlClientProvider>
   )
 }
@@ -185,6 +185,19 @@ beforeEach(() => {
 })
 
 describe("AgentToolsSettingsSection", () => {
+  it("hides unavailable computer use without overwriting its saved switch", async () => {
+    primeBackend({ computer: true, feedback: true })
+    renderWithIntl(false)
+    await loaded()
+    expect(screen.queryByLabelText(LABELS.computer)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText(LABELS.feedback))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(mockSetFeedback).toHaveBeenCalledWith({ enabled: false })
+    )
+    expect(mockSetComputer).not.toHaveBeenCalled()
+  })
+
   it("shows one switch per tool, each reflecting its own endpoint", async () => {
     primeBackend({ feedback: true, sessionInfo: false, workTasks: true })
 

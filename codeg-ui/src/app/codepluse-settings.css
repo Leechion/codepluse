@@ -1,0 +1,254 @@
+/* Settings can evolve independently; the conversation workspace stays untouched. */
+[data-settings-shell] .cp-settings-titlebar {
+  background: var(--cp-glass-chrome);
+  border-color: var(--cp-glass-edge);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+}
+
+.cp-settings-layout {
+  gap: 20px;
+  padding: 20px;
+}
+
+[data-settings-shell] .cp-settings-sidebar {
+  padding: 18px 12px;
+  border: 1px solid var(--cp-glass-edge);
+  border-radius: 22px;
+  background: var(--cp-glass-panel);
+  box-shadow:
+    var(--cp-glass-shadow),
+    inset 0 1px 0 rgb(255 255 255 / 20%);
+  -webkit-backdrop-filter: blur(28px) saturate(115%);
+  backdrop-filter: blur(28px) saturate(115%);
+  view-transition-name: cp-settings-sidebar;
+}
+
+.cp-settings-sidebar nav button {
+  border-radius: 10px;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.cp-settings-sidebar nav button[aria-current="page"] {
+  color: var(--accent-foreground);
+  background: var(--cp-glass-input);
+  box-shadow:
+    inset 0 0 0 1px var(--cp-glass-edge),
+    0 2px 8px rgb(30 56 89 / 4%);
+}
+
+.cp-settings-content {
+  border: 1px solid var(--cp-glass-edge);
+  border-radius: 22px;
+  background: var(--cp-glass-chrome);
+  box-shadow: var(--cp-glass-shadow);
+  view-transition-name: cp-settings-content;
+}
+
+.cp-settings-content [data-slot="scroll-area-viewport"] > div > .w-full {
+  max-width: 1120px;
+  margin-inline: auto;
+  padding: 24px;
+}
+
+.cp-settings-content h1 {
+  font-size: 22px;
+  line-height: 1.4;
+  letter-spacing: -0.025em;
+}
+
+[data-settings-shell] [data-settings-card] {
+  position: relative;
+  isolation: isolate;
+  border-color: var(--cp-glass-edge);
+  border-radius: 16px;
+  background: var(--cp-glass-card);
+  box-shadow:
+    0 3px 16px rgb(30 56 89 / 3%),
+    inset 0 1px 0 rgb(255 255 255 / 16%);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  transition:
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 200ms ease;
+  animation: cp-settings-card-enter 260ms ease-out backwards;
+}
+
+[data-settings-shell] [data-settings-card] [data-settings-card] {
+  box-shadow: none;
+  background: var(--secondary);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+[data-settings-shell] [data-settings-card]::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(
+    140px circle at var(--cp-spotlight-x, 50%) var(--cp-spotlight-y, 50%),
+    rgb(255 255 255 / 65%),
+    rgb(142 194 245 / 8%) 58%,
+    transparent 78%
+  );
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.dark [data-settings-shell] [data-settings-card]::before {
+  background: radial-gradient(
+    140px circle at var(--cp-spotlight-x, 50%) var(--cp-spotlight-y, 50%),
+    rgb(156 205 255 / 12%),
+    transparent 78%
+  );
+}
+
+@media (hover: hover) and (pointer: fine) {
+  [data-settings-shell] [data-settings-card]:hover {
+    transform: perspective(1200px) rotateX(var(--cp-tilt-x, 0deg))
+      rotateY(var(--cp-tilt-y, 0deg));
+    box-shadow:
+      0 8px 24px rgb(30 56 89 / 7%),
+      inset 0 1px 0 rgb(255 255 255 / 26%);
+  }
+  [data-settings-shell] [data-settings-card]:hover::before {
+    opacity: 1;
+  }
+  [data-settings-shell] [data-settings-card]:focus-within {
+    transform: none;
+  }
+}
+
+[data-settings-shell]
+  :is(
+    [data-slot="input"],
+    [data-slot="textarea"],
+    [data-slot="select-trigger"]
+  ) {
+  background-color: var(--cp-glass-input);
+  border-color: var(--input);
+}
+
+[data-settings-shell] [data-slot="collapsible-content"] {
+  overflow: hidden;
+}
+[data-settings-shell] [data-slot="collapsible-content"][data-state="open"] {
+  animation: cp-settings-expand 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+[data-settings-shell] [data-slot="collapsible-content"][data-state="closed"] {
+  animation: cp-settings-collapse 160ms ease-in;
+}
+
+body:has([data-settings-shell]) [data-slot="dialog-overlay"] {
+  background: rgb(19 45 81 / 20%);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+body:has([data-settings-shell])
+  [data-slot="dialog-content"][data-state="open"] {
+  animation: cp-settings-dialog-enter 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+body:has([data-settings-shell])
+  [data-slot="dialog-content"][data-state="closed"] {
+  animation: cp-settings-dialog-leave 150ms ease-in both;
+}
+
+html:has([data-settings-shell])::view-transition-group(cp-settings-sidebar) {
+  animation-duration: 220ms;
+}
+html:has([data-settings-shell])::view-transition-old(cp-settings-content) {
+  animation: cp-settings-content-leave 120ms ease-in both;
+}
+html:has([data-settings-shell])::view-transition-new(cp-settings-content) {
+  animation: cp-settings-card-enter 220ms ease-out both;
+}
+
+@keyframes cp-settings-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes cp-settings-content-leave {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes cp-settings-dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.94);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+@keyframes cp-settings-dialog-leave {
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+@keyframes cp-settings-expand {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+}
+@keyframes cp-settings-collapse {
+  from {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  .cp-settings-layout {
+    gap: 0;
+    padding: 10px;
+  }
+  .cp-settings-content {
+    border-radius: 16px;
+  }
+  .cp-settings-content [data-slot="scroll-area-viewport"] > div > .w-full {
+    padding: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-settings-shell] [data-settings-card],
+  [data-settings-shell] [data-settings-card]::before,
+  [data-settings-shell] [data-slot="collapsible-content"],
+  body:has([data-settings-shell]) [data-slot="dialog-content"] {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+  html:has([data-settings-shell])::view-transition-group(*),
+  html:has([data-settings-shell])::view-transition-old(*),
+  html:has([data-settings-shell])::view-transition-new(*) {
+    animation-duration: 0s !important;
+  }
+}

@@ -44,7 +44,6 @@ import {
   type ThemeColor,
   type ZoomLevel,
 } from "@/lib/theme-presets"
-import { PetManagerSection } from "./pet-manager-section"
 import { FontSettingsSection } from "./font-settings-section"
 import { WorkspaceBackgroundSection } from "./workspace-background-section"
 import { CustomStyleSection } from "./custom-style-section"
@@ -351,9 +350,6 @@ export function AppearanceSettings() {
             </div>
           </div>
         </section>
-
-        {/* ===== Desktop Pet ===== */}
-        <PetManagerSection />
       </div>
     </ScrollArea>
   )

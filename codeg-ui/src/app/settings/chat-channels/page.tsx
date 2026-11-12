@@ -1,5 +1,5 @@
-import { ChatChannelSettings } from "@/components/settings/chat-channel-settings"
+import { SettingsRedirect } from "@/components/settings/settings-redirect"
 
 export default function SettingsChatChannelsPage() {
-  return <ChatChannelSettings />
+  return <SettingsRedirect to="/settings/general" />
 }

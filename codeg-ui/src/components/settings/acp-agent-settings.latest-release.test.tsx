@@ -141,7 +141,10 @@ async function renderPanel(agents: AcpAgentInfo[]) {
       <AcpAgentSettings />
     </NextIntlClientProvider>
   )
-  await screen.findByText("Version Status")
+  // The panel is ready once the selected agent's detail heading is on screen.
+  // It works in both layouts: the preflight card (any non-pass check) and the
+  // quiet offer row (all pass) render underneath it.
+  await screen.findByRole("heading", { name: agents[0].name })
 }
 
 beforeEach(() => {
@@ -189,9 +192,9 @@ describe("AcpAgentSettings — unreviewed latest release", () => {
     }))
     await renderPanel([GEMINI])
 
-    const user = userEvent.setup()
-    await user.click(screen.getByText("Version Status"))
-    await screen.findByText(/Local: 0\.60\.1/)
+    // Nothing to unfold: while the agent passes, no status row is rendered at
+    // all, and a details change must still not re-run the lookup.
+    await screen.findByRole("heading", { name: "Gemini CLI" })
     expect(lookups()).toEqual(["gemini"])
   })
 
@@ -233,7 +236,7 @@ describe("AcpAgentSettings — unreviewed latest release", () => {
     expect(toast.error).not.toHaveBeenCalled()
   })
 
-  it("holds the start of a row it shares only with Custom install", async () => {
+  it("keeps the offer beside Custom install in the quiet action row", async () => {
     vi.mocked(acpFetchAgentLatestRelease).mockResolvedValue({
       version: "0.61.0",
     })
@@ -245,18 +248,20 @@ describe("AcpAgentSettings — unreviewed latest release", () => {
     const customInstall = screen.getByRole("button", {
       name: "Custom install",
     })
+    // The two actions stay adjacent and right-aligned, in the same row.
     expect(offer.nextElementSibling).toBe(customInstall)
-    expect(offer.parentElement?.children).toHaveLength(2)
-    expect(offer.parentElement).toHaveClass("flex-nowrap", "justify-end")
-    // Its auto end margin keeps Custom install at the far end.
-    expect(offer).toHaveClass("me-auto")
-    // The Uninstall action keeps its place in the row above.
+    expect(offer.parentElement).toBe(customInstall.parentElement)
+    expect(offer.parentElement).toHaveClass("justify-end")
+    // The status display they used to live in is gone: no card, no row label,
+    // no explanatory line.
+    expect(screen.queryByText("Version Status")).toBeNull()
     expect(
-      screen.getByRole("button", { name: "Uninstall" }).parentElement
-    ).not.toBe(offer.parentElement)
-    expect(
-      screen.getByText(/A newer, unreviewed release is available/)
-    ).toBeVisible()
+      screen.queryByText(/A newer, unreviewed release is available/)
+    ).toBeNull()
+    // Uninstall lived inside the collapsed pass row. It is deliberately NOT
+    // promoted into the quiet row: a destructive action must not become
+    // permanently visible just because the status text was hidden.
+    expect(screen.queryByRole("button", { name: "Uninstall" })).toBeNull()
   })
 
   it("is offered to an agent that is not installed yet", async () => {
@@ -274,40 +279,20 @@ describe("AcpAgentSettings — unreviewed latest release", () => {
     expect(screen.getByRole("button", { name: "Install" })).toBeVisible()
   })
 
-  it("unfolds a passing card for the offer", async () => {
+  it("offers the upgrade without unfolding anything", async () => {
     const lookup = deferred<AgentLatestRelease | null>()
     vi.mocked(acpFetchAgentLatestRelease).mockReturnValue(lookup.promise)
     await renderPanel([GEMINI])
-    // A pass starts folded.
-    expect(screen.queryByRole("button", { name: "Custom install" })).toBeNull()
+    // A passing agent renders no status row: its Custom install action already
+    // sits in the quiet action row, and the offer needs no click to appear.
+    expect(screen.getByRole("button", { name: "Custom install" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: OFFER })).toBeNull()
 
     await act(async () => {
       lookup.resolve({ version: "0.61.0" })
     })
     expect(
       await screen.findByRole("button", {
-        name: "Upgrade to unreviewed latest 0.61.0",
-      })
-    ).toBeVisible()
-  })
-
-  it("leaves a card the user folded by hand", async () => {
-    const lookup = deferred<AgentLatestRelease | null>()
-    vi.mocked(acpFetchAgentLatestRelease).mockReturnValue(lookup.promise)
-    await renderPanel([GEMINI])
-
-    const user = userEvent.setup()
-    await user.click(screen.getByText("Version Status"))
-    await user.click(screen.getByText("Version Status"))
-    await act(async () => {
-      lookup.resolve({ version: "0.61.0" })
-    })
-    expect(screen.queryByRole("button", { name: OFFER })).toBeNull()
-
-    // Unfolding it shows the offer that arrived meanwhile.
-    await user.click(screen.getByText("Version Status"))
-    expect(
-      screen.getByRole("button", {
         name: "Upgrade to unreviewed latest 0.61.0",
       })
     ).toBeVisible()

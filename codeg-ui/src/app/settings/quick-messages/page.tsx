@@ -1,5 +1,5 @@
-import { QuickMessagesSettings } from "@/components/settings/quick-messages-settings"
+import { SettingsRedirect } from "@/components/settings/settings-redirect"
 
 export default function SettingsQuickMessagesPage() {
-  return <QuickMessagesSettings />
+  return <SettingsRedirect to="/settings/general" view="quick-messages" />
 }

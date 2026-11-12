@@ -1,5 +1,5 @@
-import { GeneralSettings } from "@/components/settings/general-settings"
+import { GeneralSettingsHub } from "@/components/settings/general-settings-hub"
 
 export default function SettingsGeneralPage() {
-  return <GeneralSettings />
+  return <GeneralSettingsHub />
 }

@@ -226,6 +226,7 @@ import { MiniMaxCodeConfigPanel } from "./minimax-code-config-panel"
 import { KimiCodeConfigPanel } from "./kimi-code-config-panel"
 import { PiConfigPanel } from "./pi-config-panel"
 import { QoderConfigPanel } from "./qoder-config-panel"
+import { ExecutorProvidersPanel } from "./executor-providers-panel"
 
 interface AgentCheckState {
   result?: PreflightResult
@@ -4881,7 +4882,15 @@ function AgentReorderItem({
   )
 }
 
-export function AcpAgentSettings() {
+export function AcpAgentSettings({
+  initialAgentType,
+}: {
+  /**
+   * 同窗口设置浮层的深链入口：浮层不改 URL，`?agent=` 查询参数拿不到，
+   * 由调用方直接给出要选中的 agent 类型。独立设置窗口仍走 URL 参数。
+   */
+  initialAgentType?: string | null
+} = {}) {
   const ime = useImeGuard()
   const locale = useLocale()
   const t = useTranslations("AcpAgentSettings")
@@ -5073,8 +5082,8 @@ export function AcpAgentSettings() {
     [agents]
   )
   const requestedAgentType = useMemo(
-    () => searchParams.get("agent"),
-    [searchParams]
+    () => initialAgentType ?? searchParams.get("agent"),
+    [initialAgentType, searchParams]
   )
 
   const refreshAgents = useCallback(async () => {
@@ -6679,6 +6688,34 @@ export function AcpAgentSettings() {
     if (!selectedAgent || !locale) return []
     return getAgentChecks(selectedAgent, selectedCurrent, selectedLatestRelease)
   }, [locale, selectedAgent, selectedCurrent, selectedLatestRelease])
+
+  // 预检是后台的事：每一项都通过（且没有连接错误、没有正在跑的安装流）时，
+  // 「预检项：N」「诊断」按钮和那几行 PASS 状态都不再出现在设置页里。
+  const preflightQuietlyPassing = useMemo(() => {
+    if (selectedCurrent?.error) return false
+    if (
+      installStream.status !== "idle" &&
+      streamAgentType === selectedAgent?.agent_type
+    ) {
+      return false
+    }
+    return selectedChecks.every((check) => check.status === "pass")
+  }, [
+    installStream.status,
+    selectedAgent?.agent_type,
+    selectedChecks,
+    selectedCurrent?.error,
+    streamAgentType,
+  ])
+
+  // 但 pass 行也能挂动作——「自定义安装」「升级到未审阅最新版」就长在 pass 行的
+  // 页脚上，而升级/安装入口在本页没有别的家。全绿时状态隐去，这些 offer 仍留在
+  // 页面上。注意只取 footerFixes：行内的 `fixes` 含 Uninstall 这类破坏性动作，
+  // 原本藏在折叠的 pass 行里，不该因为隐去状态就变成常驻可见。
+  const quietPreflightActions = useMemo(
+    () => selectedChecks.flatMap((check) => check.footerFixes ?? []),
+    [selectedChecks]
+  )
 
   useEffect(() => {
     if (!selectedAgent || selectedChecks.length === 0) return
@@ -9020,6 +9057,17 @@ export function AcpAgentSettings() {
               />
 
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {preflightQuietlyPassing ? (
+                  quietPreflightActions.length > 0 ? (
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {/* 全绿时只剩这些 offer（升级 / 自定义安装）。「诊断」不在
+                        这里出现：它是排障入口，只有预检真的报问题时才需要。 */}
+                      {quietPreflightActions.map((fix, index) =>
+                        renderFixButton(selectedAgent, fix, index)
+                      )}
+                    </div>
+                  ) : null
+                ) : (
                 <div className="space-y-2">
                   {selectedCurrent?.error && (
                     <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400 flex items-start gap-2">
@@ -9070,59 +9118,17 @@ export function AcpAgentSettings() {
                       </div>
                     )}
                 </div>
+                )}
 
                 <div className="space-y-2">
-                  <label className="text-xs font-medium">{t("envVars")}</label>
-                  {selectedAgent.agent_type === "zcode" && (
-                    <p className="text-2xs text-muted-foreground">
-                      {t("zcode.runtimeHint")}
-                    </p>
-                  )}
-                  <div className="relative group">
-                    <Textarea
-                      value={selectedDraft.envText}
-                      onChange={(event) => {
-                        updateSelectedDraft((current) => ({
-                          ...current,
-                          envText: event.target.value,
-                        }))
-                      }}
-                      placeholder={"KEY1=VALUE1\nKEY2=VALUE2"}
-                      className="min-h-24"
-                      disabled={selectedGrokSaving}
-                    />
-                    <div className="pointer-events-none absolute inset-0 rounded-md bg-background/10 backdrop-blur-[3px] transition-opacity duration-200 group-focus-within:opacity-0" />
-                  </div>
                   {/*
-                    Backed by the same `envText` draft as the textarea above,
-                    not self-persisting: saving on toggle would also commit
-                    whatever unsaved edits the textarea happens to hold. One
-                    Save button owns both.
+                    环境变量文本框与「由 Agent 自行处理文件与命令」开关按产品决定
+                    对所有 agent 不再展示，共享的「保存环境变量」按钮也一并移除：
+                    启用开关与各 agent 自己的保存按钮早已各自落盘，这里只剩 Claude
+                    的思考摘要开关写 `envText`，它改为即时自保存。
+                    `hostToolsAgentModeEnabled` / `setHostToolsAgentMode` 仍留给既有
+                    会话逻辑与单元测试使用。
                   */}
-                  <div className="flex items-start justify-between gap-3 rounded-md border bg-muted/10 p-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium">
-                        {t("hostTools.label")}
-                      </label>
-                      <p className="text-2xs text-muted-foreground">
-                        {t("hostTools.description")}
-                      </p>
-                    </div>
-                    <Switch
-                      checked={hostToolsAgentModeEnabled(selectedDraft.envText)}
-                      onCheckedChange={(checked) => {
-                        updateSelectedDraft((current) => ({
-                          ...current,
-                          envText: setHostToolsAgentMode(
-                            current.envText,
-                            checked
-                          ),
-                        }))
-                      }}
-                      disabled={selectedGrokSaving}
-                      aria-label={t("hostTools.label")}
-                    />
-                  </div>
                   {selectedAgent.agent_type === "claude_code" && (
                     <div className="flex items-start justify-between gap-3 rounded-md border bg-muted/10 p-3">
                       <div className="space-y-1">
@@ -9138,56 +9144,42 @@ export function AcpAgentSettings() {
                           selectedDraft.envText
                         )}
                         onCheckedChange={(checked) => {
+                          // Self-persisting: the shared "save env vars" button
+                          // is gone, so this switch is the only writer left in
+                          // this block and must commit on its own.
+                          const nextEnvText = setClaudeThinkingSummaries(
+                            selectedDraft.envText,
+                            checked
+                          )
                           updateSelectedDraft((current) => ({
                             ...current,
-                            envText: setClaudeThinkingSummaries(
-                              current.envText,
-                              checked
-                            ),
+                            envText: nextEnvText,
                           }))
+                          persistEnv(
+                            selectedAgent.agent_type,
+                            selectedDraft.enabled,
+                            nextEnvText,
+                            selectedDraft.modelProviderId
+                          )
+                            .then(() => {
+                              toast.success(t("toasts.configSaved"), {
+                                description: t("toasts.configSavedHint"),
+                              })
+                            })
+                            .catch((err) => {
+                              console.error(
+                                "[Settings] save thinking summaries failed:",
+                                err
+                              )
+                              toast.error(t("toasts.saveEnvFailed"), {
+                                description: toErrorMessage(err),
+                              })
+                            })
                         }}
                         aria-label={t("claude.thinkingSummaries")}
                       />
                     </div>
                   )}
-                  <div className="flex justify-end">
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        persistEnv(
-                          selectedAgent.agent_type,
-                          selectedDraft.enabled,
-                          selectedDraft.envText,
-                          selectedDraft.modelProviderId
-                        )
-                          .then(() => {
-                            toast.success(t("toasts.configSaved"), {
-                              description: t("toasts.configSavedHint"),
-                            })
-                          })
-                          .catch((err) => {
-                            console.error("[Settings] save env failed:", err)
-                            const message = toErrorMessage(err)
-                            toast.error(t("toasts.saveEnvFailed"), {
-                              description: message,
-                            })
-                          })
-                      }}
-                      disabled={selectedIsSavingEnv || selectedGrokSaving}
-                    >
-                      {selectedIsSavingEnv ? (
-                        <>
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          {t("actions.saving")}
-                        </>
-                      ) : (
-                        <>
-                          <Save className="h-3.5 w-3.5" />
-                          {t("actions.saveEnvVars")}
-                        </>
-                      )}
-                    </Button>
-                  </div>
                 </div>
 
                 {selectedAgent.system_instructions_file_path &&
@@ -12130,6 +12122,9 @@ base_url = "https://api.openai.com/v1"`}
                         apiKey: selectedAgent.env.DEEPSEEK_API_KEY ?? "",
                       }}
                     />
+                    {/* Where this harness' executor config actually comes from:
+                      its own desktop app, not a locally stored provider. */}
+                    <ExecutorProvidersPanel agent="dsh" />
                   </>
                 ) : selectedAgent.agent_type === "qoder" ? (
                   <QoderConfigPanel
@@ -13023,6 +13018,13 @@ base_url = "https://api.openai.com/v1"`}
                           )}
                         </div>
                       )}
+
+                    {/* The locally stored Anthropic-compatible providers this
+                      harness launches with (CC Switch entries included) — the
+                      config a new Claude Code session actually receives. */}
+                    {selectedAgent.agent_type === "claude_code" && (
+                      <ExecutorProvidersPanel agent="claude" />
+                    )}
 
                     {(selectedAgent.agent_type !== "claude_code" ||
                       selectedDraft.claudeAuthMode === "custom" ||

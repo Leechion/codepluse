@@ -98,10 +98,10 @@ export function getTerminalTheme(container: HTMLElement | null): ITheme {
   const dark = isDarkMode()
   const baseTheme = dark ? DARK_THEME : LIGHT_THEME
 
-  // 背景图开启：终端画布透明，透出所属 ws-surface 面板的磨砂表面（跟随面板不透明度滑块），
+  // 背景图或原生毛玻璃工作区：终端画布透明，透出所属面板的磨砂表面，
   // 而非用不透明色盖住背景图。只改 background；cursorAccent 保留主题不透明色，块状光标下的
   // 字符才不会随透明背景一起消失。
-  if (isWorkspaceBgOn()) {
+  if (isWorkspaceBgOn() || container?.closest(".zw-shell")) {
     return {
       ...baseTheme,
       background: dark

@@ -28,6 +28,7 @@ import { ConversationTagsManagerHost } from "@/components/conversations/conversa
 import { TaskFromMessageHost } from "@/components/tasks/task-from-message-host"
 import { ExternalConflictDialog } from "@/components/files/external-conflict-dialog"
 import { HeavyPluginsWarmup } from "@/components/ai-elements/heavy-plugins-warmup"
+import { SettingsOverlayProvider } from "@/components/settings/settings-overlay"
 
 export default function WorkspaceLayout({
   children,
@@ -60,8 +61,10 @@ export default function WorkspaceLayout({
                                     <AutomationsViewProvider>
                                       <TasksViewProvider>
                                         <WorkbenchRouteProvider>
-                                          <TaskFromMessageHost />
-                                          {children}
+                                          <SettingsOverlayProvider>
+                                            <TaskFromMessageHost />
+                                            {children}
+                                          </SettingsOverlayProvider>
                                         </WorkbenchRouteProvider>
                                       </TasksViewProvider>
                                     </AutomationsViewProvider>
