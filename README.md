@@ -20,7 +20,7 @@ npm start
 - `codeg-ui/`：Codeg 前端。
 - `server-go/`：Go 服务、ACP 运行时及 WebView2 桌面程序。
 - `fixtures/`：Go 协议测试使用的 ACP fixture。
-- `desktop/` 和 `public/`：保留的旧界面及 Electron 桌面壳，使用 Go 后台。
-- `test/desktop.test.js`：保留的 Electron 桌面壳测试；其他旧 Node 服务测试不再适用。
+- `skills/`：可注入执行端的技能包。
+- `docs/`：历史设计文档，记录 Node 版与 Go 重写的演进，仅供参考。
 
-验证：在 `server-go/` 执行 `go test ./...` 和 `go vet ./...`；根目录的 `npm test` 仅测试保留的 Electron 桌面壳。旧 Node 服务源码已移除，历史设计文档仅供参考。
+验证：在 `server-go/` 执行 `go test ./...` 和 `go vet ./...`。旧 Node/Electron 体系（server.js、core、public、test、adapters、desktop）已移除。

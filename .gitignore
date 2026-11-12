@@ -1,6 +1,6 @@
 .data/
 node_modules/
-workspace/
+/workspace/
 .worktrees/
 dist/
 .next/
@@ -15,3 +15,4 @@ codeg-ui/out/
 .swc-cache/
 *.tsbuildinfo
 public/icon-preview/
+codeg-ui/.cdp-profile/

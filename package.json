@@ -5,11 +5,6 @@
   "description": "多 Harness 智能体统一协调中枢：注册、派发、通信、上下文隔离、审计",
   "scripts": {
     "start": "powershell -NoProfile -File scripts/start-codeg.ps1",
-    "desktop": "node desktop.js",
-    "check": "node --check desktop/main.js && node --check desktop/backend.js && node --check scripts/build-desktop.js && node --check desktop.js && node --check scripts/make-icons.js && node --check public/app.js && node --check public/chat.js && node --check public/missions.js",
-    "test": "node --test test/desktop.test.js",
-    "icons": "node scripts/make-icons.js",
-    "desktop:build": "node scripts/build-desktop.js",
     "codeg:build": "pnpm --dir codeg-ui build",
     "codeg:start": "powershell -NoProfile -File scripts/start-codeg.ps1",
     "codeg:desktop:build": "powershell -NoProfile -File scripts/build-codeg-desktop.ps1",
@@ -19,13 +14,5 @@
   },
   "engines": {
     "node": ">=22"
-  },
-  "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.101.0",
-    "@agentclientprotocol/codex-acp": "2.5.0",
-    "@agentclientprotocol/sdk": "2.4.0"
-  },
-  "devDependencies": {
-    "electron": "^38.8.6"
   }
 }
