@@ -37,3 +37,39 @@ func TestAccountAgentProfilesRemainIndependentAndBypassCustomRegistry(t *testing
 		t.Fatal("main account agent lost executor or uses an invalid Windows identifier")
 	}
 }
+
+func TestIndependentAccountAgentsAreNotFilteredAsHarnessInstances(t *testing.T) {
+	s := testServer(t)
+	base := s.Hub.CreateAgent(&hub.Agent{ID: "agt_account_qoder", Type: "account-agent", Name: "Qoder", Real: true, RealTool: "account:qoder", Wire: "account_qoder"})
+	instance := command(t, s, "codepluse_instance_create", Row{"name": "Qoder model B", "realTool": "account:qoder", "authMode": "subscription", "defaultModel": "qoder/b"}).(map[string]any)
+
+	var baseRow, instanceRow Row
+	for _, row := range s.agents() {
+		switch row["agent_type"] {
+		case wireAgent(base):
+			baseRow = row
+		case instance["agent_type"]:
+			instanceRow = row
+		}
+	}
+	if baseRow == nil || baseRow["instance"] != false {
+		t.Fatalf("independent account agent should appear as a base agent: %v", baseRow)
+	}
+	if instanceRow == nil || instanceRow["instance"] != true {
+		t.Fatalf("named account model should remain a harness instance: %v", instanceRow)
+	}
+
+	catalog, err := s.connectionCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, row := range catalog.([]Row) {
+		if row["agent_type"] == "account_qoder" && row["tool"] == "account:qoder" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("independent Qoder agent is missing from the connection catalog")
+	}
+}

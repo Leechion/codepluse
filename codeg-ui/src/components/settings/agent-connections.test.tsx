@@ -27,6 +27,29 @@ vi.mock("@/lib/api", () => ({
       enabled: true,
       available: true,
     },
+    ...[
+      ["account_buddy", "WorkBuddy 国内版", "account:buddy"],
+      ["account_workbuddy", "WorkBuddy 国际版", "account:workbuddy"],
+      ["account_qoder", "Qoder", "account:qoder"],
+      ["account_qodercn", "Qoder CN", "account:qodercn"],
+    ].map(([agent_type, name, real_tool]) => ({
+      agent_type,
+      name,
+      real_tool,
+      enabled: true,
+      available: true,
+      // Older Go backends marked any non-empty wire ID as a profile. Fixed
+      // account-agent IDs are stable identities, not model-specific profiles.
+      instance: true,
+    })),
+    {
+      agent_type: "inst_qoder_model_b",
+      name: "Qoder model B",
+      real_tool: "account:qoder",
+      enabled: true,
+      available: true,
+      instance: true,
+    },
   ],
   acpDeleteCustomAgent: vi.fn(),
   listHarnessProviders: async () => ({
@@ -112,6 +135,22 @@ it("lets Codex use the native official account without an API supplier", async (
       model: "",
     })
   )
+})
+
+it("lists each independent account agent and hides its named model profiles", async () => {
+  const user = userEvent.setup()
+  view()
+
+  await screen.findByRole("button", { name: "Native Codex" })
+  await user.click(screen.getByRole("combobox", { name: messages.Connections.harness }))
+
+  const labels = (await screen.findAllByRole("option")).map(
+    (option) => option.textContent || ""
+  )
+  for (const name of ["WorkBuddy 国内版", "WorkBuddy 国际版", "Qoder", "Qoder CN"]) {
+    expect(labels.some((label) => label.includes(name))).toBe(true)
+  }
+  expect(labels.some((label) => label.includes("Qoder model B"))).toBe(false)
 })
 
 it("saves edits to the existing API supplier without creating a copy or retyping its key", async () => {

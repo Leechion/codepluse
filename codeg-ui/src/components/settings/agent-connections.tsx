@@ -73,6 +73,9 @@ import {
 } from "./connection-fields"
 
 type Model = NonNullable<HarnessProviderInfo["models"]>[number]
+const isHarnessProfile = (agent: AcpAgentInfo) =>
+  agent.instance && agent.agent_type.startsWith("inst_")
+
 type ProviderForm = {
   name: string
   url: string
@@ -150,21 +153,25 @@ export function AgentConnections({
       listHarnessProviders(),
       listHarnessConnections(),
     ])
-    setAgents(a.filter((a) => !a.instance))
+    setAgents(a.filter((agent) => !isHarnessProfile(agent)))
     setProviders(p.providers)
     setSources(s)
     setWarning(p.ccError || "")
     setSelectedAgent((old) =>
-      a.some((a) => a.agent_type === old && !a.instance)
+      a.some((agent) => agent.agent_type === old && !isHarnessProfile(agent))
         ? old
         : (
-            a.find((a) => a.agent_type === requested && !a.instance) ||
+            a.find(
+              (agent) =>
+                agent.agent_type === requested && !isHarnessProfile(agent)
+            ) ||
             a.find(
               (candidate) =>
                 candidate.agent_type ===
-                a.find((i) => i.agent_type === requested)?.base_agent_type
+                  a.find((i) => i.agent_type === requested)?.base_agent_type &&
+                !isHarnessProfile(candidate)
             ) ||
-            a.find((a) => !a.instance)
+            a.find((agent) => !isHarnessProfile(agent))
           )?.agent_type || ""
     )
   }, [requested])
