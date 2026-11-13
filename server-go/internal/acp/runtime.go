@@ -945,7 +945,11 @@ func withinDir(root, candidate string) (string, error) {
 
 func (r *Runtime) fsRead(d *Driver, p map[string]any) (map[string]any, error) {
 	path, _ := p["path"].(string)
-	file, err := withinDir(d.cwd, filepath.Join(d.cwd, path))
+	target := path
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(d.cwd, path)
+	}
+	file, err := withinDir(d.cwd, target)
 	if err != nil {
 		return nil, err
 	}
@@ -1005,7 +1009,10 @@ func (r *Runtime) fsWrite(d *Driver, p map[string]any) (map[string]any, error) {
 	if len(content) > 1024*1024 {
 		return nil, fmt.Errorf("写入内容超过 1 MiB")
 	}
-	target := filepath.Join(d.cwd, path)
+	target := path
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(d.cwd, path)
+	}
 	check := target
 	if _, err := os.Stat(target); err != nil {
 		check = filepath.Dir(target)

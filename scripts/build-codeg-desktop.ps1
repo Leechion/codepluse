@@ -28,6 +28,8 @@ $workspaceConfig = @{ root = $workspaceRoot } | ConvertTo-Json
 [System.IO.File]::WriteAllText((Join-Path $bundleRoot 'workspace.json'), $workspaceConfig, (New-Object System.Text.UTF8Encoding($false)))
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'THIRD_PARTY_NOTICES.md') -Destination $bundleRoot
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'codeg-ui\LICENSE') -Destination (Join-Path $bundleRoot 'licenses\codeg-Apache-2.0.txt')
+Copy-Item -LiteralPath (Join-Path $workspaceRoot 'bridges\account-channels\vendor\LICENSE') -Destination (Join-Path $bundleRoot 'licenses\account-channel-MIT.txt')
+Copy-Item -LiteralPath (Join-Path $workspaceRoot 'bridges\account-channels\vendor\LICENSE-OFM') -Destination (Join-Path $bundleRoot 'licenses\account-channel-standalone-MIT.txt')
 # codepluse.ico 供可选桌面快捷方式取图标。旧的 public/codepluse.ico 已随 Node/Electron 栈删除，
 # 改由应用图标 PNG 现场生成，避免依赖已删文件。
 # 生成方式换成 scripts/make-codeg-icon.ps1：GetHicon()+Icon.Save() 只会写出

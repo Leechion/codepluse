@@ -2,8 +2,11 @@ package codeg
 
 import (
 	"fmt"
+	"harnesshub/internal/accountchannels"
 	"harnesshub/internal/hub"
 	"harnesshub/internal/providers"
+	"path/filepath"
+	"strings"
 )
 
 func (s *Server) profileBase(tool, base string) *hub.Agent {
@@ -41,6 +44,8 @@ func (s *Server) connectionCatalog() (any, error) {
 		return nil, err
 	}
 	rows := []Row{}
+	var accountRows []accountchannels.Channel
+	accountsLoaded := false
 	for _, row := range s.agents() {
 		if row["instance"] == true {
 			continue
@@ -64,6 +69,24 @@ func (s *Server) connectionCatalog() (any, error) {
 			}
 		}
 		account := providers.Account(tool)
+		if strings.HasPrefix(tool, "account:") {
+			account.Managed = true
+			account.Source = filepath.Join(s.Root, ".data", "account-channels")
+			if !accountsLoaded {
+				accountRows, _, _ = accountchannels.List(s.Root)
+				accountsLoaded = true
+			}
+			if accountRows != nil {
+				for _, channel := range accountRows {
+					if channel.ID == strings.TrimPrefix(tool, "account:") {
+						account.Configured = channel.Configured
+						for _, model := range channel.Models {
+							account.Models = append(account.Models, providers.Model{ID: model.ID, Name: model.Name})
+						}
+					}
+				}
+			}
+		}
 		rows = append(rows, Row{"agent_type": wire, "tool": tool, "account": account, "defaults": defaults})
 	}
 	return rows, nil

@@ -14,12 +14,14 @@ import (
 	"syscall"
 	"time"
 
+	"harnesshub/internal/accountchannels"
 	"harnesshub/internal/acp"
 	"harnesshub/internal/codeg"
 	"harnesshub/internal/extra"
 	"harnesshub/internal/hub"
 	"harnesshub/internal/mcpserver"
 	"harnesshub/internal/orch"
+	"harnesshub/internal/providers"
 )
 
 // ----------------------------- small helpers -----------------------------
@@ -237,6 +239,38 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 	node, err := exec.LookPath("node")
 	if err != nil {
 		return nil, fmt.Errorf("未找到 node，无法启动 ACP 适配器")
+	}
+	if strings.HasPrefix(tool, "account:") {
+		channelID := strings.TrimPrefix(tool, "account:")
+		channels, client, err := accountchannels.List(ROOT)
+		if err != nil {
+			return nil, err
+		}
+		for _, channel := range channels {
+			if channel.ID != channelID {
+				continue
+			}
+			if !channel.Configured || len(channel.Models) == 0 {
+				return nil, fmt.Errorf("请先在智能体设置中登录 %s", channel.Name)
+			}
+			model := agent.DefaultModel
+			if model == "" {
+				model = channel.Models[0].ID
+			}
+			valid := false
+			for _, item := range channel.Models {
+				if item.ID == model {
+					valid = true
+				}
+			}
+			if !valid {
+				return nil, fmt.Errorf("%s 不提供模型 %s", channel.Name, model)
+			}
+			env := providers.ClearAPIEnvironment(os.Environ())
+			env = append(env, "CODEPLUSE_CHANNEL_URL="+client.URL, "CODEPLUSE_CHANNEL_KEY="+client.Key, "CODEPLUSE_CHANNEL_MODEL="+model, "CODEPLUSE_CHANNEL_PERMISSION="+permission)
+			return &acp.Launch{Command: node, Args: []string{pkg, channelID, filepath.Join(ROOT, ".data", "account-channels", "sessions")}, Env: env}, nil
+		}
+		return nil, fmt.Errorf("账号智能体不存在")
 	}
 	env, err := buildEnv(agent)
 	if err != nil {
@@ -553,6 +587,21 @@ func main() {
 
 	// seed real CLI agents
 	if REAL_ENABLED {
+		for channelID, name := range map[string]string{"buddy": "WorkBuddy 国内版", "workbuddy": "WorkBuddy 国际版", "qoder": "Qoder", "qodercn": "Qoder CN"} {
+			tool := "account:" + channelID
+			if acpInstalled(tool) == "" {
+				continue
+			}
+			a := h.CreateAgent(&hub.Agent{ID: "agt_account_" + channelID, Type: "account-agent", Name: name, Load: 0, Trust: 1})
+			a.Real = true
+			a.RealTool = tool
+			a.Wire = "account_" + channelID
+			a.AuthMode = "subscription"
+			a.Communication = "acp"
+			a.Endpoint = "acp://" + tool
+			a.AdapterKind = "ACP"
+			a.ACPModes = map[string]string{"readonly": "readonly", "workspace": "workspace", "shell": "readonly"}
+		}
 		for _, tool := range []string{"codex", "claude", "dsh", "workbuddy"} {
 			if acpInstalled(tool) == "" {
 				continue

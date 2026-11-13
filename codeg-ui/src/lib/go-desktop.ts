@@ -8,6 +8,7 @@ export function goDesktopBridge() {
     __codegGoWindowMinimize?: () => Promise<void>
     __codegGoWindowToggleMaximize?: () => Promise<boolean>
     __codegGoWindowBeginDrag?: () => Promise<void>
+    __codegGoOpenExternal?: (url: string) => Promise<void>
   }
   return typeof host.__codegGoOpenWindow === "function" &&
     typeof host.__codegGoCloseWindow === "function" &&
@@ -20,6 +21,7 @@ export function goDesktopBridge() {
         minimize: host.__codegGoWindowMinimize,
         toggleMaximize: host.__codegGoWindowToggleMaximize,
         beginDrag: host.__codegGoWindowBeginDrag,
+        openExternal: host.__codegGoOpenExternal,
       }
     : null
 }

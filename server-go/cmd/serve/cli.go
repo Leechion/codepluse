@@ -219,6 +219,13 @@ func runtimeBin(tool string) string {
 }
 
 func acpInstalled(tool string) string {
+	if strings.HasPrefix(tool, "account:") {
+		file := filepath.Join(ROOT, "bridges", "account-channels", "acp-agent.mjs")
+		if _, err := os.Stat(file); err == nil {
+			return file
+		}
+		return ""
+	}
 	if tool == "workbuddy" {
 		return workBuddyEntry()
 	}

@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,6 +69,19 @@ func main() {
 		return nil
 	})
 	_ = w.Bind("__codegGoCloseWindow", func() { w.Terminate() })
+	_ = w.Bind("__codegGoOpenExternal", func(raw string) error {
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || strings.ContainsAny(raw, "\r\n") {
+			return fmt.Errorf("只能打开有效的 HTTPS 登录页面")
+		}
+		cmd := exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", u.String())
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		go func() { _ = cmd.Wait() }()
+		return nil
+	})
 	_ = w.Bind("__codegGoWindowMinimize", func() { showWindow(hwnd, 6) })
 	_ = w.Bind("__codegGoWindowToggleMaximize", func() bool {
 		if isWindowMaximized(hwnd) {
@@ -95,7 +109,7 @@ func removeNativeCaption(hwnd uintptr) {
 	getWindowLong := user32.NewProc("GetWindowLongW")
 	setWindowLong := user32.NewProc("SetWindowLongW")
 	style, _, _ := getWindowLong.Call(hwnd, uintptr(uint32(0xFFFFFFF0))) // GWL_STYLE
-	style &^= 0x00C00000 // WS_CAPTION; keep the resize frame and system menu.
+	style &^= 0x00C00000                                                 // WS_CAPTION; keep the resize frame and system menu.
 	setWindowLong.Call(hwnd, uintptr(uint32(0xFFFFFFF0)), style)
 	user32.NewProc("SetWindowPos").Call(hwnd, 0, 0, 0, 0, 0, 0x0027) // frame changed
 }

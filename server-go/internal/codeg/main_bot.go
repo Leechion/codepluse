@@ -81,8 +81,9 @@ func (s *Server) saveMainBotSettings(a Row) (any, error) {
 			identity += "\x00subscription"
 		}
 		digest := fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))[:12]
-		mainWire := "inst_main_" + base.RealTool + "_" + digest
-		spec := instanceSpec{ID: "main_" + base.RealTool + "_" + digest, Wire: mainWire, Name: "主智能体 · " + base.Name + " · " + model, RealTool: base.RealTool, ProviderID: providerID, DefaultModel: model, AuthMode: authMode, BaseAgentType: wireAgent(base)}
+		toolKey := strings.ReplaceAll(base.RealTool, ":", "_")
+		mainWire := "inst_main_" + toolKey + "_" + digest
+		spec := instanceSpec{ID: "main_" + toolKey + "_" + digest, Wire: mainWire, Name: "主智能体 · " + base.Name + " · " + model, RealTool: base.RealTool, ProviderID: providerID, DefaultModel: model, AuthMode: authMode, BaseAgentType: wireAgent(base)}
 		agent := s.instanceAgent(spec)
 		if agent == nil {
 			s.mu.Unlock()

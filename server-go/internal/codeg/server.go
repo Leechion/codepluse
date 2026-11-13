@@ -390,6 +390,9 @@ func (s *Server) command(command string, a Row) (any, error) {
 	if strings.HasPrefix(command, "codepluse_instance_") {
 		return s.instanceCommand(command, a)
 	}
+	if strings.HasPrefix(command, "codepluse_channel_") {
+		return s.accountChannelCommand(command, a)
+	}
 	switch command {
 	case "codepluse_connection_catalog":
 		return s.connectionCatalog()

@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ProviderModelPicker } from "./provider-model-picker"
+import { AccountChannels } from "./account-channels"
 import type { AcpAgentInfo } from "@/lib/types"
 import type {
   HarnessAuthMode,
@@ -127,6 +128,7 @@ export function AccountConnection({
 }) {
   const t = useTranslations("Connections")
   const account = source?.account
+  const independent = source?.tool.startsWith("account:")
   if (!account?.supported)
     return (
       <p className="text-sm text-muted-foreground">{t("noSubscription")}</p>
@@ -146,9 +148,11 @@ export function AccountConnection({
               <StatusIcon className="size-3.5" />
               {account.configured
                 ? t("credentialsFound")
-                : account.managed
-                  ? t("accountManaged")
-                  : t("loginRequired")}
+                : independent
+                  ? "请在下方管理官网账号并完成网页登录"
+                  : account.managed
+                    ? t("accountManaged")
+                    : t("loginRequired")}
             </p>
           </div>
           <Button
@@ -161,8 +165,18 @@ export function AccountConnection({
           </Button>
         </div>
         <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-          {t("accountHint")}
+          {independent
+            ? "此智能体拥有自己的官网账号、模型和会话，可独立完成任务并与其他智能体协作。"
+            : t("accountHint")}
         </p>
+        {independent && (
+          <div className="mt-3">
+            <AccountChannels
+              provider={source!.tool.slice(8)}
+              onChanged={onRefresh}
+            />
+          </div>
+        )}
         {account.loginCommand && !account.configured && (
           <div className="mt-3 flex items-center gap-2 rounded-lg border bg-background/25 px-3 py-2">
             <code className="min-w-0 flex-1 truncate text-xs">

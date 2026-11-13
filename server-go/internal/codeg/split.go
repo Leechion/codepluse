@@ -156,6 +156,9 @@ func splitAgentEnabled(c Row) bool {
 // baseWire maps a real tool onto the wire name the base agent answers under
 // (wireAgent's table); instance rows already carry their own wire.
 func baseWire(tool string) string {
+	if strings.HasPrefix(tool, "account:") {
+		return "account_" + strings.TrimPrefix(tool, "account:")
+	}
 	switch tool {
 	case "claude":
 		return "claude_code"

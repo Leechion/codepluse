@@ -632,6 +632,10 @@ const MONO_ICONS: Partial<Record<AgentType, AnyIcon>> = {
   grok: GrokMonoIcon,
   cursor: CursorMonoIcon,
   qoder: QoderMonoIcon,
+  account_qoder: QoderMonoIcon,
+  account_qodercn: QoderMonoIcon,
+  account_buddy: CodeBuddyMonoIcon,
+  account_workbuddy: CodeBuddyMonoIcon,
   antigravity: AntigravityMonoIcon,
 }
 

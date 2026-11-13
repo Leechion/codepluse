@@ -1,0 +1,13 @@
+# WorkBuddy / Qoder independent agents
+
+Settings → Agents → choose an independent agent → **官网订阅 → 管理官网账号** opens that product's browser login. Four independent ACP agents appear in the agent picker: `account_buddy`, `account_workbuddy`, `account_qoder`, `account_qodercn`. Each has its own session history, selected model and tool loop. They can be selected as the main agent, saved as multiple model profiles, or delegated to by another agent through the existing `codeg-mcp` tools.
+
+These agents do not run DSH. Their local ACP adapter calls their own product's inference protocol, executes workspace file tools through the ACP client, requests permission before shell commands, and connects the actual MCP servers supplied by Codepluse. Read-only sessions expose no write/shell tools and reject such calls even if a model attempts to invoke them. Model IDs are validated against the selected product; no silent cross-product fallback is performed. Cancellation aborts the live HTTP request and pending tool calls. Histories can be restored via `session/load`.
+
+The protocol code is derived from the user's installed `dsh-our-free-model` 2.3.0. WorkBuddy uses its external-link browser login, token refresh and OpenAI-compatible SSE. Qoder/CN use their separate PKCE/device login, product-specific endpoints, encrypted requests and the upstream WASM. See `bridges/account-channels/NOTICE.md` and `vendor/LICENSE` for provenance. Only these four products are initialized.
+
+The Go server owns the loopback protocol process and supplies its random local key through the environment. Multiple Codepluse backends for one checkout reuse the same protected local runtime record. Account tokens and pool state stay under `.data/account-channels`; browser/API status exposes account metadata and models only. Existing native-client and DSH credentials are untouched. Native WebView windows open login pages in the system browser; a normal browser provides a clickable login link. Login completion is polled and closing the dialog cancels it. No real login is fabricated, and no automatic credit claiming is enabled.
+
+Requirements: Node.js 22.19+ and the existing Go desktop build. First use requires completing each product's actual browser authorization. The bundled protocol may need updating when a vendor changes its private endpoint; inference and OAuth errors are surfaced rather than reported as success.
+
+Checks cover ACP initialization/session restore/model selection, real stdio MCP transport, host file tool results, shell permission rejection, cancellation, token/account isolation, tool-call streaming, usage accounting and upstream errors. Local fixtures do not consume any model credits. Actual account login and inference require user authorization in the UI.

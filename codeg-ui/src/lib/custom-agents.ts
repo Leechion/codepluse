@@ -136,6 +136,13 @@ function humanizeId(id: string): string {
  * a humanized id.
  */
 export function getAgentLabel(agentType: AgentType): string {
+  const accountLabel: Record<string, string> = {
+    account_buddy: "WorkBuddy 国内版",
+    account_workbuddy: "WorkBuddy 国际版",
+    account_qoder: "Qoder",
+    account_qodercn: "Qoder CN",
+  }
+  if (accountLabel[agentType]) return accountLabel[agentType]
   const builtin = AGENT_LABELS[agentType as BuiltinAgentType]
   if (builtin) return builtin
   const id = displayKeyOf(agentType)

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"harnesshub/internal/accountchannels"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,6 +47,9 @@ func NativeHome(tool string) string {
 }
 
 func SupportsSubscription(tool string) bool {
+	if strings.HasPrefix(tool, "account:") {
+		return accountchannels.Supported(strings.TrimPrefix(tool, "account:"))
+	}
 	return tool == "claude" || tool == "codex" || tool == "workbuddy" || tool == "qoder" || tool == "custom:qoder"
 }
 
