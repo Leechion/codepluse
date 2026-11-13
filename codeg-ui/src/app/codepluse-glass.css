@@ -72,6 +72,66 @@ body:has(:is(.zw-shell, [data-settings-shell])),
   background: var(--cp-glass-backdrop);
 }
 
+/* Go desktop draws the caption inside the WebView so the window title and controls share the workspace's glass surface. */
+body[data-go-window-chrome="true"] {
+  overflow: hidden;
+  background: var(--cp-glass-backdrop);
+}
+
+body[data-go-window-chrome="true"] .zw-shell {
+  height: calc(100dvh - 40px);
+  margin-top: 40px;
+}
+
+.cp-go-titlebar {
+  position: fixed;
+  z-index: 10000;
+  inset: 0 0 auto;
+  display: flex;
+  height: 40px;
+  align-items: stretch;
+  justify-content: space-between;
+  color: var(--foreground, #202d40);
+  background: var(--cp-glass-chrome, rgb(255 255 255 / 40%));
+  border-bottom: 1px solid var(--cp-glass-edge, rgb(255 255 255 / 65%));
+  -webkit-backdrop-filter: blur(24px) saturate(125%);
+  backdrop-filter: blur(24px) saturate(125%);
+  user-select: none;
+}
+
+.cp-go-titlebar-brand {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.cp-go-titlebar-brand img { flex: 0 0 auto; border-radius: 4px; }
+
+.cp-go-titlebar-controls { display: flex; flex: 0 0 auto; align-items: stretch; }
+
+.cp-go-titlebar-controls button {
+  display: flex;
+  width: 46px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: default;
+  transition: background-color 100ms ease;
+}
+
+.cp-go-titlebar-controls button:hover { background: rgb(255 255 255 / 30%); }
+.cp-go-titlebar-controls button:active { background: rgb(255 255 255 / 45%); }
+.cp-go-titlebar-controls .cp-go-titlebar-close:hover { color: white; background: #e81123; }
+.cp-go-titlebar-controls .cp-go-titlebar-close:active { background: #c50f1f; }
+.cp-go-titlebar-controls button:focus-visible { outline: 2px solid var(--ring, #1d4f88); outline-offset: -3px; }
+
 /* Keep the user's theme selection; dark glass has its own readable surfaces. */
 .dark body:has(:is(.zw-shell, [data-settings-shell])),
 .dark .zw-shell,

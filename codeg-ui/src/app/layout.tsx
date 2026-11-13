@@ -25,6 +25,7 @@ import { ServiceWorkerInit } from "@/components/service-worker-init"
 import { WebConnectionGuard } from "@/components/connection/web-connection-guard"
 import { WebVersionNotice } from "@/components/connection/web-version-notice"
 import { WindowResizeGrips } from "@/components/layout/window-resize-grips"
+import { GoWindowTitlebar } from "@/components/layout/go-window-titlebar"
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -82,6 +83,7 @@ export default async function RootLayout({
         />
       </head>
       <body>
+        <GoWindowTitlebar />
         {/* CSS-only dark background: applies before JS executes, preventing white flash in dark mode */}
         <style
           dangerouslySetInnerHTML={{

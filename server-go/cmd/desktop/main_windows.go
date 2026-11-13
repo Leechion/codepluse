@@ -52,6 +52,8 @@ func main() {
 	}
 	defer w.Destroy()
 	w.SetSize(900, 640, webview2.HintMin)
+	hwnd := uintptr(w.Window())
+	removeNativeCaption(hwnd)
 	_ = w.Bind("__codegGoOpenWindow", func(path string) error {
 		if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || strings.ContainsAny(path, "\\\r\n") {
 			return fmt.Errorf("只能打开本地应用页面")
@@ -66,12 +68,45 @@ func main() {
 		return nil
 	})
 	_ = w.Bind("__codegGoCloseWindow", func() { w.Terminate() })
+	_ = w.Bind("__codegGoWindowMinimize", func() { showWindow(hwnd, 6) })
+	_ = w.Bind("__codegGoWindowToggleMaximize", func() bool {
+		if isWindowMaximized(hwnd) {
+			showWindow(hwnd, 9)
+		} else {
+			showWindow(hwnd, 3)
+		}
+		return isWindowMaximized(hwnd)
+	})
+	_ = w.Bind("__codegGoWindowBeginDrag", func() {
+		user32 := syscall.NewLazyDLL("user32.dll")
+		user32.NewProc("ReleaseCapture").Call()
+		user32.NewProc("SendMessageW").Call(hwnd, 0x00A1, 2, 0) // WM_NCLBUTTONDOWN, HTCAPTION
+	})
 	if !strings.HasPrefix(*page, "/") || strings.HasPrefix(*page, "//") || strings.ContainsAny(*page, "\\\r\n") {
 		fail(fmt.Errorf("应用页面路径无效"))
 		return
 	}
 	w.Navigate(base + *page)
 	w.Run()
+}
+
+func removeNativeCaption(hwnd uintptr) {
+	user32 := syscall.NewLazyDLL("user32.dll")
+	getWindowLong := user32.NewProc("GetWindowLongW")
+	setWindowLong := user32.NewProc("SetWindowLongW")
+	style, _, _ := getWindowLong.Call(hwnd, uintptr(uint32(0xFFFFFFF0))) // GWL_STYLE
+	style &^= 0x00C00000 // WS_CAPTION; keep the resize frame and system menu.
+	setWindowLong.Call(hwnd, uintptr(uint32(0xFFFFFFF0)), style)
+	user32.NewProc("SetWindowPos").Call(hwnd, 0, 0, 0, 0, 0, 0x0027) // frame changed
+}
+
+func showWindow(hwnd uintptr, command uintptr) {
+	syscall.NewLazyDLL("user32.dll").NewProc("ShowWindow").Call(hwnd, command)
+}
+
+func isWindowMaximized(hwnd uintptr) bool {
+	maximized, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("IsZoomed").Call(hwnd)
+	return maximized != 0
 }
 
 func ensureBackend(root, base string, port int) error {
