@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +56,10 @@ type Server struct {
 	warm    map[string][]warmEntry
 	warming map[string]bool
 	started bool // guarded by warmMu; prewarming is a runtime-only behavior
+	// devOnce/devHTTP back the optional HARNESS_HUB_DEV_FRONTEND reverse proxy
+	// that forwards non-API traffic to a `next dev` server (see ServeHTTP).
+	devOnce sync.Once
+	devHTTP *httputil.ReverseProxy
 }
 
 func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (string, error)) (*Server, error) {
@@ -238,6 +244,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !strings.HasPrefix(r.URL.Path, "/api/") {
+		// Dev hot-reload: when HARNESS_HUB_DEV_FRONTEND points at a `next dev`
+		// server, proxy every non-API request there so the running WebView gets
+		// HMR while /api and /ws stay local (same origin, no CORS). Unset in
+		// normal use → serve the static export from out/.
+		if devURL := os.Getenv("HARNESS_HUB_DEV_FRONTEND"); devURL != "" {
+			s.devProxy(devURL).ServeHTTP(w, r)
+			return
+		}
 		s.static(w, r)
 		return
 	}
@@ -267,6 +281,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, 200, result)
 }
+
+// devProxy lazily builds the reverse proxy that forwards non-API requests to the
+// `next dev` server named by HARNESS_HUB_DEV_FRONTEND. ReverseProxy tunnels the
+// HMR WebSocket upgrade as well, so edits hot-reload inside the desktop WebView
+// while /api and /ws keep hitting this process (same origin, no CORS).
+func (s *Server) devProxy(target string) *httputil.ReverseProxy {
+	s.devOnce.Do(func() {
+		u, err := url.Parse(target)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "[codeg-dev] 无法解析 HARNESS_HUB_DEV_FRONTEND:", err)
+			return
+		}
+		p := httputil.NewSingleHostReverseProxy(u)
+		p.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
+			http.Error(w, "dev frontend unavailable ("+target+"): "+err.Error(), http.StatusBadGateway)
+		}
+		s.devHTTP = p
+	})
+	if s.devHTTP == nil {
+		// Misconfigured target: fail per-request instead of panicking.
+		u, _ := url.Parse("http://127.0.0.1:3000")
+		return httputil.NewSingleHostReverseProxy(u)
+	}
+	return s.devHTTP
+}
+
 func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 	static := filepath.Join(s.Root, "codeg-ui", "out")
 	request := r.URL.Path
