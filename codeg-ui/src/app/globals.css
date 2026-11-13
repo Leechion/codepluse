@@ -4277,8 +4277,11 @@ div.monaco-diff-editor.side-by-side .editor.modified {
 .zcode-turn .activity-child[data-status="succeeded"] > .activity-marker [data-ring="quiet"] {
   border-color: transparent;
 }
-.zcode-turn .activity-item[data-status="succeeded"] > .activity-marker svg,
-.zcode-turn .activity-child[data-status="succeeded"] > .activity-marker svg {
+/* Every status scales alike: keying the zoom on succeeded made a finished
+   row's glyph a fifth larger than a running/failed one on the same rail, so the
+   icon column read as misaligned. Center-anchored, so it enlarges in place. */
+.zcode-turn .activity-item > .activity-marker svg,
+.zcode-turn .activity-child > .activity-marker svg {
   transform: scale(1.2);
 }
 .zcode-turn .activity-detail {
