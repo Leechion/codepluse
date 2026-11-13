@@ -8,6 +8,7 @@ import (
 	"harnesshub/internal/modelproviders"
 	"harnesshub/internal/providers"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -82,6 +83,12 @@ type listedModel struct {
 // 模型供应商 store、执行端 store 与 CC Switch；其余来源（pi/opencode）未移植。
 func (s *Server) resolveModelListKey(keySource map[string]any) (string, error) {
 	switch text(keySource["kind"]) {
+	case "executor":
+		p, err := providers.Find(s.Root, text(keySource["providerId"]))
+		if err != nil {
+			return "", err
+		}
+		return p.Key, nil
 	case "inline":
 		return text(keySource["apiKey"]), nil
 	case "provider":
@@ -109,6 +116,62 @@ func (s *Server) resolveModelListKey(keySource map[string]any) (string, error) {
 	default:
 		return "", fmt.Errorf("暂不支持该密钥来源: %s", text(keySource["kind"]))
 	}
+}
+
+// Resolve URL and credentials together from the stored provider. The frontend
+// sends an ID, never a key or a replacement destination for that key.
+func (s *Server) harnessProviderModels(id string) (any, error) {
+	p, err := providers.Find(s.Root, id)
+	if err != nil {
+		return nil, err
+	}
+	if !providers.IsAPI(p) {
+		return nil, fmt.Errorf("请选择 API 供应商，官方订阅不提供此配置")
+	}
+	models := []listedModel{}
+	seen := map[string]bool{}
+	add := func(id, name string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			models = append(models, listedModel{ID: id, DisplayName: name})
+		}
+	}
+	for _, m := range p.Models {
+		add(m.ID, m.Name)
+	}
+	add(p.Model, "")
+	if p.Source == "dsh" && len(models) > 0 {
+		return Row{"models": models, "source": "native"}, nil
+	}
+	protocol := p.Protocol
+	if protocol == "" {
+		protocol = "openai"
+		if p.Agent == "claude" {
+			protocol = "anthropic"
+		}
+	}
+	base := strings.TrimRight(p.URL, "/")
+	if protocol == "anthropic" {
+		base = strings.TrimSuffix(base, "/v1")
+	}
+	params := Row{"protocol": protocol, "baseUrl": base, "keySource": Row{"kind": "executor", "providerId": id}}
+	if p.Env["ANTHROPIC_AUTH_TOKEN"] != "" {
+		params["keyHeader"] = "bearer"
+	}
+	raw, err := s.listProviderModels(Row{"params": params})
+	warning := ""
+	if err == nil {
+		if row, ok := raw.(map[string]any); ok {
+			if remote, ok := row["models"].([]listedModel); ok {
+				for _, m := range remote {
+					add(m.ID, m.DisplayName)
+				}
+			}
+		}
+	} else {
+		warning = "供应商模型目录暂不可用，已显示本地配置中的模型；也可填写模型 ID。"
+	}
+	return Row{"models": models, "source": "provider", "warning": warning}, nil
 }
 
 func (s *Server) listProviderModels(a Row) (any, error) {
@@ -161,7 +224,11 @@ func (s *Server) listProviderModels(a Row) (any, error) {
 	client := &http.Client{Timeout: 12 * time.Second}
 	if transport, ok := http.DefaultTransport.(*http.Transport); ok {
 		t := transport.Clone()
-		if proxy := outboundProxy(); proxy != "" {
+		target, _ := url.Parse(baseURL)
+		ip := net.ParseIP(target.Hostname())
+		if target.Hostname() == "localhost" || (ip != nil && ip.IsLoopback()) {
+			t.Proxy = nil
+		} else if proxy := outboundProxy(); proxy != "" {
 			if u, e := url.Parse(proxy); e == nil {
 				t.Proxy = func(*http.Request) (*url.URL, error) { return u, nil }
 			}

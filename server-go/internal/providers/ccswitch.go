@@ -39,24 +39,43 @@ func readCCSwitch(path string) ([]Provider, error) {
 		return nil, err
 	}
 	defer db.Close()
-	rows, err := db.Query(`SELECT id,name,settings_config,is_current FROM providers WHERE app_type='claude' ORDER BY COALESCE(sort_index, 2147483647), name`)
+	rows, err := db.Query(`SELECT id,name,settings_config,is_current,app_type FROM providers WHERE app_type IN ('claude','codex') ORDER BY COALESCE(sort_index, 2147483647), name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []Provider{}
 	for rows.Next() {
-		var id, name, raw string
+		var id, name, raw, app string
 		var current bool
-		if err = rows.Scan(&id, &name, &raw, &current); err != nil {
+		if err = rows.Scan(&id, &name, &raw, &current, &app); err != nil {
 			return nil, err
 		}
 		var cfg struct {
-			Env   map[string]any `json:"env"`
-			Model string         `json:"model"`
+			Env          map[string]any `json:"env"`
+			Model        string         `json:"model"`
+			Config       string         `json:"config"`
+			Auth         map[string]any `json:"auth"`
+			ModelCatalog struct {
+				Models []struct {
+					Model       string `json:"model"`
+					DisplayName string `json:"displayName"`
+				}
+			} `json:"modelCatalog"`
 		}
 		if err = json.Unmarshal([]byte(raw), &cfg); err != nil {
 			return nil, fmt.Errorf("CC Switch 供应商配置无效: %w", err)
+		}
+		if app == "codex" {
+			if p, ok := CodexProvider("ccswitch:codex:"+id, name, "ccswitch", cfg.Config, cfg.Auth, current); ok {
+				for _, m := range cfg.ModelCatalog.Models {
+					if m.Model != "" {
+						p.Models = append(p.Models, Model{ID: m.Model, Name: m.DisplayName})
+					}
+				}
+				out = append(out, p)
+			}
+			continue
 		}
 		env := map[string]string{}
 		for k, v := range cfg.Env {
@@ -74,7 +93,7 @@ func readCCSwitch(path string) ([]Provider, error) {
 		if key == "" {
 			key = env["ANTHROPIC_API_KEY"]
 		}
-		out = append(out, Provider{ID: "ccswitch:" + id, Name: name, Agent: "claude", URL: env["ANTHROPIC_BASE_URL"], Model: model, HasKey: key != "", Source: "ccswitch", CCCurrent: current, Env: env})
+		out = append(out, Provider{ID: "ccswitch:" + id, Name: name, Agent: "claude", URL: env["ANTHROPIC_BASE_URL"], Model: model, Key: key, HasKey: key != "", Source: "ccswitch", CCCurrent: current, Env: env, Protocol: "anthropic", Models: claudeModels(env, model)})
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err

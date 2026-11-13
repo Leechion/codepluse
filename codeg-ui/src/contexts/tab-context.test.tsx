@@ -2,6 +2,8 @@ import { act, render, screen, waitFor } from "@testing-library/react"
 import { useEffect } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { TabProvider, useTabContext } from "@/contexts/tab-context"
+import { applyMainBotSettings } from "@/lib/main-bot"
+import type { MainBotSettings } from "@/lib/api"
 import { CONVERSATION_CHANGED_EVENT, TABS_CHANGED_EVENT } from "@/lib/types"
 import type {
   AgentType,
@@ -258,6 +260,7 @@ function openConversationTab(
 describe("TabProvider tab state transitions", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    applyMainBotSettings(null)
     seedWorkspaceStore()
     listOpenedTabsMock.mockReturnValue(new Promise(() => {}))
     saveOpenedTabsMock.mockResolvedValue({
@@ -282,6 +285,44 @@ describe("TabProvider tab state transitions", () => {
       return Promise.resolve(() => {})
     })
     onTransportReconnectMock.mockReturnValue(() => {})
+  })
+
+  it("applies a saved main-agent broadcast to drafts and keeps saved conversations unchanged", () => {
+    renderTabs()
+    openConversationTab(1, 1, "Existing")
+    act(() => {
+      latestContext?.openNewConversationTab(1, "/workspace")
+    })
+    const draft = useTabStore
+      .getState()
+      .rawTabs.find((tab) => tab.conversationId == null)
+    expect(draft).toBeDefined()
+    const handler = subscribeMock.mock.calls.find(
+      ([event]) => event === "main-bot://changed"
+    )?.[1] as (settings: MainBotSettings) => void
+    expect(handler).toBeDefined()
+    act(() =>
+      handler({
+        agent_type: "inst_main_claude_api",
+        provider_id: "api",
+        model: "model-b",
+      })
+    )
+    expect(
+      useTabStore.getState().rawTabs.find((tab) => tab.id === draft?.id)
+        ?.agentType
+    ).toBe("inst_main_claude_api")
+    expect(
+      useTabStore.getState().rawTabs.find((tab) => tab.conversationId === 1)
+        ?.agentType
+    ).toBe("codex")
+    act(() => {
+      latestContext?.openNewConversationTab(2, "/workspace-two")
+    })
+    expect(
+      useTabStore.getState().rawTabs.find((tab) => tab.conversationId == null)
+        ?.agentType
+    ).toBe("inst_main_claude_api")
   })
 
   it("activates the neighboring tab when another tab update is already queued", () => {
@@ -642,6 +683,45 @@ describe("TabProvider tab state transitions", () => {
       useTabStore.getState().rawTabs.find((t) => t.id === chatDraftId)
         ?.agentTypeProvisional
     ).toBe(false)
+  })
+
+  it("uses the saved main agent when new chat reuses an older draft", () => {
+    renderTabs()
+    act(() => latestContext?.openChatModeTab({ forceAgent: "codex" }))
+    const draftId = latestContext?.activeTabId
+    applyMainBotSettings({
+      agent_type: "inst_main_claude_api",
+      provider_id: "api",
+      model: "chosen",
+    })
+    act(() => latestContext?.openChatModeTab())
+    expect(latestContext?.activeTabId).toBe(draftId)
+    expect(
+      latestContext?.tabs.find((tab) => tab.id === draftId)?.agentType
+    ).toBe("inst_main_claude_api")
+  })
+
+  it("applies the saved API main agent to restored drafts during startup correction", async () => {
+    renderTabs()
+    openConversationTab(1, 1, "Existing")
+    act(() => latestContext?.openChatModeTab({ forceAgent: "codex" }))
+    const draftId = latestContext?.activeTabId
+    applyMainBotSettings({
+      agent_type: "inst_main_claude_api",
+      provider_id: "api",
+      model: "chosen",
+    })
+    act(() => useTabStore.getState().correctDraftAgents())
+    await waitFor(() =>
+      expect(
+        useTabStore.getState().rawTabs.find((tab) => tab.id === draftId)
+          ?.agentType
+      ).toBe("inst_main_claude_api")
+    )
+    expect(
+      useTabStore.getState().rawTabs.find((tab) => tab.conversationId === 1)
+        ?.agentType
+    ).toBe("codex")
   })
 
   it("activates an opened tab when another tab update is already queued", () => {

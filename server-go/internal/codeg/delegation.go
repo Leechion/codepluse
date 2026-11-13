@@ -30,16 +30,19 @@ type Delegation struct {
 	NextPrompt                                                      string `json:"next_prompt,omitempty"`
 	Executing                                                       bool   `json:"-"`
 	Depth                                                           int
-	ParentToolUseID                                                 string        `json:"parent_tool_use_id"`
+	ParentToolUseID                                                 string `json:"parent_tool_use_id"`
 	// SplitID marks a child launched by a confirmed task-split card; Title is
 	// the card's label for it. Empty on a direct delegate_to_agent.
-	SplitID string `json:"split_id,omitempty"`
-	Title   string `json:"title,omitempty"`
+	SplitID string        `json:"split_id,omitempty"`
+	Title   string        `json:"title,omitempty"`
 	Updated chan struct{} `json:"-"`
 	Inbox   []Row         `json:"inbox,omitempty"`
 }
 
 func (s *Server) extraMCP(agent *hub.Agent, o acp.Options, runtimeID string) []map[string]any {
+	if d, ok := s.customDef(wireAgent(agent)); ok && !d.SupportsMCP {
+		return nil
+	}
 	s.mu.Lock()
 	var c *Connection
 	for _, candidate := range s.connections {
@@ -101,6 +104,7 @@ func (s *Server) companionRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, 200, result)
 }
+
 // delegateScope resolves the launch scope for one child delegation: the
 // working dir and permission inherited from the caller's parent connection,
 // re-checked against the parent's live native mode (a model can switch modes
@@ -212,7 +216,9 @@ func (s *Server) tool(ctx context.Context, caller *Caller, name string, a Row) (
 	case "ask_user_question":
 		return s.askUserQuestion(ctx, caller, a)
 	case "list_agents":
-		return Row{"agents": s.agents()}, nil
+		return Row{"agents": s.delegationAgents()}, nil
+	case "fetch_url":
+		return s.fetchURL(a)
 	case "propose_task_split":
 		return s.proposeTaskSplit(caller, a)
 	case "resume_delegation":
@@ -222,6 +228,11 @@ func (s *Server) tool(ctx context.Context, caller *Caller, name string, a Row) (
 			return nil, fmt.Errorf("委派深度达到 4 层上限")
 		}
 		agentType, task := text(a["agent_type"]), strings.TrimSpace(text(a["task"]))
+		resolved, profileErr := s.delegationProfile(agentType, text(a["model"]))
+		if profileErr != nil {
+			return nil, profileErr
+		}
+		agentType = resolved
 		if s.pick(agentType) == nil {
 			return nil, fmt.Errorf("执行端不可用：%s", agentType)
 		}

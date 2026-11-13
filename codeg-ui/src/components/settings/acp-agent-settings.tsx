@@ -40,10 +40,7 @@ import {
 } from "lucide-react"
 import { parse as parseTomlDocument } from "smol-toml"
 import { isDesktop, openUrl } from "@/lib/platform"
-import {
-  getActiveRemoteConnectionId,
-  getTransport,
-} from "@/lib/transport"
+import { getActiveRemoteConnectionId, getTransport } from "@/lib/transport"
 import { toast } from "sonner"
 import {
   customAgentId,
@@ -141,6 +138,7 @@ import type {
 } from "@/lib/types"
 import {
   HERMES_PROVIDERS,
+  instanceBaseAgent,
   parseClaudeProviderModel,
   normalizeModelIds,
   parseCodexModelConfig,
@@ -5063,11 +5061,19 @@ export function AcpAgentSettings({
   const [codexLoginError, setCodexLoginError] = useState<string | null>(null)
   const codexPollCancelledRef = useRef(false)
 
+  // This page manages the harnesses themselves. The collaboration profiles
+  // (the main bot and the named sub-agent copies) are provider/model combos
+  // layered ON TOP of a harness — they ride the same registry so conversations
+  // and delegation can address them, but they are curated under
+  // Settings → Collaboration, so listing them here as extra rows would offer a
+  // second, half-empty place to edit the same harness.
   const sortedAgents = useMemo(
     () =>
-      [...agents].sort(
-        (a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)
-      ),
+      agents
+        .filter((agent) => !agent.instance)
+        .sort(
+          (a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)
+        ),
     [agents]
   )
   const selectedAgent = useMemo(
@@ -5078,8 +5084,10 @@ export function AcpAgentSettings({
   )
   const agentTypesKey = useMemo(
     () =>
-      [...new Set(agents.map((agent) => agent.agent_type))].sort().join(","),
-    [agents]
+      [...new Set(sortedAgents.map((agent) => agent.agent_type))]
+        .sort()
+        .join(","),
+    [sortedAgents]
   )
   const requestedAgentType = useMemo(
     () => initialAgentType ?? searchParams.get("agent"),
@@ -5099,13 +5107,24 @@ export function AcpAgentSettings({
       setModelProviders(providers)
       // CC Switch 供应商列表同步刷新（失败静默：没有 CC Switch 时下拉里少一组）。
       getTransport()
-        .call<{ providers?: Array<{ id: string; name: string; url: string; model: string; hasKey: boolean; ccCurrent: boolean; source?: string; agent?: string }> }>(
-          "codepluse_providers_list"
-        )
+        .call<{
+          providers?: Array<{
+            id: string
+            name: string
+            url: string
+            model: string
+            hasKey: boolean
+            ccCurrent: boolean
+            source?: string
+            agent?: string
+          }>
+        }>("codepluse_providers_list")
         .then((d) => {
           setCcSwitchProviders(
             (d.providers ?? [])
-              .filter((p) => p.source === "ccswitch" && (p.hasKey || p.ccCurrent))
+              .filter(
+                (p) => p.source === "ccswitch" && (p.hasKey || p.ccCurrent)
+              )
               .map((p) => ({
                 id: p.id,
                 name: p.name,
@@ -5293,9 +5312,15 @@ export function AcpAgentSettings({
     if (handledSearchAgentRef.current === requestedAgentType) {
       return
     }
-    const matched = sortedAgents.find(
-      (agent) => agent.agent_type === requestedAgentType
-    )
+    const matched =
+      sortedAgents.find((agent) => agent.agent_type === requestedAgentType) ??
+      // A conversation can be running on a collaboration profile (the main bot
+      // or a named sub-agent copy). Its settings deep link ("打开该智能体的设
+      // 置") has no row here any more — the profile IS its base harness, plus a
+      // pinned provider/model, so open the harness it runs on.
+      sortedAgents.find(
+        (agent) => agent.agent_type === instanceBaseAgent(requestedAgentType)
+      )
     if (matched) {
       setSelectedAgentType(matched.agent_type)
     }
@@ -6250,12 +6275,20 @@ export function AcpAgentSettings({
   )
 
   const handleReorder = useCallback((next: AcpAgentInfo[]) => {
-    const reordered = next.map((agent, index) => ({
-      ...agent,
-      sort_order: index,
-    }))
-    setAgents(reordered)
-    pendingOrderRef.current = reordered.map((agent) => agent.agent_type)
+    // `next` is the visible harness list only. Re-index those rows and leave
+    // every other registry row (the collaboration profiles) exactly where it
+    // was — replacing the whole array with `next` would drop them from local
+    // state until the next reload, and the drafts/config errors keyed by agent
+    // type would outlive their rows.
+    const order = new Map(next.map((agent, index) => [agent.agent_type, index]))
+    setAgents((prev) =>
+      prev.map((agent) =>
+        order.has(agent.agent_type)
+          ? { ...agent, sort_order: order.get(agent.agent_type) as number }
+          : agent
+      )
+    )
+    pendingOrderRef.current = next.map((agent) => agent.agent_type)
   }, [])
 
   // One package operation at a time across ALL agents: while any
@@ -7093,9 +7126,11 @@ export function AcpAgentSettings({
   const applyModelProviderSelection = useCallback(
     (
       providerId: number | null,
-      provider:
-        | { api_url?: string; api_key?: string; model?: string | null }
-        | null
+      provider: {
+        api_url?: string
+        api_key?: string
+        model?: string | null
+      } | null
     ) => {
       if (!selectedAgent || !selectedDraft) return
       if (providerId != null) {
@@ -7323,9 +7358,7 @@ export function AcpAgentSettings({
             applyModelProviderSelection(null, {
               api_url: cfg.url ?? "",
               api_key: cfg.apiKey ?? "",
-              model: cfg.model
-                ? JSON.stringify({ main: cfg.model })
-                : null,
+              model: cfg.model ? JSON.stringify({ main: cfg.model }) : null,
             })
             updateSelectedDraft((current) => ({
               ...current,
@@ -7348,9 +7381,12 @@ export function AcpAgentSettings({
       const provider = providerId
         ? modelProviders.find((p) => p.id === providerId)
         : null
-      applyModelProviderSelection(providerId, provider)
+      applyModelProviderSelection(providerId, provider ?? null)
       // A numeric store pick (or a clear) replaces any CC Switch direct select.
-      updateSelectedDraft((current) => ({ ...current, ccSwitchProviderId: null }))
+      updateSelectedDraft((current) => ({
+        ...current,
+        ccSwitchProviderId: null,
+      }))
     },
     [
       selectedAgent,
@@ -9068,56 +9104,58 @@ export function AcpAgentSettings({
                     </div>
                   ) : null
                 ) : (
-                <div className="space-y-2">
-                  {selectedCurrent?.error && (
-                    <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400 flex items-start gap-2">
-                      <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                      <span className="break-all">{selectedCurrent.error}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-2xs text-muted-foreground flex items-center gap-1">
-                      <CheckCircle2 className="h-3 w-3" />
-                      {t("preflight.count", { count: selectedChecks.length })}
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      onClick={() => setDiagnosticsOpen(true)}
-                    >
-                      <Stethoscope className="h-3.5 w-3.5" />
-                      {t("actions.diagnose")}
-                    </Button>
-                  </div>
-                  {selectedChecks.length > 0 ? (
-                    selectedChecks.map((check) =>
-                      renderCheck(selectedAgent, check)
-                    )
-                  ) : (
-                    <div className="text-xs text-muted-foreground">
-                      {t("preflight.notRun")}
-                    </div>
-                  )}
-                  {installStream.status !== "idle" &&
-                    streamAgentType === selectedAgent.agent_type && (
-                      <div className="mt-2 rounded-md border bg-muted/50 text-muted-foreground p-3 max-h-[12.5rem] overflow-y-auto font-mono text-2xs leading-relaxed">
-                        {installStream.logs.map((line, i) => (
-                          <div
-                            key={i}
-                            className={
-                              line.startsWith("ERROR:")
-                                ? "text-destructive"
-                                : ""
-                            }
-                          >
-                            {line}
-                          </div>
-                        ))}
-                        <div ref={installLogEndRef} />
+                  <div className="space-y-2">
+                    {selectedCurrent?.error && (
+                      <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400 flex items-start gap-2">
+                        <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                        <span className="break-all">
+                          {selectedCurrent.error}
+                        </span>
                       </div>
                     )}
-                </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-2xs text-muted-foreground flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3" />
+                        {t("preflight.count", { count: selectedChecks.length })}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        onClick={() => setDiagnosticsOpen(true)}
+                      >
+                        <Stethoscope className="h-3.5 w-3.5" />
+                        {t("actions.diagnose")}
+                      </Button>
+                    </div>
+                    {selectedChecks.length > 0 ? (
+                      selectedChecks.map((check) =>
+                        renderCheck(selectedAgent, check)
+                      )
+                    ) : (
+                      <div className="text-xs text-muted-foreground">
+                        {t("preflight.notRun")}
+                      </div>
+                    )}
+                    {installStream.status !== "idle" &&
+                      streamAgentType === selectedAgent.agent_type && (
+                        <div className="mt-2 rounded-md border bg-muted/50 text-muted-foreground p-3 max-h-[12.5rem] overflow-y-auto font-mono text-2xs leading-relaxed">
+                          {installStream.logs.map((line, i) => (
+                            <div
+                              key={i}
+                              className={
+                                line.startsWith("ERROR:")
+                                  ? "text-destructive"
+                                  : ""
+                              }
+                            >
+                              {line}
+                            </div>
+                          ))}
+                          <div ref={installLogEndRef} />
+                        </div>
+                      )}
+                  </div>
                 )}
 
                 <div className="space-y-2">
@@ -12973,8 +13011,8 @@ base_url = "https://api.openai.com/v1"`}
                           <label className="text-2xs text-muted-foreground">
                             {t("selectModelProvider")}
                           </label>
-                          {(selectedModelProviders.length > 0 ||
-                            ccSwitchProviders.length > 0) ? (
+                          {selectedModelProviders.length > 0 ||
+                          ccSwitchProviders.length > 0 ? (
                             <Select
                               value={
                                 selectedDraft.modelProviderId != null

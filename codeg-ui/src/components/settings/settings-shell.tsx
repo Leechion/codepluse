@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react"
 import {
+  ArrowLeft,
   Bot,
   BookOpenText,
   Bubbles,
@@ -122,6 +123,11 @@ interface SettingsShellProps {
   activeHref?: string
   /** 浮层用法：给定时导航不再改 URL，而是回调给调用方。 */
   onNavigate?: (href: string) => void
+  /**
+   * 浮层用法：给定时在导航栏左上角渲染「← 回到工作区」，作为退出设置回到工作区
+   * 的唯一入口。独立设置窗口不传（它有自己的关闭窗口的方式）。
+   */
+  onClose?: () => void
 }
 
 /** Go runtime navigation: merged pages and unavailable services stay off the rail. */
@@ -149,6 +155,7 @@ export function SettingsShell({
   children,
   activeHref,
   onNavigate,
+  onClose,
 }: SettingsShellProps) {
   const t = useTranslations("SettingsShell")
   const navigation = useTranslations("SettingsNavigation")
@@ -205,6 +212,26 @@ export function SettingsShell({
 
   const navContent = (
     <div className="flex min-h-0 flex-1 flex-col">
+      {onClose && (
+        // 同窗口浮层的退出入口：放在导航栏左上角（设置界面内部），而不是浮层
+        // 自己额外顶一条工具栏。文案是 codepluse 本地新增的单窗口 affordance，
+        // 与 executor-providers-panel 一样先只给中文，未走 10 个语言包。
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="mb-1 w-full justify-start px-2 text-muted-foreground hover:text-foreground"
+          onClick={() => {
+            setNavOpen(false)
+            onClose()
+          }}
+        >
+          <span className="inline-flex items-center gap-1">
+            <ArrowLeft className="h-3.5 w-3.5" />
+            回到工作区
+          </span>
+        </Button>
+      )}
       <div className="px-2 pb-2 text-2xs font-medium text-muted-foreground">
         {t("preferences")}
       </div>
@@ -252,24 +279,33 @@ export function SettingsShell({
     >
       {/* Only settings documents opt into same-origin shared-element navigation. */}
       <style>{"@view-transition { navigation: auto; }"}</style>
-      <AppTitleBar
-        className="cp-settings-titlebar"
-        left={
-          isMobile ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => setNavOpen(true)}
-            >
-              <Menu className="h-4 w-4" />
-            </Button>
-          ) : undefined
-        }
-        center={
-          <div className="text-sm font-bold tracking-tight">{t("title")}</div>
-        }
-      />
+      {/*
+        浮层里不再顶一条「设置」标题栏：工作区窗口本来就有自己的 chrome，这条
+        栏只是重复的装饰。窄屏仍保留一条极窄的栏，因为抽屉触发器住在里面，但不
+        再显示「设置」文字。独立设置窗口（没有 onClose）一切照旧。
+      */}
+      {(!onClose || isMobile) && (
+        <AppTitleBar
+          className="cp-settings-titlebar"
+          left={
+            isMobile ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setNavOpen(true)}
+              >
+                <Menu className="h-4 w-4" />
+              </Button>
+            ) : undefined
+          }
+          center={
+            onClose ? undefined : (
+              <div className="text-sm font-bold tracking-tight">{t("title")}</div>
+            )
+          }
+        />
+      )}
 
       <div className="cp-settings-layout flex-1 min-h-0 flex">
         {/* Desktop sidebar */}

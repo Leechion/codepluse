@@ -151,7 +151,12 @@ export function DelegationSettingsSection() {
         if (cancelled) return
         setWithheldAgents(
           agents
-            .filter((a) => a.enabled && a.host_tools_agent_mode)
+            .filter(
+              (a) =>
+                a.enabled &&
+                a.host_tools_agent_mode &&
+                !a.host_tools_supports_delegation
+            )
             .map((a) => a.name)
         )
       })

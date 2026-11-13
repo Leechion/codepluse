@@ -14,6 +14,9 @@ vi.mock("@/lib/api", () => ({
   getDelegationSettings: vi.fn(),
   setDelegationSettings: vi.fn(),
   acpListAgents: vi.fn(),
+  listHarnessProviders: vi.fn(async () => ({ providers: [], active: {} })),
+  listHarnessInstances: vi.fn(async () => []),
+  getMainBotSettings: vi.fn(async () => ({ agent_type: "", model: "" })),
   // The assistants tab's store.
   assistantList: vi.fn(async () => []),
   assistantCreate: vi.fn(),
@@ -188,6 +191,18 @@ describe("DelegationSettingsSection", () => {
     expect(note).not.toHaveTextContent("Pi")
   })
 
+  it("keeps Go collaboration tools available alongside native file and command tools", async () => {
+    mockGetDelegationSettings.mockResolvedValue(settings({ enabled: true }))
+    mockAcpListAgents.mockResolvedValue([
+      { ...agent("Codex", true, true), host_tools_supports_delegation: true },
+    ])
+    renderWithIntl()
+    await loaded()
+    expect(
+      screen.queryByText(/will not get the delegation tools/)
+    ).not.toBeInTheDocument()
+  })
+
   it("says nothing when no agent hands its channels back", async () => {
     mockGetDelegationSettings.mockResolvedValue(settings({ enabled: true }))
     mockAcpListAgents.mockResolvedValue([agent("Grok", true, false)])
@@ -310,7 +325,7 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
     within(tab(name)).queryByRole("img", { name: "Unsaved changes" })
   const offNotice = /Multi-Agent Collaboration is off/
 
-  it("shows the save bar on the first two tabs only", async () => {
+  it("saves general settings as a group and model profiles individually", async () => {
     mockGetDelegationSettings.mockResolvedValue(settings({ enabled: true }))
     const user = userEvent.setup()
     renderWithIntl()
@@ -318,7 +333,12 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument()
 
     await user.click(tab(/^Agent defaults/))
-    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Save" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Add model configuration" })
+    ).toBeInTheDocument()
 
     // Every assistant change is written at once.
     await user.click(tab(/^Assistants/))
@@ -326,22 +346,21 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
   })
 
-  it("explains the disabled agent defaults while the switch is off, and leads to it", async () => {
+  it("allows preparing sub-agent configurations without enabling delegation", async () => {
     mockGetDelegationSettings.mockResolvedValue(settings({ enabled: false }))
     const user = userEvent.setup()
     renderWithIntl()
     await loaded()
 
     await user.click(tab(/^Agent defaults/))
-    const notice = /Turn it on to edit these defaults/
-    expect(screen.getByText(notice)).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Go to General" }))
-    expect(tab(/^General/)).toHaveAttribute("data-state", "active")
-
-    // Switched on — saved or not — the defaults can be edited.
-    await user.click(screen.getByLabelText("Enable delegation"))
-    await user.click(tab(/^Agent defaults/))
-    expect(screen.queryByText(notice)).toBeNull()
+    expect(
+      await screen.findByRole("heading", { name: "Sub-agent configurations" })
+    ).toBeInTheDocument()
+    await user.click(tab(/^General/))
+    expect(screen.getByLabelText("Enable delegation")).toHaveAttribute(
+      "data-state",
+      "unchecked"
+    )
   })
 
   it("marks a tab with unsaved changes, and the assistants tab points back to it", async () => {

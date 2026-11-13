@@ -87,6 +87,30 @@ export function isNotFoundError(error: unknown): boolean {
   return extractAppCommandError(error)?.code === "not_found"
 }
 
+/**
+ * 把后端 HTTP 错误体（`{code,message,detail,i18n_key,i18n_params}`）转成 Error。
+ *
+ * Go 后台失败时返回 JSON 对象，传输层原本直接 `throw` 这个纯对象；而 Tauri 侧后端
+ * 会把错误塌缩成字符串，所以 `err instanceof Error ? err.message : String(err)`
+ * 这种写法在 Tauri 下正常、在 Go 下却渲染成 `[object Object]`（非 vendor 树里就有
+ * 18 处）。统一成 Error 之后：旧写法天然拿到可读文案，`extractAppCommandError`
+ * 也仍能从对象上读到 code/detail，`isNotFoundError` 一类判定不受影响。
+ */
+export function toCommandError(body: unknown, status?: number): Error {
+  const parsed = parseErrorObject(body)
+  const text =
+    parsed?.message ??
+    normalizeString(typeof body === "string" ? body : undefined) ??
+    (status ? `HTTP ${status}` : "Request failed")
+  const error = Object.assign(new Error(text), {
+    code: parsed?.code ?? "task_execution_failed",
+  }) as Error & AppCommandError
+  if (parsed?.detail) error.detail = parsed.detail
+  if (parsed?.i18n_key) error.i18n_key = parsed.i18n_key
+  if (parsed?.i18n_params) error.i18n_params = parsed.i18n_params
+  return error
+}
+
 export function toErrorMessage(error: unknown): string {
   const appError = extractAppCommandError(error)
   if (appError) {

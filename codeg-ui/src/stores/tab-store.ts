@@ -14,7 +14,7 @@ import {
   saveOpenedTabs,
 } from "@/lib/api"
 import { resolveDefaultAgent } from "@/lib/resolve-default-agent"
-import { mainBotAgentFor } from "@/lib/main-bot"
+import { getCachedMainBot, mainBotAgentFor } from "@/lib/main-bot"
 import { formatConversationTitle } from "@/lib/conversation-title"
 import {
   firstLeafId,
@@ -1437,8 +1437,8 @@ function resolveAgentForFolder(
           ?.default_agent_type ?? null)
   return resolveDefaultAgent({
     folderDefault,
-    // The main bot (Settings → 主 bot) wins over inherit: every new
-    // conversation lands on it unless the folder pinned its own default.
+    // Every new conversation starts on the configured main agent. Folder
+    // defaults and inherited harnesses are fallbacks when it is unset.
     mainBot: mainBotAgentFor(runtime.sortedAvailableAgents),
     inherit,
     sortedTypes: runtime.sortedAvailableAgents,
@@ -2330,14 +2330,14 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
       recomputeTabs()
     } else if (existingTab.isChat && existingTab.folderId === 0) {
       // Already a chat-mode draft. Normally there is nothing to do but focus it
-      // — it keeps whatever agent it was on, because `inherit` is only ever a
-      // suggestion. A FORCED agent is not: the caller needs this draft to run on
-      // that agent (an "ask about this selection" continuing a chat
-      // conversation), so re-point it. No explicit disconnect: the connection
+      // — inheritance is only a suggestion. A saved main agent or a forced
+      // agent must retarget this draft just like a newly created one.
+      // No explicit disconnect: the connection
       // lifecycle is keyed on the agent and tears the old one down itself, the
       // same way the agent picker's `confirmDraftAgent` relies on.
       if (
-        options?.forceAgent != null &&
+        (options?.forceAgent != null ||
+          mainBotAgentFor(runtime.sortedAvailableAgents) != null) &&
         (existingTab.agentType !== targetAgent ||
           (existingTab.agentTypeProvisional ?? false) !== provisional)
       ) {
@@ -2922,8 +2922,13 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
   },
 
   correctDraftAgents: () => {
+    const mainBot = getCachedMainBot()
     const candidates = get().rawTabs.filter((tab) => {
       if (tab.conversationId != null) return false
+      // A restored device-local draft can predate the saved API main agent.
+      // Apply it after hydration even when the old harness is still available.
+      if (mainBot?.providerId && tab.agentType !== mainBot.agentType)
+        return true
       if (tab.agentTypeProvisional) return true
       if (!runtime.sortedAvailableAgents.includes(tab.agentType)) return true
       return false

@@ -28,7 +28,8 @@ import {
   type ConversationChange,
   type TabsChanged,
 } from "@/lib/types"
-import { loadMainBot } from "@/lib/main-bot"
+import { applyMainBotSettings, loadMainBot } from "@/lib/main-bot"
+import type { MainBotSettings } from "@/lib/api"
 
 export type { OpenedDraftTarget, TabItem }
 export { useTabStore, useTabActions } from "@/stores/tab-store"
@@ -132,6 +133,35 @@ export function TabProvider({ children }: TabProviderProps) {
   // the timeout covers a request that hangs without answering, so the gate can
   // only ever delay, never strand, the correction.
   const [mainBotSettled, setMainBotSettled] = useState(false)
+  useEffect(() => {
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    const apply = (bot: ReturnType<typeof applyMainBotSettings>) => {
+      if (disposed || !bot?.providerId) return
+      const store = useTabStore.getState()
+      for (const tab of store.rawTabs) {
+        if (tab.conversationId == null && tab.kind === "conversation")
+          store.confirmDraftAgent(tab.id, bot.agentType)
+      }
+    }
+    void subscribe<MainBotSettings>("main-bot://changed", (settings) =>
+      apply(applyMainBotSettings(settings))
+    ).then((off) => {
+      if (disposed) off()
+      else unlisten = off
+    })
+    const refresh = () => {
+      void loadMainBot(true).then(apply)
+    }
+    window.addEventListener("focus", refresh)
+    const reconnect = onTransportReconnect(refresh)
+    return () => {
+      disposed = true
+      unlisten?.()
+      window.removeEventListener("focus", refresh)
+      reconnect?.()
+    }
+  }, [])
   useEffect(() => {
     let cancelled = false
     const settle = () => {

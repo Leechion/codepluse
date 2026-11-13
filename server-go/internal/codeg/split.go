@@ -281,6 +281,31 @@ func resolveSplitTarget(wanted string, candidates []Row, parentAgentType string)
 	return "", nil, false
 }
 
+func resolveSplitModelTarget(wanted, model string, candidates []Row, parent string) (string, Row, bool) {
+	if model != "" {
+		matches := []Row{}
+		for _, row := range candidates {
+			if text(row["agent_type"]) == wanted {
+				break
+			}
+			if row["instance"] == true && text(row["provider_id"]) != "" && text(row["default_model"]) == model && (text(row["real_tool"]) == wanted || baseWire(text(row["real_tool"])) == wanted) {
+				matches = append(matches, row)
+			}
+		}
+		if len(matches) == 1 {
+			return text(matches[0]["agent_type"]), matches[0], true
+		}
+		if len(matches) > 1 {
+			return "", nil, false
+		}
+	}
+	wire, row, ok := resolveSplitTarget(wanted, candidates, parent)
+	if ok && text(row["provider_id"]) != "" && model != "" && model != text(row["default_model"]) {
+		return "", nil, false
+	}
+	return wire, row, ok
+}
+
 // claimSplitToolUse links a split card to the parent's propose_task_split tool
 // row so the transcript shows the card under the call that produced it. Callers
 // hold s.mu.
@@ -345,7 +370,7 @@ func (s *Server) proposeTaskSplit(caller *Caller, a Row) (any, error) {
 	}
 	// The card's dropdown is built from the live registry: an agent uninstalled
 	// between the outer check and here must not offer a target that fails.
-	candidates := s.agents()
+	candidates := s.delegationAgents()
 	parentAgentType := parent.AgentType
 	sp := &taskSplit{ID: id(), Parent: caller.ConnectionID, Root: caller.RootID, CreatedAt: timestamp()}
 	for i, raw := range rawTasks {
@@ -360,13 +385,13 @@ func (s *Server) proposeTaskSplit(caller *Caller, a Row) (any, error) {
 		if auto {
 			wanted = autoAssignSplitTarget(prompt, candidates, parentAgentType)
 		}
-		at, row, ok := resolveSplitTarget(wanted, candidates, parentAgentType)
+		model := strings.TrimSpace(text(item["model"]))
+		at, row, ok := resolveSplitModelTarget(wanted, model, candidates, parentAgentType)
 		if !ok {
 			s.mu.Unlock()
 			return nil, fmt.Errorf("没有可用的执行端，无法拆分任务")
 		}
 		wanted = at
-		model := strings.TrimSpace(text(item["model"]))
 		if model == "" {
 			// Default to the target instance's pinned model so the chip shows
 			// what will actually run, and a confirmed dispatch carries it
@@ -445,7 +470,7 @@ func (s *Server) respondTaskSplit(a Row) (any, error) {
 			s.mu.Unlock()
 			return nil, fmt.Errorf("tasks 需要 1–8 个子任务")
 		}
-		candidates := s.agents()
+		candidates := s.delegationAgents()
 		tasks := []Row{}
 		for i, rawTask := range raw {
 			item, _ := rawTask.(map[string]any)
@@ -462,13 +487,13 @@ func (s *Server) respondTaskSplit(a Row) (any, error) {
 			if title == "" {
 				title = shortenTitle(prompt, 60)
 			}
-			at, row, ok := resolveSplitTarget(text(item["agent_type"]), candidates, parent.AgentType)
+			model := strings.TrimSpace(text(item["model"]))
+			at, row, ok := resolveSplitModelTarget(text(item["agent_type"]), model, candidates, parent.AgentType)
 			if !ok {
 				s.mu.Unlock()
 				return nil, fmt.Errorf("没有可用的执行端")
 			}
 			agentType := at
-			model := strings.TrimSpace(text(item["model"]))
 			if model == "" {
 				model = text(row["default_model"])
 			}

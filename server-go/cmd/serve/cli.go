@@ -20,10 +20,10 @@ import (
 // flipping the global active selection never disturbs its driver.
 func providerVersion(agent *hub.Agent) string {
 	tool := agent.RealTool
-	if tool == "dsh" {
+	if tool == "dsh" && agent.ProviderID == "" {
 		return dshModelVersion()
 	}
-	if tool != "claude" {
+	if tool != "claude" && agent.ProviderID == "" {
 		return "default"
 	}
 	p, ok, err := resolveProvider(agent)
@@ -36,7 +36,9 @@ func providerVersion(agent *hub.Agent) string {
 	b, _ := json.Marshal(struct {
 		Provider providers.Provider
 		Env      map[string]string
-	}{p, p.Env})
+		Native   map[string]any
+	}{p, p.Env, p.Native})
+	b = append(b, []byte(agent.DefaultModel)...)
 	return fmt.Sprintf("%x", sha256.Sum256(b))
 }
 
@@ -46,10 +48,14 @@ func providerVersion(agent *hub.Agent) string {
 // follows. The bool mirrors providers.Active's "configured" meaning.
 func resolveProvider(agent *hub.Agent) (providers.Provider, bool, error) {
 	if agent.ProviderID != "" {
-		if p, err := providers.Find(ROOT, agent.ProviderID); err == nil {
-			return p, true, nil
+		p, err := providers.Find(ROOT, agent.ProviderID)
+		if err != nil {
+			return p, false, err
 		}
-		fmt.Fprintf(os.Stderr, "[hub] 实例 %s 钉住的供应商已失效，回退全局供应商\n", agent.Name)
+		if p.Agent != agent.RealTool || !providers.IsAPI(p) {
+			return p, false, fmt.Errorf("固定的 API 供应商无效，请重新配置")
+		}
+		return p, true, nil
 	}
 	return providers.Active(ROOT, agent.RealTool)
 }

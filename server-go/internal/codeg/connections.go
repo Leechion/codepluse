@@ -42,18 +42,18 @@ type Connection struct {
 	// PendingSplit is the task-split card waiting on the user (see split.go).
 	// Like Pending it is published through events and the snapshot, and cleared
 	// when the split resolves or the connection goes.
-	PendingSplit    Row
+	PendingSplit Row
 	// PendingQuestion is a blocking ask_user_question card waiting on the user
 	// (see question.go). Published through events and the snapshot, cleared when
 	// the question resolves or the turn/session goes.
 	PendingQuestion Row
 	Busy            bool
 	SeenPermissions map[string]string
-	Depth                    int
-	RootID                   string
-	Feedback                 []Row
-	ToolClaims               map[string]bool
-	Warm                     bool
+	Depth           int
+	RootID          string
+	Feedback        []Row
+	ToolClaims      map[string]bool
+	Warm            bool
 	// RunSeq retires a turn's deferred cleanup once a newer run owns the
 	// connection, so healing a leaked busy flag can never let the abandoned
 	// run clobber the new turn's Live/Busy/Status state.
@@ -97,6 +97,10 @@ func (s *Server) connect(a Row) (string, error) {
 	}
 	if agent.RealTool == "dsh" {
 		mode = ""
+		// Pinned DSH profiles select provider+model in their per-process patch.
+		if agent.ProviderID != "" {
+			model = ""
+		}
 	}
 	c := &Connection{ID: id(), Agent: agent, AgentType: wireAgent(agent), Status: "connecting", Options: acp.Options{SessionKey: key, Permission: permission, Workdir: cwd, Model: model, Mode: mode, Structured: false, Role: "manager"}, Events: []Row{}, Tools: []Row{}, SeenPermissions: map[string]string{}}
 	c.Depth = number(a["_depth"])
@@ -650,7 +654,7 @@ func (s *Server) runWithContent(c *Connection, prompt string, content []map[stri
 	opts := c.Options
 	// This is a native dialogue. The model chooses tools and sub-agents itself,
 	// rather than being required to output an externally planned task JSON.
-	prefix := "本工作台支持 codeg-mcp 协作工具。需要其他执行端时使用 delegate_to_agent 自主分工，并用 get_delegation_status 收集真实结果后汇报；用户点名执行端时遵从其选择。任务可拆成多个各自独立的子任务时，优先用 propose_task_split 一次性提案（界面卡片让用户确认或改选执行端），确认后系统自动派发，你无需也不得重复派发；无需用户挑选的单独立项仍用 delegate_to_agent。子任务必须自包含并继承当前权限边界。\n\n" + s.delegationContext(c) + s.splitContext(c.ID)
+	prefix := "本工作台支持 codeg-mcp 协作工具。需要其他执行端时使用 delegate_to_agent 自主分工，并用 get_delegation_status 收集真实结果后汇报；用户点名执行端时遵从其选择。任务可拆成多个各自独立的子任务时，优先用 propose_task_split 一次性提案（界面卡片让用户确认或改选执行端），确认后系统自动派发，你无需也不得重复派发；无需用户挑选的单独立项仍用 delegate_to_agent。子任务必须自包含并继承当前权限边界。抓取网页时使用 codeg-mcp 的 fetch_url 工具：harness 自带的网页工具（如 Claude Code 的 WebFetch）会先向域名安全校验服务查询，该服务不可达时会直接失败并提示 “Unable to verify if domain … is safe to fetch”，此时用 fetch_url 抓取同一地址。\n\n" + s.delegationContext(c) + s.splitContext(c.ID)
 	wireBlocks := content
 	if len(wireBlocks) == 0 {
 		wireBlocks = []map[string]any{{"type": "text", "text": prefix + prompt}}

@@ -8,6 +8,7 @@ import {
   type Mock,
 } from "vitest"
 import { WebTransport } from "./web-transport"
+import { toErrorMessage } from "../app-error"
 
 // Minimal controllable WebSocket stand-in: records instances and lets the test
 // drive the lifecycle (open / __ready__ frame / drop) deterministically. The
@@ -503,5 +504,55 @@ describe("WebTransport opened without any credential", () => {
     t.destroy()
     await vi.advanceTimersByTimeAsync(60_000)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// 后端命令失败时返回的是 `{code,message}` JSON 体。传输层必须把它包成 Error：
+// 调用方遍布 `err instanceof Error ? err.message : String(err)` 这种写法（非
+// vendor 树里就有 18 处），抛裸对象会让用户看到 [object Object] 而不是原因。
+describe("WebTransport command rejections", () => {
+  const resp400 = (body: unknown) => ({
+    status: 400,
+    ok: false,
+    headers: new Headers(),
+    json: async () => body,
+  })
+
+  it("rejects with an Error carrying the backend message and code", async () => {
+    const { t } = connectReady()
+    fetchMock.mockResolvedValue(
+      resp400({
+        code: "task_execution_failed",
+        message: "ACP 注册表中未找到 does-not-exist",
+      })
+    )
+
+    const err = await t
+      .call("acp_fetch_registry_catalog", {})
+      .then(
+        () => null,
+        (e: unknown) => e
+      )
+
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toBe("ACP 注册表中未找到 does-not-exist")
+    expect((err as Error & { code?: string }).code).toBe("task_execution_failed")
+    expect(toErrorMessage(err)).toBe("ACP 注册表中未找到 does-not-exist")
+    expect(String(err)).not.toBe("[object Object]")
+    t.destroy()
+  })
+
+  it("keeps a non-object error body readable too", async () => {
+    const { t } = connectReady()
+    fetchMock.mockResolvedValue(resp400("plain text failure"))
+
+    const err = await t.call("some_command", {}).then(
+      () => null,
+      (e: unknown) => e
+    )
+
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toBe("plain text failure")
+    t.destroy()
   })
 })

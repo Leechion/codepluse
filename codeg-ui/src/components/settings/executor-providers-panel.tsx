@@ -101,8 +101,9 @@ export function ExecutorProvidersPanel({
       <div>
         <h3 className="text-xs font-medium">执行端供应商</h3>
         <p className="mt-1 text-2xs text-muted-foreground">
-          为执行端保存多个 Anthropic Messages 兼容供应商，并选择新会话使用的配置。
-          已有会话继续使用原配置。API 密钥保存在本机项目数据目录。
+          为执行端保存多个 Anthropic Messages
+          兼容供应商，并选择新会话使用的配置。 已有会话继续使用原配置。API
+          密钥保存在本机项目数据目录。
         </p>
       </div>
 
@@ -137,7 +138,7 @@ export function ExecutorProvidersPanel({
           >
             <div className="min-w-0">
               <div className="text-xs font-medium">
-                {p.name} {p.source === "ccswitch" && "· CC Switch"}{" "}
+                {p.name} {p.source && `· ${p.source}`}{" "}
                 {p.ccCurrent && "· CC 当前"}
                 {data.active[agent] === p.id && " · 使用中"}
               </div>
@@ -146,28 +147,35 @@ export function ExecutorProvidersPanel({
               </div>
             </div>
             <div className="flex shrink-0 gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={
-                  busy ||
-                  data.active[agent] === p.id ||
-                  (p.source === "ccswitch" && !p.hasKey && !p.ccCurrent)
-                }
-                onClick={() =>
-                  void run(
-                    () =>
-                      getTransport().call("codepluse_provider_activate", {
-                        agent,
-                        id: p.id,
-                      }),
-                    "已切换，新会话生效。"
-                  )
-                }
-              >
-                使用
-              </Button>
-              {p.source !== "ccswitch" && (
+              {(!p.source || p.source === "ccswitch") && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={
+                    busy ||
+                    data.active[agent] === p.id ||
+                    (p.source === "ccswitch" && !p.hasKey && !p.ccCurrent)
+                  }
+                  onClick={() =>
+                    void run(
+                      () =>
+                        getTransport().call("codepluse_provider_activate", {
+                          agent,
+                          id: p.id,
+                        }),
+                      "已切换，新会话生效。"
+                    )
+                  }
+                >
+                  使用
+                </Button>
+              )}
+              {p.source && p.source !== "ccswitch" && (
+                <span className="text-2xs text-muted-foreground">
+                  原配置管理
+                </span>
+              )}
+              {!p.source && (
                 <>
                   <Button
                     size="sm"
@@ -211,7 +219,9 @@ export function ExecutorProvidersPanel({
         >
           刷新 CC Switch
         </Button>
-        <span>{data.ccError || "CC Switch 配置在其应用中编辑；更改后可刷新。"}</span>
+        <span>
+          {data.ccError || "CC Switch 配置在其应用中编辑；更改后可刷新。"}
+        </span>
       </div>
 
       <form

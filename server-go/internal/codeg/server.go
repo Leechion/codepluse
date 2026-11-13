@@ -25,6 +25,8 @@ type Server struct {
 	// which owns the binary-resolution logic. When nil, every enabled agent is
 	// treated as available (the prior behavior).
 	AgentAvailable func(a *hub.Agent) bool
+	RegistryURL    string
+	RegistryClient *http.Client
 	store          *Store
 	mu             sync.Mutex
 	connections    map[string]*Connection
@@ -70,6 +72,7 @@ func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (s
 	if err := s.loadDelegations(); err != nil {
 		return nil, err
 	}
+	s.loadCustomAgents()
 	s.loadInstances()
 	s.loadSplits()
 	s.applyEnabledOverrides()
@@ -163,6 +166,27 @@ func (s *Server) agents() []Row {
 		}
 		row := Row{"agent_type": wireAgent(a), "name": a.Name, "description": "ACP · " + a.Name, "available": available, "enabled": a.Enabled, "registry_id": wireAgent(a), "registry_version": nil, "skills_capable": true, "supports_custom_version": false, "distribution_type": "system", "is_acp_adapter": a.RealTool != "", "custom_source": nil, "installed_version": s.installedVersion(a), "sort_order": len(out), "env": Row{}, "config_json": nil, "config_file_path": nil, "codex_auth_json": nil, "codex_config_toml": nil, "codex_model_catalog": nil, "system_instructions_content": nil, "system_instructions_file_path": nil, "model_provider_id": nil, "host_tools_agent_mode": true, "instance": a.Wire != "", "real_tool": a.RealTool, "provider_id": a.ProviderID, "default_model": a.DefaultModel}
 		mergeAgentOverlay(overlay, wireAgent(a), row)
+		// Go injects the collaboration MCP alongside each harness's native
+		// file/command tools; native tools do not withhold delegation here.
+		row["host_tools_supports_delegation"] = true
+		if d, ok := s.customDef(wireAgent(a)); ok {
+			available, _ = s.CustomAgentAvailable(a)
+			row["available"] = available
+			row["instance"] = false
+			row["description"] = d.Description
+			row["registry_id"] = d.RegistryID
+			row["registry_version"] = nil
+			if d.Source == "registry" && d.Version != "" {
+				row["registry_version"] = d.Version
+			}
+			row["custom_source"] = d.Source
+			row["icon_url"] = d.IconURL
+			row["distribution_type"] = d.Kind
+			row["is_acp_adapter"] = false
+			row["skills_capable"] = d.SkillsSharedStore || d.SkillsDir != nil
+			row["host_tools_supports_delegation"] = d.SupportsMCP
+			row["installed_version"] = s.customInstalledVersion(d)
+		}
 		out = append(out, row)
 	}
 	return out
@@ -262,6 +286,14 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, file)
 }
 func (s *Server) command(command string, a Row) (any, error) {
+	if command == "acp_current_platform" || command == "acp_fetch_registry_catalog" || command == "acp_add_registry_agent" || command == "acp_list_custom_agents" || command == "acp_save_custom_agent" || command == "acp_delete_custom_agent" {
+		return s.customAgentCommand(command, a)
+	}
+	if command == "acp_download_agent_binary" || command == "acp_prepare_npx_agent" || command == "acp_uninstall_agent" || command == "acp_clear_binary_cache" {
+		if d, ok := s.customDef(text(a["agentType"])); ok {
+			return s.customInstallCommand(command, a, d)
+		}
+	}
 	if command == "delete_conversation" {
 		return nil, s.deleteConversation(number(a["conversationId"]))
 	}
@@ -318,6 +350,10 @@ func (s *Server) command(command string, a Row) (any, error) {
 	switch command {
 	case "codepluse_providers_list":
 		return providers.Public(s.Root)
+	case "codepluse_provider_models":
+		return s.harnessProviderModels(text(a["providerId"]))
+	case "update_main_bot_settings":
+		return s.saveMainBotSettings(a)
 	case "codepluse_provider_save":
 		return nil, providers.Save(s.Root, providers.Provider{ID: text(a["id"]), Name: text(a["name"]), Agent: text(a["agent"]), URL: text(a["url"]), Model: text(a["model"]), Key: text(a["key"])})
 	case "codepluse_provider_activate":

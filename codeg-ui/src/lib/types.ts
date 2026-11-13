@@ -61,15 +61,20 @@ export function customAgentId(agentType: AgentType): string | null {
 /**
  * The built-in an instance wire is a copy of, using the same tool→wire table
  * the Go backend's `wireAgent()` maps for built-ins. `inst_claude2` →
- * `claude_code`, `inst_codex11` → `codex`. Only claude/codex instances can be
- * created (the backend rejects pinning a provider for anything else), so the
- * other arms are future-proofing; an unrecognized suffix yields `null` and the
- * caller treats the instance as an unbranded agent.
+ * `claude_code`, `inst_codex11` → `codex`. Dedicated main profiles retain the
+ * same brand and capabilities as their underlying harness.
  */
 export function instanceBaseAgent(
   agentType: AgentType
 ): BuiltinAgentType | null {
   if (!isInstanceAgentType(agentType)) return null
+  const main = /^inst_main_(claude|codex|dsh)_/.exec(agentType)
+  if (main)
+    return main[1] === "claude"
+      ? "claude_code"
+      : main[1] === "dsh"
+        ? "deepseek"
+        : "codex"
   const tool = agentType
     .slice(INSTANCE_AGENT_PREFIX.length)
     .replace(/[0-9]+$/, "")
@@ -4023,6 +4028,7 @@ export interface AcpAgentInfo {
    * env; reading `env` here would miss the second.
    */
   host_tools_agent_mode: boolean
+  host_tools_supports_delegation?: boolean
   config_json: string | null
   config_file_path: string | null
   system_instructions_file_path?: string | null

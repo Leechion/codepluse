@@ -43,9 +43,9 @@ export interface ResolveDefaultAgentResult {
  * spinning up a renderer.
  *
  * Priority (highest first):
- *   1. `folderDefault` — the user explicitly pinned a default on this folder.
- *   2. `mainBot` — the harness picked in Settings ("主 bot"): new
+ *   1. `mainBot` — the harness picked in Settings ("主 bot"): new
  *      conversations land on it without switching harness by hand.
+ *   2. `folderDefault` — used when no main agent has been configured.
  *   3. `inherit` — "new conversation" launched from inside an existing
  *      conversation should produce another conversation with the same agent.
  *   4. `sortedTypes[0]` — first entry of the user-managed drag-sorted list.
@@ -61,11 +61,11 @@ export function resolveDefaultAgent(
   input: ResolveDefaultAgentInput
 ): ResolveDefaultAgentResult {
   const { folderDefault, mainBot, inherit, sortedTypes, fresh } = input
-  if (folderDefault) {
-    return { agentType: folderDefault, provisional: false }
-  }
   if (mainBot) {
     return { agentType: mainBot, provisional: false }
+  }
+  if (folderDefault) {
+    return { agentType: folderDefault, provisional: false }
   }
   if (inherit) {
     return { agentType: inherit, provisional: false }

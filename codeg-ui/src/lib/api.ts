@@ -568,6 +568,9 @@ export interface HarnessProviderInfo {
   hasKey: boolean
   source?: string
   ccCurrent?: boolean
+  models?: { id: string; name?: string }[]
+  protocol?: string
+  api?: boolean
 }
 
 export async function listHarnessInstances(): Promise<HarnessInstance[]> {
@@ -576,7 +579,7 @@ export async function listHarnessInstances(): Promise<HarnessInstance[]> {
 
 export async function createHarnessInstance(params: {
   name: string
-  realTool: "claude" | "codex"
+  realTool: "claude" | "codex" | "dsh"
   providerId?: string
   defaultModel?: string
 }): Promise<HarnessInstance> {
@@ -599,18 +602,20 @@ export async function deleteHarnessInstance(agentType: string): Promise<void> {
 export async function listHarnessProviders(): Promise<{
   providers: HarnessProviderInfo[]
   active: Record<string, string>
+  ccError?: string
 }> {
   return getTransport().call("codepluse_providers_list")
 }
 
 // ── Main bot ───────────────────────────────────────────────────────────────
-// The harness a new conversation starts on when nothing else decides it
-// (folder default and per-chat picks still win). `model` is the optional
-// session default on top of the harness's own pin.
+// The provider-bound main agent takes priority for new conversations. The
+// backend returns its isolated wire plus the underlying base harness.
 
 export interface MainBotSettings {
   agent_type: string
   model: string
+  provider_id?: string
+  base_agent_type?: string
 }
 
 export async function getMainBotSettings(): Promise<MainBotSettings> {
@@ -619,8 +624,15 @@ export async function getMainBotSettings(): Promise<MainBotSettings> {
 
 export async function setMainBotSettings(
   settings: MainBotSettings
-): Promise<void> {
-  await getTransport().call("update_main_bot_settings", { settings })
+): Promise<MainBotSettings> {
+  return getTransport().call("update_main_bot_settings", { settings })
+}
+
+export async function listHarnessProviderModels(providerId: string): Promise<{
+  models: { id: string; displayName?: string }[]
+  warning?: string
+}> {
+  return getTransport().call("codepluse_provider_models", { providerId })
 }
 
 export async function acpGetAgentStatus(
@@ -3788,7 +3800,9 @@ export async function openSettingsWindow(
   }
   const query = params.toString()
   const path = `/settings/${section ?? "general"}${query ? `?${query}` : ""}`
-  return openAppWindow(`settings-${section ?? "general"}`, async () => ({ path }))
+  return openAppWindow(`settings-${section ?? "general"}`, async () => ({
+    path,
+  }))
 }
 
 export interface OpenImportSessionsWindowOptions {

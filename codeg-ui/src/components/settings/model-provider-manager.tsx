@@ -75,7 +75,8 @@ export function ModelProviderManager() {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        为智能体保存模型供应商凭据（名称 / API 地址 / 密钥 / 模型）。密钥保存在本机项目数据目录，列表中只显示掩码。
+        为智能体保存模型供应商凭据（名称 / API 地址 / 密钥 /
+        模型）。密钥保存在本机项目数据目录，列表中只显示掩码。
       </p>
 
       <div className="flex items-center gap-2">
@@ -112,7 +113,8 @@ export function ModelProviderManager() {
                   {p.name} · {AGENT_LABELS[p.agent_type] ?? p.agent_type}
                 </div>
                 <div className="break-all text-xs text-muted-foreground">
-                  {p.api_url} · {p.model || "默认模型"} · 密钥 {p.api_key_masked}
+                  {p.api_url} · {p.model || "默认模型"} · 密钥{" "}
+                  {p.api_key_masked}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -164,9 +166,10 @@ export function ModelProviderManager() {
             setBusy(false)
           }
           if (form.id != null) {
+            const providerId = form.id
             void run(async () => {
               await updateModelProvider({
-                id: form.id,
+                id: providerId,
                 name: form.name,
                 apiUrl: form.apiUrl,
                 apiKey: form.apiKey || null,

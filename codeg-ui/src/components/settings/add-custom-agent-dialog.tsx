@@ -50,6 +50,7 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
+import { toErrorMessage } from "@/lib/app-error"
 
 interface AddCustomAgentDialogProps {
   open: boolean
@@ -271,7 +272,7 @@ export function AddCustomAgentDialog({
     try {
       setCatalog(await acpFetchRegistryCatalog())
     } catch (err) {
-      setCatalogError(err instanceof Error ? err.message : String(err))
+      setCatalogError(toErrorMessage(err))
     } finally {
       setLoadingCatalog(false)
     }
@@ -316,7 +317,7 @@ export function AddCustomAgentDialog({
       })
       .catch((err) => {
         if (cancelled) return
-        toast.error(err instanceof Error ? err.message : String(err))
+        toast.error(toErrorMessage(err))
         onOpenChange(false)
       })
     return () => {
@@ -404,7 +405,7 @@ export function AddCustomAgentDialog({
         onAdded()
         onOpenChange(false)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err))
+        toast.error(toErrorMessage(err))
       } finally {
         setAddingId(null)
       }
@@ -464,7 +465,7 @@ export function AddCustomAgentDialog({
       onAdded()
       onOpenChange(false)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(toErrorMessage(err))
     } finally {
       setSavingManual(false)
     }

@@ -9,6 +9,7 @@ import type {
 } from "./types"
 import { buildCodegWebSocketProtocols } from "./ws-auth"
 import { parseJsonOrThrow } from "../json-parse-error"
+import { toCommandError } from "../app-error"
 import {
   codegAuthHeaders,
   getCodegToken,
@@ -208,11 +209,14 @@ export class WebTransport implements Transport {
       throw new Error("Unauthorized")
     }
     if (!res.ok) {
-      const error = await res.json().catch(() => ({
+      const body = await res.json().catch(() => ({
         code: "network_error",
         message: `HTTP ${res.status}`,
       }))
-      throw error
+      // 抛 Error 而不是裸 JSON 对象：调用方大量使用
+      // `err instanceof Error ? err.message : String(err)`，裸对象会显示成
+      // [object Object]（详见 app-error.ts 的 toCommandError）。
+      throw toCommandError(body, res.status)
     }
     // Read the body as text and parse it here rather than calling
     // `res.json()`. Identical on the happy path, but a truncated or malformed

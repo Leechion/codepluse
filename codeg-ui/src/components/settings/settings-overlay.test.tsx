@@ -15,15 +15,24 @@ vi.mock("./settings-shell", () => ({
     children,
     activeHref,
     onNavigate,
+    onClose,
   }: {
     children: React.ReactNode
     activeHref?: string
     onNavigate?: (href: string) => void
+    onClose?: () => void
   }) => (
     <div data-testid="shell" data-href={activeHref}>
       <button type="button" onClick={() => onNavigate?.("/settings/logs")}>
         go-logs
       </button>
+      {/* The back-to-workspace affordance lives inside the shell, so the
+        overlay must hand it a close handler. */}
+      {onClose && (
+        <button type="button" onClick={onClose}>
+          back-to-workspace
+        </button>
+      )}
       {children}
     </div>
   ),
@@ -134,6 +143,22 @@ describe("SettingsOverlayProvider", () => {
     await openSettingsWindow("general").catch(() => undefined)
     await waitFor(() => expect(openSpy).toHaveBeenCalled())
     openSpy.mockRestore()
+  })
+
+  it("closes through the back affordance inside the shell", async () => {
+    mount()
+    await openSettingsWindow("general")
+    await screen.findByRole("dialog")
+
+    // No outer toolbar of its own: the only exit is the shell's back button.
+    expect(
+      screen.queryByRole("button", { name: "关闭设置" })
+    ).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "back-to-workspace" }))
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    )
   })
 
   it("forwards the deep-linked agent type to the agents section", async () => {

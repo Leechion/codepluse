@@ -1,5 +1,8 @@
 /* Frosted workspace skin. Geometry remains owned by the original components:
    no sizing, padding, positioning, flex/grid or font-metric overrides here. */
+/* Radix portals live under body, outside the workspace/settings shell. Keep
+   their theme tokens on that shared ancestor as well. */
+body:has(:is(.zw-shell, [data-settings-shell])),
 .zw-shell,
 .dark .zw-shell,
 [data-settings-shell],
@@ -9,6 +12,7 @@
   --cp-glass-chrome: rgb(255 255 255 / 32%);
   --cp-glass-card: rgb(255 255 255 / 54%);
   --cp-glass-input: rgb(255 255 255 / 79%);
+  --cp-glass-floating: rgb(241 248 255 / 66%);
   --cp-glass-edge: rgb(255 255 255 / 68%);
   --cp-glass-shadow: 0 6px 24px rgb(30 56 89 / 6%);
   --cp-glass-blur: 24px;
@@ -26,6 +30,8 @@
   --foreground: #202d40;
   --card: var(--cp-glass-card);
   --card-foreground: var(--foreground);
+  --popover: var(--cp-glass-floating);
+  --popover-foreground: var(--foreground);
   --muted: rgb(255 255 255 / 35%);
   --muted-foreground: #566479;
   --accent: rgb(255 255 255 / 58%);
@@ -58,12 +64,16 @@
   --zw-fg-subtlest: var(--muted-foreground);
   --zw-brand: var(--primary);
   --zw-shadow: var(--cp-glass-shadow);
+}
 
+.zw-shell,
+[data-settings-shell] {
   color: var(--foreground);
   background: var(--cp-glass-backdrop);
 }
 
 /* Keep the user's theme selection; dark glass has its own readable surfaces. */
+.dark body:has(:is(.zw-shell, [data-settings-shell])),
 .dark .zw-shell,
 .dark [data-settings-shell] {
   --cp-glass-tint: 18 33 52;
@@ -71,6 +81,7 @@
   --cp-glass-chrome: rgb(21 39 61 / 56%);
   --cp-glass-card: rgb(28 46 68 / 66%);
   --cp-glass-input: rgb(28 45 65 / 87%);
+  --cp-glass-floating: rgb(24 42 63 / 74%);
   --cp-glass-edge: rgb(193 219 248 / 16%);
   --cp-glass-shadow: 0 6px 24px rgb(0 8 22 / 14%);
   --cp-glass-backdrop:
@@ -155,25 +166,83 @@
   backdrop-filter: blur(20px);
 }
 
+/* Conversation rows only provide positioning for the tree. Painting sidebar
+   glass again on each wrapper leaves square white blocks behind nested rows;
+   the inner pill already owns hover/selection, so keep the wrapper clear. */
+.zw-shell [data-conv-key] {
+  background-color: transparent;
+}
+
+.zw-shell [data-conv-key] .bg-sidebar-border {
+  background-color: color-mix(
+    in srgb,
+    var(--muted-foreground) 20%,
+    transparent
+  );
+}
+
+/* Shared floating surfaces, including body portals and nested submenus.
+   Geometry, placement and open/close motion stay with the original controls. */
+body:has(:is(.zw-shell, [data-settings-shell]))
+  :is(
+    [data-slot="dropdown-menu-content"],
+    [data-slot="dropdown-menu-sub-content"],
+    [data-slot="select-content"],
+    [data-slot="popover-content"],
+    [data-slot="hover-card-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="context-menu-sub-content"],
+    [data-slot="dialog-content"],
+    [data-slot="alert-dialog-content"]
+  ) {
+  color: var(--popover-foreground);
+  background-color: var(--cp-glass-floating);
+  border-color: var(--cp-glass-edge);
+  box-shadow:
+    0 12px 32px rgb(14 38 69 / 12%),
+    inset 0 0 0 1px var(--cp-glass-edge),
+    inset 0 1px 0 rgb(255 255 255 / 20%);
+  -webkit-backdrop-filter: blur(28px) saturate(125%);
+  backdrop-filter: blur(28px) saturate(125%);
+}
+
+/* Nested command lists and select scroll caps must not paint a second opaque
+   layer over the surface that already provides their frost. */
+body:has(:is(.zw-shell, [data-settings-shell]))
+  :is([data-slot="popover-content"], [data-slot="dialog-content"])
+  [data-slot="command"],
+body:has(:is(.zw-shell, [data-settings-shell]))
+  :is(
+    [data-slot="select-scroll-up-button"],
+    [data-slot="select-scroll-down-button"]
+  ) {
+  background-color: transparent;
+}
+
 /* A solid, high-contrast fallback when translucency is unavailable/unwanted. */
 @supports not (backdrop-filter: blur(1px)) {
+  body:has(:is(.zw-shell, [data-settings-shell])),
   .zw-shell,
   [data-settings-shell] {
     --cp-glass-panel: #e8f0f7;
     --cp-glass-chrome: #edf3f8;
     --cp-glass-card: #f5f8fc;
     --cp-glass-input: #fafcfe;
+    --cp-glass-floating: #edf4fb;
   }
+  .dark body:has(:is(.zw-shell, [data-settings-shell])),
   .dark .zw-shell,
   .dark [data-settings-shell] {
     --cp-glass-panel: #192c40;
     --cp-glass-chrome: #20354b;
     --cp-glass-card: #263b51;
     --cp-glass-input: #253a50;
+    --cp-glass-floating: #20354b;
   }
 }
 
 @media (prefers-reduced-transparency: reduce) {
+  body:has(:is(.zw-shell, [data-settings-shell])),
   .zw-shell,
   [data-settings-shell] {
     --cp-glass-panel: #e8f0f7;
@@ -181,12 +250,31 @@
     --cp-glass-card: #f5f8fc;
     --cp-glass-input: #fafcfe;
     --cp-glass-blur: 0px;
+    --cp-glass-floating: #edf4fb;
   }
+  .dark body:has(:is(.zw-shell, [data-settings-shell])),
   .dark .zw-shell,
   .dark [data-settings-shell] {
     --cp-glass-panel: #192c40;
     --cp-glass-chrome: #20354b;
     --cp-glass-card: #263b51;
     --cp-glass-input: #253a50;
+    --cp-glass-floating: #20354b;
+  }
+
+  body:has(:is(.zw-shell, [data-settings-shell]))
+    :is(
+      [data-slot="dropdown-menu-content"],
+      [data-slot="dropdown-menu-sub-content"],
+      [data-slot="select-content"],
+      [data-slot="popover-content"],
+      [data-slot="hover-card-content"],
+      [data-slot="context-menu-content"],
+      [data-slot="context-menu-sub-content"],
+      [data-slot="dialog-content"],
+      [data-slot="alert-dialog-content"]
+    ) {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 }

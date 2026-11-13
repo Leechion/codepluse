@@ -216,6 +216,11 @@ func (s *server) loadCustomAcp() {
 
 // launchFn builds the ACP adapter launch for one agent.
 func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch, error) {
+	if s.codeg != nil {
+		if launch, ok, err := s.codeg.CustomAgentLaunch(agent); ok {
+			return launch, err
+		}
+	}
 	s.mu.Lock()
 	custom := s.customAcp[agent.ID]
 	s.mu.Unlock()
@@ -276,7 +281,7 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 			return nil, fmt.Errorf("读取 API 供应商失败: %w", err)
 		}
 		if configured {
-			if provider.Source == "ccswitch" {
+			if provider.Env != nil {
 				filtered := env[:0]
 				for _, item := range env {
 					if !strings.HasPrefix(strings.ToUpper(item), "ANTHROPIC_") && !strings.HasPrefix(strings.ToUpper(item), "CLAUDE_CODE_SUBAGENT_MODEL=") {
@@ -291,8 +296,21 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 					env = append(env, "ANTHROPIC_MODEL="+provider.Model)
 				}
 			} else {
+				for _, key := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"} {
+					env = dropEnvKey(env, key)
+				}
 				env = append(env, "ANTHROPIC_BASE_URL="+provider.URL, "ANTHROPIC_AUTH_TOKEN="+provider.Key, "ANTHROPIC_API_KEY="+provider.Key, "ANTHROPIC_MODEL="+provider.Model)
 			}
+			if agent.DefaultModel != "" {
+				env = append(dropEnvKey(env, "ANTHROPIC_MODEL"), "ANTHROPIC_MODEL="+agent.DefaultModel)
+			}
+		}
+	}
+	if tool == "codex" && agent.ProviderID != "" {
+		var err error
+		env, err = applyCodexProvider(agent, env)
+		if err != nil {
+			return nil, err
 		}
 	}
 	if tool == "dsh" {
@@ -300,7 +318,13 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 			return nil, fmt.Errorf("DSH 不提供只读会话模式，请使用其原生工作区策略")
 		}
 		args = append(args, "--profile", "acp")
-		patch, err := dshDesktopPatch()
+		var patch string
+		var err error
+		if agent.ProviderID != "" {
+			patch, env, err = dshProviderPatch(agent, env)
+		} else {
+			patch, err = dshDesktopPatch()
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -325,6 +349,11 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 // adapter entry is the reliable evidence that the harness is installed. A
 // custom ACP instance is available when its pinned launch command still exists.
 func (s *server) agentAvailable(a *hub.Agent) bool {
+	if s.codeg != nil {
+		if available, ok := s.codeg.CustomAgentAvailable(a); ok {
+			return available
+		}
+	}
 	s.mu.Lock()
 	custom := s.customAcp[a.ID]
 	s.mu.Unlock()

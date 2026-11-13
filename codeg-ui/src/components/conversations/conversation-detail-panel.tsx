@@ -69,7 +69,6 @@ import { FeedbackDialog } from "@/components/chat/feedback-dialog"
 import { AgentDiagnosticsDialog } from "@/components/settings/agent-diagnostics-dialog"
 import { useFeedbackEnabled } from "@/hooks/use-feedback-enabled"
 import { useSessionFeedback } from "@/hooks/use-session-feedback"
-import { AgentSelector } from "@/components/chat/agent-selector"
 import { ChatInput } from "@/components/chat/chat-input"
 import { WelcomeHero, WelcomeTip } from "@/components/chat/welcome-hero"
 import { QuickActions } from "@/components/chat/quick-actions"
@@ -317,8 +316,6 @@ const ConversationTabView = memo(function ConversationTabView({
     pinTab,
     openNewConversationTab,
     closeTab,
-    confirmDraftAgent,
-    setDraftAgentFromFallback,
   } = useTabActions()
   const {
     appendOptimisticTurn,
@@ -372,8 +369,6 @@ const ConversationTabView = memo(function ConversationTabView({
     getSavedModeId(agentType)
   )
   const [sendSignal, setSendSignal] = useState(0)
-  const [agentsLoaded, setAgentsLoaded] = useState(false)
-  const [usableAgentCount, setUsableAgentCount] = useState(0)
   const [composerDiagnosticsOpen, setComposerDiagnosticsOpen] = useState(false)
   const [agentConnectError, setAgentConnectError] = useState<string | null>(
     null
@@ -614,7 +609,10 @@ const ConversationTabView = memo(function ConversationTabView({
   // connect. Rather than firing a doomed (and racy) auto-connect whose only
   // outcome is a transient "not installed" toast, we skip the connect and
   // surface a persistent install prompt instead (see composerBlockedMessage).
-  const { agents: acpAgents } = useAcpAgents()
+  const { agents: acpAgents, fresh: agentsLoaded } = useAcpAgents()
+  const usableAgentCount = acpAgents.filter(
+    (agent) => agent.enabled && agent.available
+  ).length
   const selectedAgentNotInstalled = useMemo(() => {
     const info = acpAgents.find((a) => a.agent_type === selectedAgent)
     return (
@@ -1527,49 +1525,6 @@ const ConversationTabView = memo(function ConversationTabView({
     })
   }, [selectedAgent])
 
-  // Manual agent switch only updates local draft state. The single source of
-  // truth for (dis)connecting is `useConnectionLifecycle`'s auto-connect
-  // effect: when `selectedAgent` changes, the hook re-fires `connect()`,
-  // which internally disconnects the old agent's connection at the same
-  // contextKey before creating the new one (acp-connections-context.tsx).
-  // Doing the disconnect+reconnect here too would race the lifecycle path:
-  // a late-returning disconnect would dispatch CONNECTION_REMOVED by
-  // contextKey and wipe the new connection's frontend state, leaving a
-  // backend orphan.
-  const handleAgentSelect = useCallback(
-    (nextAgentType: AgentType) => {
-      if (nextAgentType === selectedAgentRef.current) return
-      if (dbConvIdRef.current) return
-
-      setDraftAgentType(nextAgentType)
-      setModeId(getSavedModeId(nextAgentType))
-      setAgentConnectError(null)
-      // Real user click — clear the provisional flag so TabProvider's
-      // correction effect leaves this tab alone.
-      confirmDraftAgent(tabId, nextAgentType)
-    },
-    [confirmDraftAgent, tabId]
-  )
-
-  // AgentSelector auto-fallback: the requested default agent was missing
-  // or unavailable, so it picked a substitute on its own. Sync local UI
-  // state (so the connection points at the right agent immediately) but
-  // mark the tab as still provisional — TabProvider's correction effect
-  // will re-resolve against the folder's saved default once all three
-  // hydration gates are open, and overwrite this substitute if needed.
-  const handleAgentFallback = useCallback(
-    (nextAgentType: AgentType) => {
-      if (nextAgentType === selectedAgentRef.current) return
-      if (dbConvIdRef.current) return
-
-      setDraftAgentType(nextAgentType)
-      setModeId(getSavedModeId(nextAgentType))
-      setAgentConnectError(null)
-      setDraftAgentFromFallback(tabId, nextAgentType)
-    },
-    [setDraftAgentFromFallback, tabId]
-  )
-
   const handleModeChange = useCallback(
     (newModeId: string) => {
       setModeId(newModeId)
@@ -2432,28 +2387,6 @@ const ConversationTabView = memo(function ConversationTabView({
                 onSelect={handleQuickAction}
                 agentType={selectedAgent}
               />
-              <div className="flex justify-center">
-                <AgentSelector
-                  // The selector spans the row it is given (it has to measure
-                  // how much room it has), so the centring lives inside it now
-                  // — the `justify-center` above only centres a full-width box.
-                  align="center"
-                  defaultAgentType={selectedAgent}
-                  onSelect={handleAgentSelect}
-                  onFallback={handleAgentFallback}
-                  onAgentsLoaded={(agents) => {
-                    setAgentsLoaded(true)
-                    setUsableAgentCount(
-                      agents.filter((agent) => agent.enabled && agent.available)
-                        .length
-                    )
-                  }}
-                  onOpenAgentsSettings={handleOpenAgentsSettings}
-                  // Drafts remain switchable while connecting; saved
-                  // conversations retain the agent they were created with.
-                  disabled={dbConversationId != null}
-                />
-              </div>
               {composerBlockedMessage ? (
                 <div className="flex w-full items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                   <button
@@ -2519,21 +2452,6 @@ const ConversationTabView = memo(function ConversationTabView({
       ) : showDraftHeader ? (
         <div className="flex h-full min-h-0 flex-col">
           <div className="px-4 pt-3 pb-2">
-            <AgentSelector
-              defaultAgentType={selectedAgent}
-              onSelect={handleAgentSelect}
-              onFallback={handleAgentFallback}
-              onAgentsLoaded={(agents) => {
-                setAgentsLoaded(true)
-                setUsableAgentCount(
-                  agents.filter((agent) => agent.enabled && agent.available)
-                    .length
-                )
-              }}
-              onOpenAgentsSettings={handleOpenAgentsSettings}
-              // Same draft/saved rule as the welcome-mode picker above.
-              disabled={dbConversationId != null}
-            />
             {composerBlockedMessage ? (
               <div className="mt-2 flex w-full items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                 <button

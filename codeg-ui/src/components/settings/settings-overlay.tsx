@@ -17,8 +17,6 @@ import {
   type ComponentType,
   type ReactNode,
 } from "react"
-import { X } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { SettingsShell } from "./settings-shell"
 import {
   registerSettingsOverlayHandler,
@@ -126,30 +124,22 @@ export function SettingsOverlayProvider({
           aria-modal="true"
           aria-label="设置"
           data-settings-overlay=""
-          className="fixed inset-0 z-50 flex flex-col bg-background"
+          className="fixed inset-0 z-50 bg-background"
         >
-          <div className="flex items-center justify-end gap-2 border-b px-3 py-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={close}
-              aria-label="关闭设置"
-            >
-              <X className="h-3.5 w-3.5" />
-              关闭
-            </Button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <SettingsShell
-              activeHref={`/settings/${state.section}`}
-              onNavigate={navigate}
-            >
-              {/* 分区页里需要深链到某个 agent 时（会话详情「在设置中打开此
-                agent」）由 props 传入；独立设置窗口仍走 URL 查询参数。 */}
-              <SectionWithAgentType Section={Section} agentType={state.agentType} />
-            </SettingsShell>
-          </div>
+          {/* 退出入口在 SettingsShell 的导航栏左上角（「← 回到工作区」），
+            浮层自己不再顶一条工具栏。 */}
+          <SettingsShell
+            activeHref={`/settings/${state.section}`}
+            onNavigate={navigate}
+            onClose={close}
+          >
+            {/* 分区页里需要深链到某个 agent 时（会话详情「在设置中打开此
+              agent」）由 props 传入；独立设置窗口仍走 URL 查询参数。 */}
+            <SectionWithAgentType
+              Section={Section}
+              agentType={state.agentType}
+            />
+          </SettingsShell>
         </div>
       )}
     </>

@@ -41,7 +41,8 @@ type Store struct {
 	// written back to the vendor files (~/.claude, real ~/.codex) so saving a
 	// config never mutates the user's global CLI setup; the launch path merges
 	// this overlay on top of the ambient environment instead.
-	Agents map[string]Row `json:"agents"`
+	Agents       map[string]Row            `json:"agents"`
+	CustomAgents map[string]customAgentDef `json:"customAgents,omitempty"`
 }
 
 func timestamp() string { return time.Now().UTC().Format(time.RFC3339Nano) }

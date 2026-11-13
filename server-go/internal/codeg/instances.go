@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"harnesshub/internal/hub"
-	"harnesshub/internal/providers"
 )
 
 // Harness instances are named copies of a built-in tool (Claude 1号/2号…)
@@ -46,12 +45,12 @@ func (s *Server) loadInstances() {
 		return
 	}
 	for _, spec := range saved {
-		if s.pick(spec.RealTool) == nil {
+		if s.pick(baseWire(spec.RealTool)) == nil {
 			continue
 		}
 		// A hub rebuilt over an existing registry (server restart in tests,
 		// or a double New) must not duplicate entries.
-		if s.Hub.Agent("agt_inst_" + spec.ID) != nil {
+		if s.Hub.Agent("agt_inst_"+spec.ID) != nil {
 			continue
 		}
 		if a := s.instanceAgent(spec); a != nil {
@@ -92,10 +91,11 @@ func (s *Server) saveInstancesLocked() error {
 // wire is persisted with the spec (not re-derived), so a reload reproduces
 // the exact registry the stored conversations address.
 func (s *Server) instanceAgent(spec instanceSpec) *hub.Agent {
-	if spec.RealTool != "claude" && spec.RealTool != "codex" {
+	if spec.RealTool != "claude" && spec.RealTool != "codex" && spec.RealTool != "dsh" {
 		return nil
 	}
-	base := s.pick(spec.RealTool)
+	// pick resolves registry IDs or public wire names, not internal tool names.
+	base := s.pick(baseWire(spec.RealTool))
 	if base == nil {
 		return nil
 	}
@@ -123,7 +123,7 @@ func (s *Server) instanceCommand(command string, a Row) (any, error) {
 	case "codepluse_instance_list":
 		out := []Row{}
 		for _, row := range s.agents() {
-			if instance, _ := row["instance"].(bool); instance {
+			if instance, _ := row["instance"].(bool); instance && !strings.HasPrefix(text(row["agent_type"]), "inst_main_") {
 				out = append(out, row)
 			}
 		}
@@ -137,19 +137,19 @@ func (s *Server) instanceCommand(command string, a Row) (any, error) {
 		if tool == "claude_code" {
 			tool = "claude"
 		}
-		if tool != "claude" && tool != "codex" {
-			return nil, fmt.Errorf("实例只能基于 Claude Code 或 Codex")
+		if tool == "deepseek" {
+			tool = "dsh"
 		}
-		if s.pick(tool) == nil {
+		if tool != "claude" && tool != "codex" && tool != "dsh" {
+			return nil, fmt.Errorf("请选择支持 API 供应商的 Harness：Claude Code、Codex 或 DSH")
+		}
+		if s.pick(baseWire(tool)) == nil {
 			return nil, fmt.Errorf("本机未安装 %s，无法创建实例", tool)
 		}
 		providerID := strings.TrimSpace(text(a["providerId"]))
 		defaultModel := strings.TrimSpace(text(a["defaultModel"]))
 		if providerID != "" {
-			if tool != "claude" {
-				return nil, fmt.Errorf("只有 Claude Code 支持钉住供应商，Codex 请使用默认模型")
-			}
-			if _, err := providers.Find(s.Root, providerID); err != nil {
+			if _, err := s.validateProfileProvider(tool, providerID); err != nil {
 				return nil, fmt.Errorf("钉住供应商失败: %w", err)
 			}
 		}
@@ -171,6 +171,7 @@ func (s *Server) instanceCommand(command string, a Row) (any, error) {
 			return nil, err
 		}
 		s.emit("agent://changed", Row{"kind": "upsert", "agent": agent.Wire})
+		s.emit("app://acp-agents-updated", Row{})
 		return s.instanceView(agent), nil
 	case "codepluse_instance_update":
 		agentID := s.resolveInstanceID(a)
@@ -179,14 +180,16 @@ func (s *Server) instanceCommand(command string, a Row) (any, error) {
 		defaultModel, hasModel := a["defaultModel"].(string)
 		name := strings.TrimSpace(text(a["name"]))
 		if providerID != "" {
-			if _, err := providers.Find(s.Root, providerID); err != nil {
+			existing := s.Hub.Agent(agentID)
+			if existing == nil {
+				return nil, fmt.Errorf("实例不存在")
+			}
+			if _, err := s.validateProfileProvider(existing.RealTool, providerID); err != nil {
 				return nil, fmt.Errorf("钉住供应商失败: %w", err)
 			}
 		}
 		if existing := s.Hub.Agent(agentID); existing == nil || !strings.HasPrefix(existing.Wire, "inst_") {
 			return nil, fmt.Errorf("实例不存在")
-		} else if providerID != "" && existing.RealTool != "claude" {
-			return nil, fmt.Errorf("只有 Claude Code 支持钉住供应商，Codex 请使用默认模型")
 		}
 		var updated *hub.Agent
 		s.mu.Lock()
@@ -221,6 +224,7 @@ func (s *Server) instanceCommand(command string, a Row) (any, error) {
 		// where a claim still carries the previous provider.
 		s.retireAgentConnections(agentID)
 		s.emit("agent://changed", Row{"kind": "upsert", "agent": updated.Wire})
+		s.emit("app://acp-agents-updated", Row{})
 		return view, nil
 	case "codepluse_instance_delete":
 		agentID := s.resolveInstanceID(a)
@@ -239,6 +243,7 @@ func (s *Server) instanceCommand(command string, a Row) (any, error) {
 		}
 		s.retireAgentConnections(agentID)
 		s.emit("agent://changed", Row{"kind": "remove", "agent": wire})
+		s.emit("app://acp-agents-updated", Row{})
 		return nil, nil
 	}
 	return nil, fmt.Errorf("未知命令: %s", command)

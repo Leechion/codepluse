@@ -23,7 +23,21 @@ type Provider struct {
 	Source    string            `json:"source,omitempty"`
 	CCCurrent bool              `json:"ccCurrent,omitempty"`
 	Env       map[string]string `json:"-"`
+	Models    []Model           `json:"models,omitempty"`
+	Protocol  string            `json:"protocol,omitempty"`
+	Native    map[string]any    `json:"-"`
+	API       bool              `json:"api"`
 }
+type Model struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+}
+
+func IsAPI(p Provider) bool {
+	u, err := url.Parse(p.URL)
+	return err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") && u.User == nil && u.RawQuery == "" && u.Fragment == "" && p.Key != "" && !strings.HasPrefix(p.Key, "sk-ant-oat")
+}
+
 type Data struct {
 	Providers []Provider        `json:"providers"`
 	Active    map[string]string `json:"active"`
@@ -64,15 +78,33 @@ func Public(root string) (Data, error) {
 	mu.Lock()
 	defer mu.Unlock()
 	d, e := read(root)
-	for i := range d.Providers {
-		d.Providers[i].HasKey = d.Providers[i].Key != ""
-		d.Providers[i].Key = ""
-	}
 	cc, ccErr := CCSwitch()
 	if ccErr != nil {
 		d.CCError = "无法读取 CC Switch 数据库: " + ccErr.Error()
 	} else {
 		d.Providers = append(d.Providers, cc...)
+	}
+	stored, storedErr := ModelProviders(root)
+	if storedErr != nil {
+		d.CCError += " 无法读取已保存的模型供应商"
+	} else {
+		d.Providers = append(d.Providers, stored...)
+	}
+	native, nativeErr := Native()
+	if nativeErr != nil {
+		d.CCError += " " + nativeErr.Error()
+	}
+	d.Providers = append(d.Providers, native...)
+	for i := range d.Providers {
+		p := &d.Providers[i]
+		p.API = IsAPI(*p)
+		if u, err := url.Parse(p.URL); err == nil && (u.User != nil || u.RawQuery != "" || u.Fragment != "") {
+			p.URL = ""
+		}
+		p.HasKey = p.HasKey || p.Key != ""
+		p.Key = ""
+		p.Env = nil
+		p.Native = nil
 	}
 	return d, e
 }
@@ -83,7 +115,7 @@ func Save(root string, p Provider) error {
 	p.URL = strings.TrimRight(strings.TrimSpace(p.URL), "/")
 	p.Model = strings.TrimSpace(p.Model)
 	u, e := url.Parse(p.URL)
-	if p.Name == "" || p.Model == "" || e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (p.Agent != "claude" && p.Agent != "dsh") {
+	if p.Name == "" || p.Model == "" || e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (p.Agent != "claude" && p.Agent != "dsh" && p.Agent != "codex") {
 		return fmt.Errorf("请填写名称、模型和有效的 HTTP(S) 地址，并选择执行端")
 	}
 	d, e := read(root)
@@ -171,6 +203,7 @@ func Delete(root, id string) error {
 	}
 	return fmt.Errorf("供应商不存在")
 }
+
 // Find resolves one provider by id, including ccswitch: entries. An unknown
 // or keyless ccswitch provider is an error so a pinned instance never silently
 // falls back to another vendor's credentials.
@@ -181,6 +214,30 @@ func Find(root, id string) (Provider, error) {
 	if e != nil {
 		return Provider{}, e
 	}
+	if strings.HasPrefix(id, "native:") {
+		list, err := Native()
+		for _, p := range list {
+			if p.ID == id {
+				return p, nil
+			}
+		}
+		if err != nil {
+			return Provider{}, err
+		}
+		return Provider{}, fmt.Errorf("原生供应商已不存在，请重新读取配置")
+	}
+	if strings.HasPrefix(id, "store:") {
+		list, err := ModelProviders(root)
+		if err != nil {
+			return Provider{}, err
+		}
+		for _, p := range list {
+			if p.ID == id {
+				return p, nil
+			}
+		}
+		return Provider{}, fmt.Errorf("已保存的模型供应商不存在")
+	}
 	if strings.HasPrefix(id, "ccswitch:") {
 		cc, err := CCSwitch()
 		if err != nil {
@@ -188,7 +245,7 @@ func Find(root, id string) (Provider, error) {
 		}
 		for _, p := range cc {
 			if p.ID == id {
-				if !p.HasKey && !p.CCCurrent {
+				if !p.HasKey {
 					return Provider{}, fmt.Errorf("该 CC Switch 供应商没有 API 密钥，请先在 CC Switch 中切换到它")
 				}
 				return p, nil
