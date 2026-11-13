@@ -17,6 +17,7 @@ import (
 
 	"harnesshub/internal/acp"
 	"harnesshub/internal/hub"
+	"harnesshub/internal/providers"
 )
 
 type customLaunch struct {
@@ -132,6 +133,7 @@ func runCustomInstaller(command string, args []string, env []string, dir string)
 	}
 	return nil
 }
+
 // customNotInstalled 复刻原版 AcpError::SdkNotInstalled 的渲染方式。
 //
 // 前端 acp-connections-context.tsx:7733 用 `message.includes("is not installed")`
@@ -271,7 +273,7 @@ func (s *Server) prepareCustom(d customAgentDef) (customLaunch, error) {
 	return launch, nil
 }
 func (s *Server) CustomAgentAvailable(agent *hub.Agent) (bool, bool) {
-	d, ok := s.customDef(wireAgent(agent))
+	d, ok := s.customDefForAgent(agent)
 	if !ok {
 		return false, false
 	}
@@ -294,6 +296,9 @@ func (s *Server) CustomAgentAvailable(agent *hub.Agent) (bool, bool) {
 }
 func (s *Server) CustomAgentLaunch(agent *hub.Agent) (*acp.Launch, bool, error) {
 	wire := wireAgent(agent)
+	if agent.BaseAgentType != "" {
+		wire = agent.BaseAgentType
+	}
 	d, ok := s.customDef(wire)
 	if !ok {
 		// 判定"注册丢失"只看 hub 记录自己的 Wire：registerCustomAgent 一定显式写
@@ -326,6 +331,9 @@ func (s *Server) CustomAgentLaunch(agent *hub.Agent) (*acp.Launch, bool, error) 
 	processEnv := customEnv(os.Environ(), env)
 	overlay, _, _ := s.LaunchOverlay(agent)
 	processEnv = customEnv(processEnv, overlay)
+	if agent.AuthMode == "subscription" {
+		processEnv = providers.ClearAPIEnvironment(processEnv)
+	}
 	return &acp.Launch{Command: launch.Command, Args: append(append([]string{}, launch.Args...), args...), Env: processEnv}, true, nil
 }
 

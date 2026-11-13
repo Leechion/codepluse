@@ -40,7 +40,7 @@ type Delegation struct {
 }
 
 func (s *Server) extraMCP(agent *hub.Agent, o acp.Options, runtimeID string) []map[string]any {
-	if d, ok := s.customDef(wireAgent(agent)); ok && !d.SupportsMCP {
+	if d, ok := s.customDefForAgent(agent); ok && !d.SupportsMCP {
 		return nil
 	}
 	s.mu.Lock()

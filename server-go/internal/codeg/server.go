@@ -73,6 +73,7 @@ func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (s
 		return nil, err
 	}
 	s.loadCustomAgents()
+	s.loadHarnessConnections()
 	s.loadInstances()
 	s.loadSplits()
 	s.applyEnabledOverrides()
@@ -169,10 +170,12 @@ func (s *Server) agents() []Row {
 		// Go injects the collaboration MCP alongside each harness's native
 		// file/command tools; native tools do not withhold delegation here.
 		row["host_tools_supports_delegation"] = true
-		if d, ok := s.customDef(wireAgent(a)); ok {
+		row["auth_mode"] = a.AuthMode
+		row["base_agent_type"] = a.BaseAgentType
+		if d, ok := s.customDefForAgent(a); ok {
 			available, _ = s.CustomAgentAvailable(a)
 			row["available"] = available
-			row["instance"] = false
+			row["instance"] = strings.HasPrefix(a.Wire, "inst_")
 			row["description"] = d.Description
 			row["registry_id"] = d.RegistryID
 			row["registry_version"] = nil
@@ -348,6 +351,10 @@ func (s *Server) command(command string, a Row) (any, error) {
 		return s.instanceCommand(command, a)
 	}
 	switch command {
+	case "codepluse_connection_catalog":
+		return s.connectionCatalog()
+	case "codepluse_connection_save":
+		return s.saveHarnessConnection(a)
 	case "codepluse_providers_list":
 		return providers.Public(s.Root)
 	case "codepluse_provider_models":
@@ -355,7 +362,7 @@ func (s *Server) command(command string, a Row) (any, error) {
 	case "update_main_bot_settings":
 		return s.saveMainBotSettings(a)
 	case "codepluse_provider_save":
-		return nil, providers.Save(s.Root, providers.Provider{ID: text(a["id"]), Name: text(a["name"]), Agent: text(a["agent"]), URL: text(a["url"]), Model: text(a["model"]), Key: text(a["key"])})
+		return s.saveProviderConfiguration(a)
 	case "codepluse_provider_activate":
 		return nil, providers.Activate(s.Root, text(a["agent"]), text(a["id"]))
 	case "codepluse_provider_delete":
@@ -411,7 +418,10 @@ func (s *Server) command(command string, a Row) (any, error) {
 		return s.tokenUsageStatus()
 	case "token_usage_sync":
 		return s.tokenUsageSync(a)
-	case "experts_list", "science_list", "experts_read_content", "science_read_content", "experts_list_all_install_statuses", "science_list_all_install_statuses", "officecli_skill_list_all_install_statuses", "acp_list_agent_runtime_skills", "acp_list_agent_skills":
+	case "experts_list", "science_list", "experts_read_content", "science_read_content", "experts_list_all_install_statuses", "science_list_all_install_statuses", "officecli_skill_list_all_install_statuses", "acp_list_agent_runtime_skills", "acp_list_agent_skills",
+		"experts_get_install_status", "science_get_install_status",
+		"experts_link_to_agent", "experts_unlink_from_agent", "experts_apply_links",
+		"science_link_to_agent", "science_unlink_from_agent", "science_apply_links":
 		return s.skills(command, a)
 	case "pick_directory":
 		return s.pickDirectory()

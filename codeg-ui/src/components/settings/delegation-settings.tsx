@@ -5,7 +5,7 @@
  * tabs:
  *
  *   * "General" — feature kill switch + chain depth limit. Persisted as
- *     `delegation.enabled` / `delegation.depth_limit` on the Rust side.
+ *     `delegation.enabled` / `delegation.depth_limit` in the Go settings store.
  *   * "Sub-agent config" (子智能体配置) — the main agent's default harness +
  *     model and the named harness instances (执行端实例), each pinned to its own
  *     provider/model. This hosts the relocated `HarnessInstanceSection`; the
@@ -19,9 +19,8 @@
  * configure here.
  *
  * Mounted under `/settings/collaboration` above the in-conversation tools,
- * because delegation is a global feature — not per-agent — and doesn't belong
- * inside the 7,800-line `acp-agent-settings.tsx` that powers
- * `/settings/agents`.
+ * because delegation is a global feature. `/settings/agents` manages native
+ * account connections and API suppliers separately.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"

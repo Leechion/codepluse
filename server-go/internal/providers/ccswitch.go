@@ -12,7 +12,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// CCSwitch reads the live database without modifying CC Switch or copying its keys.
+// CCSwitch reads the live database without exposing keys to the frontend.
 func CCSwitch() ([]Provider, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -26,36 +26,40 @@ func readCCSwitch(path string) ([]Provider, error) {
 	} else if err != nil {
 		return nil, err
 	}
+	db, err := sql.Open("sqlite", sqliteURL(path, "ro"))
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	return readCCSwitchRows(db)
+}
+func sqliteURL(path, mode string) string {
 	filePath := filepath.ToSlash(path)
 	if !strings.HasPrefix(filePath, "/") {
 		filePath = "/" + filePath
 	}
 	u := url.URL{Scheme: "file", Path: filePath}
 	q := u.Query()
-	q.Set("mode", "ro")
+	q.Set("mode", mode)
 	u.RawQuery = q.Encode()
-	db, err := sql.Open("sqlite", u.String())
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
-	rows, err := db.Query(`SELECT id,name,settings_config,is_current,app_type FROM providers WHERE app_type IN ('claude','codex') ORDER BY COALESCE(sort_index, 2147483647), name`)
+	return u.String()
+}
+func readCCSwitchRows(db *sql.DB) ([]Provider, error) {
+	rows, err := db.Query(`SELECT id,name,settings_config,is_current FROM providers WHERE app_type = 'claude' ORDER BY COALESCE(sort_index, 2147483647), name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []Provider{}
 	for rows.Next() {
-		var id, name, raw, app string
+		var id, name, raw string
 		var current bool
-		if err = rows.Scan(&id, &name, &raw, &current, &app); err != nil {
+		if err = rows.Scan(&id, &name, &raw, &current); err != nil {
 			return nil, err
 		}
 		var cfg struct {
 			Env          map[string]any `json:"env"`
 			Model        string         `json:"model"`
-			Config       string         `json:"config"`
-			Auth         map[string]any `json:"auth"`
 			ModelCatalog struct {
 				Models []struct {
 					Model       string `json:"model"`
@@ -65,17 +69,6 @@ func readCCSwitch(path string) ([]Provider, error) {
 		}
 		if err = json.Unmarshal([]byte(raw), &cfg); err != nil {
 			return nil, fmt.Errorf("CC Switch 供应商配置无效: %w", err)
-		}
-		if app == "codex" {
-			if p, ok := CodexProvider("ccswitch:codex:"+id, name, "ccswitch", cfg.Config, cfg.Auth, current); ok {
-				for _, m := range cfg.ModelCatalog.Models {
-					if m.Model != "" {
-						p.Models = append(p.Models, Model{ID: m.Model, Name: m.DisplayName})
-					}
-				}
-				out = append(out, p)
-			}
-			continue
 		}
 		env := map[string]string{}
 		for k, v := range cfg.Env {
@@ -93,7 +86,16 @@ func readCCSwitch(path string) ([]Provider, error) {
 		if key == "" {
 			key = env["ANTHROPIC_API_KEY"]
 		}
-		out = append(out, Provider{ID: "ccswitch:" + id, Name: name, Agent: "claude", URL: env["ANTHROPIC_BASE_URL"], Model: model, Key: key, HasKey: key != "", Source: "ccswitch", CCCurrent: current, Env: env, Protocol: "anthropic", Models: claudeModels(env, model)})
+		models := claudeModels(env, model)
+		if len(cfg.ModelCatalog.Models) > 0 {
+			models = []Model{}
+			for _, m := range cfg.ModelCatalog.Models {
+				if m.Model != "" {
+					models = append(models, Model{ID: m.Model, Name: m.DisplayName})
+				}
+			}
+		}
+		out = append(out, Provider{ID: "ccswitch:" + id, Name: name, Agent: "claude", URL: env["ANTHROPIC_BASE_URL"], Model: model, Key: key, HasKey: key != "", Source: "ccswitch", CCCurrent: current, Env: env, Protocol: "anthropic", Models: models})
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err

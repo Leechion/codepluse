@@ -29,6 +29,11 @@ func TestCCSwitchReadAndFollowCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Other harnesses must read their own native configuration, even when
+	// CC Switch also has entries for them.
+	if _, err = db.Exec(`INSERT INTO providers VALUES (?,?,?,?,?,?)`, "codex-id", "codex", "CC Codex", `{"auth":{"OPENAI_API_KEY":"cc-key"},"config":"model='cc-model'"}`, true, 2); err != nil {
+		t.Fatal(err)
+	}
 	public, err := Public(t.TempDir())
 	if err != nil || public.CCError != "" {
 		t.Fatalf("read failed: %v %s", err, public.CCError)

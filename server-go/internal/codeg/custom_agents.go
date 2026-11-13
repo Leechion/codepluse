@@ -123,6 +123,14 @@ func (s *Server) customDef(wire string) (customAgentDef, bool) {
 	d, ok := s.store.CustomAgents[strings.TrimPrefix(wire, "custom:")]
 	return clone(d), ok
 }
+
+func (s *Server) customDefForAgent(agent *hub.Agent) (customAgentDef, bool) {
+	wire := wireAgent(agent)
+	if agent.BaseAgentType != "" {
+		wire = agent.BaseAgentType
+	}
+	return s.customDef(wire)
+}
 func (s *Server) validateCustomDef(d customAgentDef) error {
 	if !customIDPattern.MatchString(d.RegistryID) || s.builtinRegistryID(d.RegistryID) {
 		return fmt.Errorf("自定义智能体 ID 无效或与内置执行端冲突")

@@ -568,9 +568,42 @@ export interface HarnessProviderInfo {
   hasKey: boolean
   source?: string
   ccCurrent?: boolean
-  models?: { id: string; name?: string }[]
+  models?: { id: string; name?: string; enabled?: boolean }[]
   protocol?: string
   api?: boolean
+  enabled?: boolean
+}
+
+export type HarnessAuthMode = "api" | "subscription"
+export interface HarnessConnectionSource {
+  agent_type: string
+  tool: string
+  account: {
+    supported: boolean
+    configured: boolean
+    managed?: boolean
+    source: string
+    loginCommand?: string
+    models: { id: string; name?: string }[]
+  }
+  defaults: {
+    auth_mode: HarnessAuthMode | ""
+    provider_id: string
+    model: string
+  }
+}
+export async function listHarnessConnections(): Promise<
+  HarnessConnectionSource[]
+> {
+  return getTransport().call("codepluse_connection_catalog", {})
+}
+export async function saveHarnessConnection(params: {
+  agentType: string
+  authMode: HarnessAuthMode
+  providerId?: string
+  model?: string
+}): Promise<void> {
+  return getTransport().call("codepluse_connection_save", params)
 }
 
 export async function listHarnessInstances(): Promise<HarnessInstance[]> {
@@ -579,9 +612,10 @@ export async function listHarnessInstances(): Promise<HarnessInstance[]> {
 
 export async function createHarnessInstance(params: {
   name: string
-  realTool: "claude" | "codex" | "dsh"
+  realTool: string
   providerId?: string
   defaultModel?: string
+  authMode?: HarnessAuthMode
 }): Promise<HarnessInstance> {
   return getTransport().call("codepluse_instance_create", { ...params })
 }
@@ -591,6 +625,7 @@ export async function updateHarnessInstance(params: {
   name?: string
   providerId?: string
   defaultModel?: string
+  authMode?: HarnessAuthMode
 }): Promise<HarnessInstance> {
   return getTransport().call("codepluse_instance_update", { ...params })
 }
@@ -616,6 +651,7 @@ export interface MainBotSettings {
   model: string
   provider_id?: string
   base_agent_type?: string
+  auth_mode?: HarnessAuthMode
 }
 
 export async function getMainBotSettings(): Promise<MainBotSettings> {

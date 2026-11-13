@@ -18,6 +18,20 @@ beforeEach(() => {
   applyMainBotSettings(null)
   vi.clearAllMocks()
 })
+it("uses an official account main agent and clears a previous API model when following native defaults", () => {
+  applyMainBotSettings({
+    agent_type: "inst_main_codex_account",
+    auth_mode: "subscription",
+    model: "",
+  })
+  expect(mainBotAgentFor(["claude_code"])).toBe("inst_main_codex_account")
+  expect(
+    withMainBotModel("inst_main_codex_account", {
+      modeId: null,
+      configValues: { model: "api-model", permission: "workspace" },
+    }).configValues
+  ).toEqual({ permission: "workspace" })
+})
 it("uses the saved main agent ahead of folder defaults and inherited harnesses", () => {
   applyMainBotSettings({
     agent_type: "inst_main_claude_api",

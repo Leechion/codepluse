@@ -48,11 +48,16 @@ func TestCodexSubscriptionIsNotAnAPIProvider(t *testing.T) {
 	if IsAPI(Provider{URL: "https://api.anthropic.com", Key: "sk-ant-oat-subscription"}) {
 		t.Fatal("OAuth subscription treated as API key")
 	}
-	if _, ok := CodexProvider("native:codex:config", "subscription", "codex", "model='gpt-test'", map[string]any{"tokens": map[string]any{"access_token": "subscription-token"}}, false); ok {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "config.toml"), []byte("model='gpt-test'\nmodel_provider='gateway'\n[model_providers.gateway]\nbase_url='https://provider.test/v1'\nwire_api='responses'"), 0600)
+	os.WriteFile(filepath.Join(dir, "auth.json"), []byte(`{"tokens":{"access_token":"subscription-token"}}`), 0600)
+	rows, err := readCodex(dir)
+	if err != nil || len(rows) != 1 || rows[0].Key != "" || IsAPI(rows[0]) {
 		t.Fatal("subscription account exposed as API provider")
 	}
-	p, ok := CodexProvider("native:codex:config", "api", "codex", "model='gpt-test'\nmodel_provider='gateway'\n[model_providers.gateway]\nbase_url='https://provider.test/v1'\nwire_api='responses'", map[string]any{"OPENAI_API_KEY": "api-key"}, false)
-	if !ok || p.Agent != "codex" || p.Model != "gpt-test" || p.Key != "api-key" {
+	os.WriteFile(filepath.Join(dir, "auth.json"), []byte(`{"OPENAI_API_KEY":"api-key"}`), 0600)
+	rows, err = readCodex(dir)
+	if err != nil || len(rows) != 1 || rows[0].Agent != "codex" || rows[0].Model != "gpt-test" || rows[0].Key != "api-key" {
 		t.Fatal("Codex API configuration not read")
 	}
 }

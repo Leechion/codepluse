@@ -20,6 +20,9 @@ import (
 // flipping the global active selection never disturbs its driver.
 func providerVersion(agent *hub.Agent) string {
 	tool := agent.RealTool
+	if agent.AuthMode == "subscription" {
+		return "subscription:" + providers.AccountVersion(tool) + ":" + agent.DefaultModel
+	}
 	if tool == "dsh" && agent.ProviderID == "" {
 		return dshModelVersion()
 	}
@@ -47,12 +50,15 @@ func providerVersion(agent *hub.Agent) string {
 // the pin went stale), otherwise the global active selection the built-in
 // follows. The bool mirrors providers.Active's "configured" meaning.
 func resolveProvider(agent *hub.Agent) (providers.Provider, bool, error) {
+	if agent.AuthMode == "subscription" {
+		return providers.Provider{}, false, nil
+	}
 	if agent.ProviderID != "" {
 		p, err := providers.Find(ROOT, agent.ProviderID)
 		if err != nil {
 			return p, false, err
 		}
-		if p.Agent != agent.RealTool || !providers.IsAPI(p) {
+		if p.Agent != agent.RealTool || !providers.IsAPI(p) || (p.Enabled != nil && !*p.Enabled) {
 			return p, false, fmt.Errorf("固定的 API 供应商无效，请重新配置")
 		}
 		return p, true, nil
@@ -256,7 +262,7 @@ func codexHome(name ...string) (string, error) {
 		return "", fmt.Errorf("无法创建 Codex 配置目录: %w", err)
 	}
 	for _, name := range []string{"auth.json", "config.toml"} {
-		src := filepath.Join(home(), ".codex", name)
+		src := filepath.Join(providers.NativeHome("codex"), name)
 		data, err := os.ReadFile(src)
 		if os.IsNotExist(err) {
 			continue
@@ -332,6 +338,9 @@ func buildEnv(agent *hub.Agent) ([]string, error) {
 			if json.Unmarshal(data, &s) == nil {
 				for k, v := range s.Env {
 					if strings.HasPrefix(k, "ANTHROPIC_") && os.Getenv(k) == "" {
+						if k == "ANTHROPIC_BASE_URL" {
+							v = anthropicBaseURL(v)
+						}
 						set(k, v)
 					}
 				}

@@ -29,17 +29,185 @@ func (s *Server) bundledSkills(group string) ([]Row, error) {
 	}
 	return out, nil
 }
+// skillTool resolves a wire to the tool whose skill directory serves it.
+// A named instance (inst_claude2, inst_main_claude_<digest>) is the same
+// harness with a pinned provider/model, so it reads and links into the BASE
+// tool's directory: giving each profile a skill directory of its own would
+// leave every instance-started conversation with an empty skill set.
+func skillTool(agentType string) string {
+	switch agentType {
+	case "claude_code", "claude":
+		return "claude"
+	case "codex":
+		return "codex"
+	case "deepseek", "dsh":
+		return "dsh"
+	}
+	if strings.HasPrefix(agentType, "inst_") {
+		rest := strings.TrimPrefix(agentType, "inst_")
+		rest = strings.TrimPrefix(rest, "main_")
+		for _, tool := range []string{"claude", "codex", "dsh", "deepseek"} {
+			if strings.HasPrefix(rest, tool) {
+				return skillTool(tool)
+			}
+		}
+	}
+	return ""
+}
+
 func nativeSkillRoot(agentType string) string {
 	home, _ := os.UserHomeDir()
 	dir := ".agents"
-	if agentType == "claude_code" {
+	switch skillTool(agentType) {
+	case "claude":
 		dir = ".claude"
-	}
-	if agentType == "codex" {
+	case "codex":
 		dir = ".codex"
 	}
 	return filepath.Join(home, dir, "skills")
 }
+
+// skillCopyMarker marks a skill directory codepluse copied (rather than
+// linked) into an agent's skill directory. Copying is the fallback for Windows
+// without Developer Mode, where creating a symlink needs a privilege this
+// process does not hold. The marker carries the central path it came from, so
+// disable only ever removes codepluse's own copy, never a user directory.
+const skillCopyMarker = ".codeg-copy"
+
+// skillStatus is the per-(skill, agent) row the settings matrix and the
+// welcome-screen cards read: enabled only when the link at the agent's own
+// skill directory points at codeg's central copy of the skill.
+func skillStatus(name, agentType, central string) Row {
+	link := filepath.Join(nativeSkillRoot(agentType), name)
+	state := "not_linked"
+	copyMode := false
+	var target any
+	if info, err := os.Lstat(link); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			if actual, err := filepath.EvalSymlinks(link); err == nil {
+				target = actual
+				state = "linked_elsewhere"
+				if strings.EqualFold(actual, central) {
+					state = "linked_to_codeg"
+				}
+			} else {
+				state = "broken"
+			}
+		} else if marker, err := os.ReadFile(filepath.Join(link, skillCopyMarker)); err == nil &&
+			strings.EqualFold(strings.TrimSpace(string(marker)), central) {
+			target = strings.TrimSpace(string(marker))
+			state = "linked_to_codeg"
+			copyMode = true
+		} else {
+			state = "blocked_by_real_directory"
+		}
+	}
+	return Row{"expertId": name, "agentType": agentType, "state": state, "linkPath": link, "targetPath": target, "expectedTargetPath": central, "copyMode": copyMode}
+}
+
+// copySkillDir copies a skill directory tree and stamps it with the marker.
+func copySkillDir(src, dst string) error {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	return filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(src, path)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == "." {
+			return nil
+		}
+		out := filepath.Join(dst, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(out, 0o755)
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		return os.WriteFile(out, data, 0o644)
+	})
+}
+
+// skillLink enables or disables one bundled skill for one agent by managing the
+// link in that agent's skill directory. Only links/copies codeg itself put there
+// are removed, and a same-named real directory is never touched.
+func (s *Server) skillLink(group, skillID, agentType string, enable bool) (Row, error) {
+	list, err := s.bundledSkills(group)
+	if err != nil {
+		return nil, err
+	}
+	central := ""
+	for _, item := range list {
+		if meta, ok := item["metadata"].(map[string]any); ok && text(meta["id"]) == skillID {
+			central = text(item["central_path"])
+			break
+		}
+	}
+	if central == "" {
+		return nil, fmt.Errorf("技能不存在：%s", skillID)
+	}
+	root := nativeSkillRoot(agentType)
+	link := filepath.Join(root, skillID)
+	if enable {
+		if err = os.MkdirAll(root, 0o755); err != nil {
+			return nil, fmt.Errorf("无法创建技能目录 %s：%w", root, err)
+		}
+		if info, statErr := os.Lstat(link); statErr == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				actual, _ := filepath.EvalSymlinks(link)
+				if !strings.EqualFold(actual, central) {
+					return nil, fmt.Errorf("已存在指向 %s 的链接，未改动", actual)
+				}
+				return skillStatus(skillID, agentType, central), nil
+			}
+			if marker, readErr := os.ReadFile(filepath.Join(link, skillCopyMarker)); readErr == nil &&
+				strings.EqualFold(strings.TrimSpace(string(marker)), central) {
+				return skillStatus(skillID, agentType, central), nil
+			}
+			return nil, fmt.Errorf("目标位置已有同名目录，未改动：%s", link)
+		}
+		if err = os.Symlink(central, link); err != nil {
+			// Windows without Developer Mode: copy the skill instead, which the
+			// harness reads exactly like a linked directory.
+			if copyErr := copySkillDir(central, link); copyErr != nil {
+				return nil, fmt.Errorf("创建技能链接失败（可开启 Windows 开发者模式）：%w", err)
+			}
+			if markErr := os.WriteFile(filepath.Join(link, skillCopyMarker), []byte(central), 0o644); markErr != nil {
+				_ = os.RemoveAll(link)
+				return nil, markErr
+			}
+		}
+		return skillStatus(skillID, agentType, central), nil
+	}
+	info, statErr := os.Lstat(link)
+	if statErr != nil {
+		return skillStatus(skillID, agentType, central), nil
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		marker, readErr := os.ReadFile(filepath.Join(link, skillCopyMarker))
+		if readErr != nil || !strings.EqualFold(strings.TrimSpace(string(marker)), central) {
+			return nil, fmt.Errorf("目标不是 codepluse 创建的链接或副本，未删除：%s", link)
+		}
+		if err = os.RemoveAll(link); err != nil {
+			return nil, err
+		}
+		return skillStatus(skillID, agentType, central), nil
+	}
+	actual, _ := filepath.EvalSymlinks(link)
+	if !strings.EqualFold(actual, central) {
+		return nil, fmt.Errorf("链接指向别处，未删除：%s", actual)
+	}
+	if err = os.Remove(link); err != nil {
+		return nil, err
+	}
+	return skillStatus(skillID, agentType, central), nil
+}
+
 func (s *Server) skills(command string, a Row) (any, error) {
 	group := "experts"
 	if strings.HasPrefix(command, "science_") {
@@ -78,28 +246,48 @@ func (s *Server) skills(command string, a Row) (any, error) {
 			meta := item["metadata"].(map[string]any)
 			name := text(meta["id"])
 			for _, agent := range s.agents() {
-				agentType := text(agent["agent_type"])
-				link := filepath.Join(nativeSkillRoot(agentType), name)
-				expected := text(item["central_path"])
-				state := "not_linked"
-				var target any
-				if info, err := os.Lstat(link); err == nil {
-					if info.Mode()&os.ModeSymlink != 0 {
-						if actual, err := filepath.EvalSymlinks(link); err == nil {
-							target = actual
-							state = "linked_elsewhere"
-							if strings.EqualFold(actual, expected) {
-								state = "linked_to_codeg"
-							}
-						} else {
-							state = "broken"
-						}
-					} else {
-						state = "blocked_by_real_directory"
-					}
-				}
-				out = append(out, Row{"expertId": name, "agentType": agentType, "state": state, "linkPath": link, "targetPath": target, "expectedTargetPath": expected, "copyMode": false})
+				out = append(out, skillStatus(name, text(agent["agent_type"]), text(item["central_path"])))
 			}
+		}
+		return out, nil
+	}
+	if strings.HasSuffix(command, "_get_install_status") {
+		name := text(a["expertId"])
+		if name == "" {
+			name = text(a["skillId"])
+		}
+		agentType := text(a["agentType"])
+		list, err := s.bundledSkills(group)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range list {
+			if meta, ok := item["metadata"].(map[string]any); ok && text(meta["id"]) == name {
+				return skillStatus(name, agentType, text(item["central_path"])), nil
+			}
+		}
+		return nil, fmt.Errorf("技能不存在：%s", name)
+	}
+	if command == "experts_link_to_agent" || command == "science_link_to_agent" {
+		return s.skillLink(group, text(a["expertId"]), text(a["agentType"]), true)
+	}
+	if command == "experts_unlink_from_agent" || command == "science_unlink_from_agent" {
+		return s.skillLink(group, text(a["expertId"]), text(a["agentType"]), false)
+	}
+	if command == "experts_apply_links" || command == "science_apply_links" {
+		ops, _ := a["ops"].([]any)
+		out := []Row{}
+		for _, raw := range ops {
+			op, _ := raw.(map[string]any)
+			enable, _ := op["enable"].(bool)
+			status, err := s.skillLink(group, text(op["expertId"]), text(op["agentType"]), enable)
+			row := Row{"expertId": text(op["expertId"]), "agentType": text(op["agentType"]), "ok": err == nil, "status": nil, "error": nil}
+			if err != nil {
+				row["error"] = err.Error()
+			} else if enable {
+				row["status"] = status
+			}
+			out = append(out, row)
 		}
 		return out, nil
 	}

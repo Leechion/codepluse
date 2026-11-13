@@ -20,6 +20,7 @@ export interface MainBot {
   model: string
   providerId?: string
   baseAgentType?: AgentType
+  authMode?: "api" | "subscription"
 }
 
 let cached: MainBot | null = null
@@ -34,6 +35,7 @@ function normalize(
         model?: string
         provider_id?: string
         base_agent_type?: string
+        auth_mode?: "api" | "subscription"
       }
     | null
     | undefined
@@ -45,6 +47,7 @@ function normalize(
     model: (raw?.model ?? "").trim(),
     providerId: raw?.provider_id,
     baseAgentType: raw?.base_agent_type,
+    authMode: raw?.auth_mode,
   }
 }
 
@@ -86,15 +89,22 @@ export async function loadMainBot(force = false): Promise<MainBot | null> {
 export async function saveMainBot(
   agentType: AgentType | null,
   model = "",
-  providerId = ""
+  providerId = "",
+  authMode?: "api" | "subscription"
 ): Promise<void> {
   const raw = await setMainBotSettings({
     agent_type: agentType ?? "",
     model: model ?? "",
     provider_id: providerId,
+    auth_mode: authMode,
   })
   applyMainBotSettings(
-    raw ?? { agent_type: agentType ?? "", model, provider_id: providerId }
+    raw ?? {
+      agent_type: agentType ?? "",
+      model,
+      provider_id: providerId,
+      auth_mode: authMode,
+    }
   )
 }
 
@@ -108,7 +118,8 @@ export async function saveMainBot(
  */
 export function mainBotAgentFor(available: AgentType[]): AgentType | null {
   if (!cached) return null
-  if (cached.providerId) return cached.agentType
+  if (cached.providerId || cached.authMode === "subscription")
+    return cached.agentType
   if (available.length === 0) return cached.agentType
   return available.includes(cached.agentType) ? cached.agentType : null
 }
@@ -123,7 +134,17 @@ export function withMainBotModel(
   agentType: AgentType,
   prefs: { modeId: string | null; configValues: Record<string, string> | null }
 ): { modeId: string | null; configValues: Record<string, string> | null } {
-  if (!cached || cached.agentType !== agentType || !cached.model) return prefs
+  if (!cached || cached.agentType !== agentType) return prefs
+  if (cached.authMode === "subscription") {
+    const values = { ...prefs.configValues }
+    if (cached.model) values.model = cached.model
+    else delete values.model
+    return {
+      ...prefs,
+      configValues: Object.keys(values).length ? values : null,
+    }
+  }
+  if (!cached.model) return prefs
   if (prefs.configValues?.model && !cached.providerId) return prefs
   return {
     ...prefs,

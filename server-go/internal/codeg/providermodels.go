@@ -130,8 +130,14 @@ func (s *Server) harnessProviderModels(id string) (any, error) {
 	}
 	models := []listedModel{}
 	seen := map[string]bool{}
+	disabled := map[string]bool{}
+	for _, m := range p.Models {
+		if m.Enabled != nil && !*m.Enabled {
+			disabled[m.ID] = true
+		}
+	}
 	add := func(id, name string) {
-		if id != "" && !seen[id] {
+		if id != "" && !seen[id] && !disabled[id] {
 			seen[id] = true
 			models = append(models, listedModel{ID: id, DisplayName: name})
 		}
@@ -144,6 +150,9 @@ func (s *Server) harnessProviderModels(id string) (any, error) {
 		return Row{"models": models, "source": "native"}, nil
 	}
 	protocol := p.Protocol
+	if protocol == "openai-responses" {
+		protocol = "openai"
+	}
 	if protocol == "" {
 		protocol = "openai"
 		if p.Agent == "claude" {

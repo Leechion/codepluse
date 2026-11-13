@@ -11,20 +11,49 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   create: vi.fn(),
   list: vi.fn(),
+  get: vi.fn(),
 }))
 vi.mock("@/lib/api", () => ({
   acpListAgents: async () => [
     {
       agent_type: "claude_code",
+      name: "Claude Code",
       real_tool: "claude",
       available: true,
       enabled: true,
     },
     {
       agent_type: "deepseek",
+      name: "DeepSeek Harness",
       real_tool: "dsh",
       available: true,
       enabled: true,
+    },
+  ],
+  listHarnessConnections: async () => [
+    {
+      agent_type: "claude_code",
+      tool: "claude",
+      account: {
+        supported: true,
+        configured: true,
+        managed: false,
+        source: "fixture",
+        models: [],
+      },
+      defaults: { auth_mode: "api", provider_id: "cc-api", model: "model-a" },
+    },
+    {
+      agent_type: "deepseek",
+      tool: "dsh",
+      account: {
+        supported: false,
+        configured: false,
+        managed: false,
+        source: "fixture",
+        models: [],
+      },
+      defaults: { auth_mode: "api", provider_id: "", model: "" },
     },
   ],
   listHarnessInstances: async () => [],
@@ -57,7 +86,7 @@ vi.mock("@/lib/api", () => ({
       },
     ],
   }),
-  getMainBotSettings: async () => ({ agent_type: "", model: "" }),
+  getMainBotSettings: () => mocks.get(),
   setMainBotSettings: (...args: unknown[]) => mocks.save(...args),
   listHarnessProviderModels: (...args: unknown[]) => mocks.models(...args),
   createHarnessInstance: (...args: unknown[]) => mocks.create(...args),
@@ -75,6 +104,7 @@ const wrap = (children: React.ReactNode) => (
 beforeEach(() => {
   vi.clearAllMocks()
   applyMainBotSettings(null)
+  mocks.get.mockResolvedValue({ agent_type: "", model: "" })
   mocks.models.mockResolvedValue({
     models: [{ id: "model-a" }, { id: "model-b" }],
   })
@@ -87,21 +117,37 @@ beforeEach(() => {
 })
 
 describe("provider-bound harness profiles", () => {
+  it("restores an official main profile without inheriting the harness's API model", async () => {
+    mocks.get.mockResolvedValue({
+      agent_type: "inst_main_claude_account",
+      base_agent_type: "claude_code",
+      auth_mode: "subscription",
+      model: "",
+      provider_id: "",
+    })
+    render(wrap(<HarnessProfiles mode="main" />))
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent(
+        messages.Connections.accountDefault
+      )
+    )
+    expect(
+      screen.queryByRole("combobox", { name: "API provider" })
+    ).not.toBeInTheDocument()
+  })
   it("loads provider models, excludes subscription accounts and saves the main profile", async () => {
     const user = userEvent.setup()
     render(wrap(<HarnessProfiles mode="main" />))
     await waitFor(() =>
-      expect(
-        screen.getByRole("combobox", { name: "Harness" })
-      ).toHaveTextContent("Claude Code")
+      expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent(
+        "Claude Code"
+      )
     )
     await user.click(screen.getByRole("combobox", { name: "API provider" }))
     expect(
       screen.queryByRole("option", { name: "Official subscription" })
     ).not.toBeInTheDocument()
-    await user.click(
-      await screen.findByRole("option", { name: "Gateway · ccswitch" })
-    )
+    await user.click(await screen.findByRole("option", { name: "Gateway" }))
     await waitFor(() => expect(mocks.models).toHaveBeenCalledWith("cc-api"))
     await user.click(screen.getByRole("combobox", { name: "Model" }))
     await user.click(await screen.findByRole("option", { name: "model-b" }))
@@ -111,6 +157,7 @@ describe("provider-bound harness profiles", () => {
         agent_type: "claude_code",
         model: "model-b",
         provider_id: "cc-api",
+        auth_mode: "api",
       })
     )
     await waitFor(() =>
@@ -130,19 +177,18 @@ describe("provider-bound harness profiles", () => {
       screen.getByRole("button", { name: "Add model configuration" })
     )
     await user.type(screen.getByLabelText("Configuration name"), "DSH small")
-    await user.click(screen.getByRole("combobox", { name: "Harness" }))
+    await user.click(screen.getByRole("combobox", { name: "Agent" }))
     await user.click(
       await screen.findByRole("option", { name: "DeepSeek Harness" })
     )
     await user.click(screen.getByRole("combobox", { name: "API provider" }))
-    await user.click(
-      await screen.findByRole("option", { name: "Native DSH · dsh" })
-    )
+    await user.click(await screen.findByRole("option", { name: "Native DSH" }))
     await user.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() =>
       expect(mocks.create).toHaveBeenCalledWith({
         name: "DSH small",
         realTool: "dsh",
+        authMode: "api",
         providerId: "dsh-native",
         defaultModel: "dsh-small",
       })

@@ -149,10 +149,17 @@ func readDSH(home string) ([]Provider, error) {
 					model = models[0].ID
 				}
 				protocol := "openai"
+				if stringValue(cfg["api"]) == "openai-responses" {
+					protocol = "openai-responses"
+				}
 				if strings.HasPrefix(stringValue(cfg["api"]), "anthropic") {
 					protocol = "anthropic"
 				}
-				out = append(out, Provider{ID: "native:dsh:" + profile + ":" + id, Name: id + " · DSH " + profile, Agent: "dsh", URL: base, Key: key, HasKey: key != "", Source: "dsh", Model: model, Models: models, Protocol: protocol, Native: cfg})
+				name := stringValue(cfg["name"])
+				if name == "" {
+					name = id + " · DSH " + profile
+				}
+				out = append(out, Provider{ID: "native:dsh:" + profile + ":" + id, Name: name, Agent: "dsh", URL: base, Key: key, HasKey: key != "", Source: "dsh", Model: model, Models: models, Protocol: protocol, Native: cfg})
 			}
 		}
 	}
@@ -204,25 +211,6 @@ func claudeModels(env map[string]string, model string) []Model {
 	return out
 }
 
-func CodexProvider(id, name, source, config string, auth map[string]any, current bool) (Provider, bool) {
-	var cfg map[string]any
-	if toml.Unmarshal([]byte(config), &cfg) != nil {
-		return Provider{}, false
-	}
-	selected := stringValue(cfg["model_provider"])
-	settings := object(object(cfg["model_providers"])[selected])
-	base := stringValue(settings["base_url"])
-	key := os.Getenv(stringValue(settings["env_key"]))
-	if key == "" {
-		key = stringValue(auth["OPENAI_API_KEY"])
-	}
-	if base == "" || key == "" {
-		return Provider{}, false
-	}
-	model := stringValue(cfg["model"])
-	return Provider{ID: id, Name: name, Source: source, Agent: "codex", URL: base, Model: model, Key: key, HasKey: true, CCCurrent: current, Protocol: "openai", Models: []Model{{ID: model}}, Native: settings}, true
-}
-
 func readCodex(home string) ([]Provider, error) {
 	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
 	if os.IsNotExist(err) {
@@ -235,8 +223,45 @@ func readCodex(home string) ([]Provider, error) {
 	if b, e := os.ReadFile(filepath.Join(home, "auth.json")); e == nil {
 		_ = json.Unmarshal(b, &auth)
 	}
-	if p, ok := CodexProvider("native:codex:config", "Codex 原生 API 配置", "codex", string(data), auth, false); ok {
-		return []Provider{p}, nil
+	var cfg map[string]any
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("Codex 配置格式无效")
 	}
-	return nil, nil
+	selected := stringValue(cfg["model_provider"])
+	providers := object(cfg["model_providers"])
+	names := []string{}
+	for name := range providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := []Provider{}
+	for _, name := range names {
+		settings := object(providers[name])
+		base := stringValue(settings["base_url"])
+		if base == "" {
+			continue
+		}
+		key := os.Getenv(stringValue(settings["env_key"]))
+		if key == "" {
+			key = stringValue(settings["experimental_bearer_token"])
+		}
+		if key == "" && name == selected {
+			key = stringValue(auth["OPENAI_API_KEY"])
+		}
+		model := stringValue(settings["model"])
+		if name == selected {
+			model = stringValue(cfg["model"])
+		}
+		id := "native:codex:provider:" + name
+		label := stringValue(settings["name"])
+		if label == "" {
+			label = name
+		}
+		models := []Model{}
+		if model != "" {
+			models = append(models, Model{ID: model})
+		}
+		out = append(out, Provider{ID: id, Name: label, Source: "codex", Agent: "codex", URL: base, Model: model, Key: key, HasKey: key != "", CCCurrent: name == selected, Protocol: "openai-responses", Models: models, Native: settings})
+	}
+	return out, nil
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
@@ -71,6 +72,11 @@ func applyCodexProvider(agent *hub.Agent, env []string) ([]string, error) {
 	if err = os.WriteFile(file, data, 0600); err != nil {
 		return nil, err
 	}
+	// API profiles must not inherit the native ChatGPT login copied by codexHome.
+	auth, _ := json.Marshal(map[string]string{"auth_mode": "apikey", "OPENAI_API_KEY": p.Key})
+	if err = os.WriteFile(filepath.Join(dir, "auth.json"), auth, 0600); err != nil {
+		return nil, err
+	}
 	env = append(dropEnvKey(env, "CODEX_HOME"), "CODEX_HOME="+dir)
 	return append(dropEnvKey(env, "CODEPLUSE_CODEX_API_KEY"), "CODEPLUSE_CODEX_API_KEY="+p.Key), nil
 }
@@ -89,6 +95,9 @@ func dshProviderPatch(agent *hub.Agent, env []string) (string, []string, error) 
 	delete(cfg, "apiKey")
 	if cfg["api"] == nil {
 		cfg["api"] = "openai-completions"
+		if p.Protocol == "openai-responses" {
+			cfg["api"] = "openai-responses"
+		}
 		if p.Protocol == "anthropic" {
 			cfg["api"] = "anthropic-messages"
 		}

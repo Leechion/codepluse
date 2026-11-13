@@ -27,10 +27,12 @@ type Provider struct {
 	Protocol  string            `json:"protocol,omitempty"`
 	Native    map[string]any    `json:"-"`
 	API       bool              `json:"api"`
+	Enabled   *bool             `json:"enabled,omitempty"`
 }
 type Model struct {
-	ID   string `json:"id"`
-	Name string `json:"name,omitempty"`
+	ID      string `json:"id"`
+	Name    string `json:"name,omitempty"`
+	Enabled *bool  `json:"enabled,omitempty"`
 }
 
 func IsAPI(p Provider) bool {
@@ -94,9 +96,16 @@ func Public(root string) (Data, error) {
 	if nativeErr != nil {
 		d.CCError += " " + nativeErr.Error()
 	}
-	d.Providers = append(d.Providers, native...)
+	for _, p := range native {
+		if p.Agent != "claude" {
+			d.Providers = append(d.Providers, p)
+		}
+	}
 	for i := range d.Providers {
 		p := &d.Providers[i]
+		if err := applyMetadata(root, p); err != nil {
+			return d, err
+		}
 		p.API = IsAPI(*p)
 		if u, err := url.Parse(p.URL); err == nil && (u.User != nil || u.RawQuery != "" || u.Fragment != "") {
 			p.URL = ""
@@ -109,46 +118,63 @@ func Public(root string) (Data, error) {
 	return d, e
 }
 func Save(root string, p Provider) error {
-	mu.Lock()
-	defer mu.Unlock()
+	_, err := SaveConfiguration(root, p)
+	return err
+}
+
+func SaveConfiguration(root string, p Provider) (Provider, error) {
 	p.Name = strings.TrimSpace(p.Name)
 	p.URL = strings.TrimRight(strings.TrimSpace(p.URL), "/")
 	p.Model = strings.TrimSpace(p.Model)
+	if p.Model == "" && len(p.Models) > 0 {
+		p.Model = p.Models[0].ID
+	}
 	u, e := url.Parse(p.URL)
 	if p.Name == "" || p.Model == "" || e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (p.Agent != "claude" && p.Agent != "dsh" && p.Agent != "codex") {
-		return fmt.Errorf("请填写名称、模型和有效的 HTTP(S) 地址，并选择执行端")
+		return p, fmt.Errorf("请填写名称、模型和有效的 HTTP(S) 地址，并选择执行端")
 	}
+	if externalProvider(p.ID) {
+		return saveExternal(root, p)
+	}
+	mu.Lock()
+	defer mu.Unlock()
 	d, e := read(root)
 	if e != nil {
-		return e
+		return p, e
 	}
 	for i, old := range d.Providers {
 		if old.ID == p.ID && p.ID != "" {
 			if old.Agent != p.Agent {
-				return fmt.Errorf("不能更改供应商所属执行端")
+				return p, fmt.Errorf("不能更改供应商所属执行端")
 			}
 			if p.Key == "" {
 				p.Key = old.Key
 			}
+			if p.Protocol == "" {
+				p.Protocol = old.Protocol
+			}
+			if p.Models == nil {
+				p.Models = old.Models
+			}
 			p.HasKey = false
 			d.Providers[i] = p
-			return write(root, d)
+			return p, write(root, d)
 		}
 	}
 	if p.ID != "" {
-		return fmt.Errorf("供应商不存在")
+		return p, fmt.Errorf("供应商不存在")
 	}
 	if p.Key == "" {
-		return fmt.Errorf("请输入 API 密钥")
+		return p, fmt.Errorf("请输入 API 密钥")
 	}
 	b := make([]byte, 12)
 	if _, e = rand.Read(b); e != nil {
-		return e
+		return p, e
 	}
 	p.ID = hex.EncodeToString(b)
 	p.HasKey = false
 	d.Providers = append(d.Providers, p)
-	return write(root, d)
+	return p, write(root, d)
 }
 func Activate(root, agent, id string) error {
 	mu.Lock()
@@ -208,6 +234,17 @@ func Delete(root, id string) error {
 // or keyless ccswitch provider is an error so a pinned instance never silently
 // falls back to another vendor's credentials.
 func Find(root, id string) (Provider, error) {
+	p, err := find(root, id)
+	if err != nil {
+		return p, err
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	err = applyMetadata(root, &p)
+	return p, err
+}
+
+func find(root, id string) (Provider, error) {
 	mu.Lock()
 	defer mu.Unlock()
 	d, e := read(root)
@@ -217,6 +254,9 @@ func Find(root, id string) (Provider, error) {
 	if strings.HasPrefix(id, "native:") {
 		list, err := Native()
 		for _, p := range list {
+			if id == "native:codex:config" && p.Agent == "codex" && p.CCCurrent {
+				return p, nil
+			}
 			if p.ID == id {
 				return p, nil
 			}
@@ -239,6 +279,9 @@ func Find(root, id string) (Provider, error) {
 		return Provider{}, fmt.Errorf("已保存的模型供应商不存在")
 	}
 	if strings.HasPrefix(id, "ccswitch:") {
+		if strings.HasPrefix(id, "ccswitch:codex:") {
+			return Provider{}, fmt.Errorf("Codex 不再从 CC Switch 读取，请选择 Codex 原生配置中的供应商")
+		}
 		cc, err := CCSwitch()
 		if err != nil {
 			return Provider{}, fmt.Errorf("读取 CC Switch 失败: %w", err)

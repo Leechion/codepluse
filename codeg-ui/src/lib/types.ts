@@ -4018,6 +4018,8 @@ export interface AcpAgentInfo {
   real_tool?: string
   /** Pinned provider id for an instance; "" follows the global selection. */
   provider_id?: string
+  auth_mode?: "api" | "subscription"
+  base_agent_type?: string
   /** Model an instance starts every session on; "" leaves the choice per-chat. */
   default_model?: string
   /**

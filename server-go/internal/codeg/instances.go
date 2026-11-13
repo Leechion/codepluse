@@ -20,12 +20,14 @@ import (
 // .data/harness-instances.json; launchFn (cmd/serve/wiring.go) reads the
 // same hub.Agent fields, so the spawn path needs no extra plumbing.
 type instanceSpec struct {
-	ID           string `json:"id"`
-	Wire         string `json:"wire"`
-	Name         string `json:"name"`
-	RealTool     string `json:"realTool"`
-	ProviderID   string `json:"providerId,omitempty"`
-	DefaultModel string `json:"defaultModel,omitempty"`
+	ID            string `json:"id"`
+	Wire          string `json:"wire"`
+	Name          string `json:"name"`
+	RealTool      string `json:"realTool"`
+	ProviderID    string `json:"providerId,omitempty"`
+	DefaultModel  string `json:"defaultModel,omitempty"`
+	AuthMode      string `json:"authMode,omitempty"`
+	BaseAgentType string `json:"baseAgentType,omitempty"`
 }
 
 func (s *Server) instancesFile() string {
@@ -45,7 +47,7 @@ func (s *Server) loadInstances() {
 		return
 	}
 	for _, spec := range saved {
-		if s.pick(baseWire(spec.RealTool)) == nil {
+		if s.profileBase(spec.RealTool, spec.BaseAgentType) == nil {
 			continue
 		}
 		// A hub rebuilt over an existing registry (server restart in tests,
@@ -68,7 +70,7 @@ func (s *Server) saveInstancesLocked() error {
 			continue
 		}
 		saved = append(saved, instanceSpec{ID: strings.TrimPrefix(a.ID, "agt_inst_"), Wire: a.Wire, Name: a.Name,
-			RealTool: a.RealTool, ProviderID: a.ProviderID, DefaultModel: a.DefaultModel})
+			RealTool: a.RealTool, ProviderID: a.ProviderID, DefaultModel: a.DefaultModel, AuthMode: a.AuthMode, BaseAgentType: a.BaseAgentType})
 	}
 	if saved == nil {
 		saved = []instanceSpec{}
@@ -91,11 +93,8 @@ func (s *Server) saveInstancesLocked() error {
 // wire is persisted with the spec (not re-derived), so a reload reproduces
 // the exact registry the stored conversations address.
 func (s *Server) instanceAgent(spec instanceSpec) *hub.Agent {
-	if spec.RealTool != "claude" && spec.RealTool != "codex" && spec.RealTool != "dsh" {
-		return nil
-	}
 	// pick resolves registry IDs or public wire names, not internal tool names.
-	base := s.pick(baseWire(spec.RealTool))
+	base := s.profileBase(spec.RealTool, spec.BaseAgentType)
 	if base == nil {
 		return nil
 	}
@@ -109,6 +108,8 @@ func (s *Server) instanceAgent(spec instanceSpec) *hub.Agent {
 	clone.Wire = spec.Wire
 	clone.ProviderID = spec.ProviderID
 	clone.DefaultModel = spec.DefaultModel
+	clone.AuthMode = spec.AuthMode
+	clone.BaseAgentType = wireAgent(base)
 	clone.Endpoint = "acp://" + spec.RealTool + "/" + spec.ID
 	clone.Load = 0
 	clone.MaxCon = 4
@@ -140,25 +141,31 @@ func (s *Server) instanceCommand(command string, a Row) (any, error) {
 		if tool == "deepseek" {
 			tool = "dsh"
 		}
-		if tool != "claude" && tool != "codex" && tool != "dsh" {
-			return nil, fmt.Errorf("请选择支持 API 供应商的 Harness：Claude Code、Codex 或 DSH")
-		}
-		if s.pick(baseWire(tool)) == nil {
+		base := s.profileBase(tool, "")
+		if base == nil {
 			return nil, fmt.Errorf("本机未安装 %s，无法创建实例", tool)
 		}
 		providerID := strings.TrimSpace(text(a["providerId"]))
 		defaultModel := strings.TrimSpace(text(a["defaultModel"]))
+		authMode := text(a["authMode"])
+		if err := s.validateProfileAuth(tool, authMode, providerID); err != nil {
+			return nil, err
+		}
 		if providerID != "" {
-			if _, err := s.validateProfileProvider(tool, providerID); err != nil {
+			p, err := s.validateProfileProvider(tool, providerID)
+			if err != nil {
 				return nil, fmt.Errorf("钉住供应商失败: %w", err)
+			}
+			if err := validateProfileModel(p, defaultModel); err != nil {
+				return nil, err
 			}
 		}
 		b := make([]byte, 6)
 		if _, err := rand.Read(b); err != nil {
 			return nil, err
 		}
-		spec := instanceSpec{ID: hex.EncodeToString(b), RealTool: tool, Name: name,
-			ProviderID: providerID, DefaultModel: defaultModel, Wire: s.freeWire(tool)}
+		spec := instanceSpec{ID: hex.EncodeToString(b), RealTool: base.RealTool, Name: name,
+			ProviderID: providerID, DefaultModel: defaultModel, Wire: s.freeWire(strings.ReplaceAll(tool, ":", "_")), AuthMode: authMode, BaseAgentType: wireAgent(base)}
 		agent := s.instanceAgent(spec)
 		if agent == nil {
 			return nil, fmt.Errorf("实例配置无效")
@@ -176,16 +183,42 @@ func (s *Server) instanceCommand(command string, a Row) (any, error) {
 	case "codepluse_instance_update":
 		agentID := s.resolveInstanceID(a)
 		providerID, hasProvider := a["providerId"].(string)
+		authMode, hasAuth := a["authMode"].(string)
 		providerID = strings.TrimSpace(providerID)
 		defaultModel, hasModel := a["defaultModel"].(string)
 		name := strings.TrimSpace(text(a["name"]))
+		if hasAuth {
+			existing := s.Hub.Agent(agentID)
+			if existing == nil {
+				return nil, fmt.Errorf("实例不存在")
+			}
+			pin := providerID
+			if !hasProvider {
+				pin = existing.ProviderID
+			}
+			tool := existing.RealTool
+			if tool == "" {
+				tool = existing.BaseAgentType
+			}
+			if err := s.validateProfileAuth(tool, authMode, pin); err != nil {
+				return nil, err
+			}
+		}
 		if providerID != "" {
 			existing := s.Hub.Agent(agentID)
 			if existing == nil {
 				return nil, fmt.Errorf("实例不存在")
 			}
-			if _, err := s.validateProfileProvider(existing.RealTool, providerID); err != nil {
+			p, err := s.validateProfileProvider(existing.RealTool, providerID)
+			if err != nil {
 				return nil, fmt.Errorf("钉住供应商失败: %w", err)
+			}
+			model := defaultModel
+			if !hasModel {
+				model = existing.DefaultModel
+			}
+			if err := validateProfileModel(p, model); err != nil {
+				return nil, err
 			}
 		}
 		if existing := s.Hub.Agent(agentID); existing == nil || !strings.HasPrefix(existing.Wire, "inst_") {
@@ -203,6 +236,9 @@ func (s *Server) instanceCommand(command string, a Row) (any, error) {
 			}
 			if hasProvider {
 				ag.ProviderID = providerID
+			}
+			if hasAuth {
+				ag.AuthMode = authMode
 			}
 			if hasModel {
 				ag.DefaultModel = strings.TrimSpace(defaultModel)

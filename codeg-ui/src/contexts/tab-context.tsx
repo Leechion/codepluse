@@ -137,7 +137,12 @@ export function TabProvider({ children }: TabProviderProps) {
     let disposed = false
     let unlisten: (() => void) | undefined
     const apply = (bot: ReturnType<typeof applyMainBotSettings>) => {
-      if (disposed || !bot?.providerId) return
+      if (
+        disposed ||
+        !bot ||
+        (!bot.providerId && bot.authMode !== "subscription")
+      )
+        return
       const store = useTabStore.getState()
       for (const tab of store.rawTabs) {
         if (tab.conversationId == null && tab.kind === "conversation")

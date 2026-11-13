@@ -19,7 +19,19 @@ func (s *Server) validateProfileProvider(tool, id string) (providers.Provider, e
 	if !providers.IsAPI(p) {
 		return p, fmt.Errorf("请选择有 API 密钥的供应商，官方订阅不能用作此配置")
 	}
+	if p.Enabled != nil && !*p.Enabled {
+		return p, fmt.Errorf("此 API 供应商已停用")
+	}
 	return p, nil
+}
+
+func validateProfileModel(p providers.Provider, model string) error {
+	for _, m := range p.Models {
+		if m.ID == model && m.Enabled != nil && !*m.Enabled {
+			return fmt.Errorf("此模型已停用，请选择其他模型")
+		}
+	}
+	return nil
 }
 
 // A dedicated instance binds the main agent to a provider without mutating the
@@ -32,41 +44,66 @@ func (s *Server) saveMainBotSettings(a Row) (any, error) {
 	wire := strings.TrimSpace(text(cfg["agent_type"]))
 	providerID := strings.TrimSpace(text(cfg["provider_id"]))
 	model := strings.TrimSpace(text(cfg["model"]))
-	if providerID != "" {
+	authMode := text(cfg["auth_mode"])
+	if providerID != "" && authMode == "" {
+		authMode = "api"
+	}
+	if providerID != "" || authMode == "subscription" {
 		base := s.pick(wire)
 		if base == nil {
 			return nil, fmt.Errorf("所选 Harness 不可用")
 		}
-		p, err := s.validateProfileProvider(base.RealTool, providerID)
-		if err != nil {
+		tool := base.RealTool
+		if tool == "" {
+			tool = wireAgent(base)
+		}
+		if err := s.validateProfileAuth(tool, authMode, providerID); err != nil {
 			return nil, err
 		}
-		if model == "" {
-			model = p.Model
-		}
-		if model == "" {
-			return nil, fmt.Errorf("请选择模型")
+		if authMode == "api" {
+			p, err := s.validateProfileProvider(tool, providerID)
+			if err != nil {
+				return nil, err
+			}
+			if model == "" {
+				model = p.Model
+			}
+			if model == "" {
+				return nil, fmt.Errorf("请选择模型")
+			}
+			if err := validateProfileModel(p, model); err != nil {
+				return nil, err
+			}
 		}
 		s.mu.Lock()
-		digest := fmt.Sprintf("%x", sha256.Sum256([]byte(base.RealTool+"\x00"+providerID+"\x00"+model)))[:12]
+		identity := tool + "\x00" + providerID + "\x00" + model
+		if authMode == "subscription" {
+			identity += "\x00subscription"
+		}
+		digest := fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))[:12]
 		mainWire := "inst_main_" + base.RealTool + "_" + digest
-		spec := instanceSpec{ID: "main_" + base.RealTool + "_" + digest, Wire: mainWire, Name: "主智能体 · " + base.RealTool + " · " + model, RealTool: base.RealTool, ProviderID: providerID, DefaultModel: model}
+		spec := instanceSpec{ID: "main_" + base.RealTool + "_" + digest, Wire: mainWire, Name: "主智能体 · " + base.Name + " · " + model, RealTool: base.RealTool, ProviderID: providerID, DefaultModel: model, AuthMode: authMode, BaseAgentType: wireAgent(base)}
 		agent := s.instanceAgent(spec)
 		if agent == nil {
 			s.mu.Unlock()
 			return nil, fmt.Errorf("主智能体配置无效")
 		}
 		if s.Hub.Agent(agent.ID) != nil {
-			s.Hub.UpdateAgent(agent.ID, func(old *hub.Agent) { old.ProviderID = providerID; old.DefaultModel = model; old.Name = agent.Name })
+			s.Hub.UpdateAgent(agent.ID, func(old *hub.Agent) {
+				old.ProviderID = providerID
+				old.DefaultModel = model
+				old.Name = agent.Name
+				old.AuthMode = authMode
+			})
 		} else {
 			s.Hub.CreateAgent(agent)
 		}
-		err = s.saveInstancesLocked()
+		err := s.saveInstancesLocked()
 		s.mu.Unlock()
 		if err != nil {
 			return nil, err
 		}
-		cfg = Row{"agent_type": mainWire, "base_agent_type": baseWire(base.RealTool), "provider_id": providerID, "model": model}
+		cfg = Row{"agent_type": mainWire, "base_agent_type": wireAgent(base), "provider_id": providerID, "model": model, "auth_mode": authMode}
 		s.retireAgentConnections(agent.ID)
 	}
 	s.store.mu.Lock()

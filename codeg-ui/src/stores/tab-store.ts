@@ -2927,7 +2927,10 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
       if (tab.conversationId != null) return false
       // A restored device-local draft can predate the saved API main agent.
       // Apply it after hydration even when the old harness is still available.
-      if (mainBot?.providerId && tab.agentType !== mainBot.agentType)
+      if (
+        (mainBot?.providerId || mainBot?.authMode === "subscription") &&
+        tab.agentType !== mainBot.agentType
+      )
         return true
       if (tab.agentTypeProvisional) return true
       if (!runtime.sortedAvailableAgents.includes(tab.agentType)) return true

@@ -281,6 +281,7 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 			return nil, fmt.Errorf("读取 API 供应商失败: %w", err)
 		}
 		if configured {
+			env = dropEnvKey(env, "CLAUDE_CODE_OAUTH_TOKEN")
 			if provider.Env != nil {
 				filtered := env[:0]
 				for _, item := range env {
@@ -290,6 +291,9 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 				}
 				env = filtered
 				for key, value := range provider.Env {
+					if strings.EqualFold(key, "ANTHROPIC_BASE_URL") {
+						value = anthropicBaseURL(value)
+					}
 					env = append(env, key+"="+value)
 				}
 				if provider.Model != "" && provider.Env["ANTHROPIC_MODEL"] == "" {
@@ -299,7 +303,7 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 				for _, key := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"} {
 					env = dropEnvKey(env, key)
 				}
-				env = append(env, "ANTHROPIC_BASE_URL="+provider.URL, "ANTHROPIC_AUTH_TOKEN="+provider.Key, "ANTHROPIC_API_KEY="+provider.Key, "ANTHROPIC_MODEL="+provider.Model)
+				env = append(env, "ANTHROPIC_BASE_URL="+anthropicBaseURL(provider.URL), "ANTHROPIC_AUTH_TOKEN="+provider.Key, "ANTHROPIC_API_KEY="+provider.Key, "ANTHROPIC_MODEL="+provider.Model)
 			}
 			if agent.DefaultModel != "" {
 				env = append(dropEnvKey(env, "ANTHROPIC_MODEL"), "ANTHROPIC_MODEL="+agent.DefaultModel)
@@ -309,6 +313,12 @@ func (s *server) launchFn(agent *hub.Agent, permission, cwd string) (*acp.Launch
 	if tool == "codex" && agent.ProviderID != "" {
 		var err error
 		env, err = applyCodexProvider(agent, env)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if agent.AuthMode == "subscription" {
+		env, err = applyOfficialAccount(agent, env)
 		if err != nil {
 			return nil, err
 		}

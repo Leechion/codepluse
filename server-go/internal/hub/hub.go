@@ -43,9 +43,11 @@ type Agent struct {
 	Permissions   []string          `json:"permissions,omitempty"`
 	// Instance fields (multi-harness): a named copy of a built-in tool that
 	// pins its own provider/model instead of following the global selection.
-	Wire         string `json:"wire,omitempty"`         // unique wire name, e.g. claude_2; empty = built-in mapping
-	ProviderID   string `json:"providerId,omitempty"`   // pinned provider ("" = follow global active)
-	DefaultModel string `json:"defaultModel,omitempty"` // pinned model applied when a session starts
+	Wire          string `json:"wire,omitempty"`         // unique wire name, e.g. claude_2; empty = built-in mapping
+	ProviderID    string `json:"providerId,omitempty"`   // pinned provider ("" = follow global active)
+	DefaultModel  string `json:"defaultModel,omitempty"` // pinned model applied when a session starts
+	AuthMode      string `json:"authMode,omitempty"`     // api | subscription; empty preserves the harness's native selection
+	BaseAgentType string `json:"baseAgentType,omitempty"`
 }
 
 // Execution carries the real-run facts of a task.

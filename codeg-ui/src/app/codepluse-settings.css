@@ -1,4 +1,17 @@
 /* Settings can evolve independently; the conversation workspace stays untouched. */
+.cp-provider-workbench,
+.cp-account-card {
+  background: var(--cp-glass-card);
+  border-color: var(--cp-glass-edge);
+  box-shadow: var(--cp-glass-shadow);
+}
+.cp-provider-sidebar {
+  background: rgb(var(--cp-glass-tint) / 12%);
+  border-color: var(--cp-glass-edge);
+}
+.cp-provider-row[aria-current="true"] {
+  box-shadow: inset 0 0 0 1px var(--cp-glass-edge);
+}
 [data-settings-shell] .cp-settings-titlebar {
   background: var(--cp-glass-chrome);
   border-color: var(--cp-glass-edge);
@@ -48,7 +61,8 @@
   view-transition-name: cp-settings-content;
 }
 
-.cp-settings-content [data-slot="scroll-area-viewport"] > div > .w-full {
+.cp-settings-content [data-slot="scroll-area-viewport"] > div > .w-full,
+.cp-settings-content .cp-settings-page {
   max-width: 1120px;
   margin-inline: auto;
   padding: 24px;
@@ -232,7 +246,8 @@ html:has([data-settings-shell])::view-transition-new(cp-settings-content) {
   .cp-settings-content {
     border-radius: 16px;
   }
-  .cp-settings-content [data-slot="scroll-area-viewport"] > div > .w-full {
+  .cp-settings-content [data-slot="scroll-area-viewport"] > div > .w-full,
+  .cp-settings-content .cp-settings-page {
     padding: 16px;
   }
 }
