@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel)"
+repo_root_win="$(cygpath -w "$repo_root")"
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$repo_root_win/scripts/rebuild-after-pull.ps1"

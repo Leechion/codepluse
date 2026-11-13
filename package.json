@@ -10,6 +10,8 @@
     "codeg:desktop:build": "powershell -NoProfile -File scripts/build-codeg-desktop.ps1",
     "codepluse:build": "pnpm --dir codeg-ui build",
     "codepluse:start": "powershell -NoProfile -File scripts/start-codeg.ps1",
+    "codepluse:setup-auto-update": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-codepluse-update-hook.ps1",
+    "codepluse:refresh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rebuild-after-pull.ps1",
     "codepluse:desktop:build": "powershell -NoProfile -File scripts/build-codeg-desktop.ps1"
   },
   "engines": {
