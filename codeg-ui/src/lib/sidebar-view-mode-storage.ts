@@ -13,6 +13,7 @@ const SORT_MODE_KEY = "workspace:sidebar-sort-mode"
 const SECTION_ORDER_KEY = "workspace:sidebar-section-order"
 const SECTION_COLLAPSED_KEY = "workspace:sidebar-section-collapsed"
 const CONVERSATION_EXPANDED_KEY = "workspace:sidebar-conversation-expanded"
+const CONVERSATION_COLLAPSED_KEY = "workspace:sidebar-conversation-collapsed"
 const TAG_FILTER_KEY = "workspace:sidebar-tag-filter"
 
 export type SidebarSortMode = "created" | "updated"
@@ -245,6 +246,40 @@ export function saveConversationExpanded(ids: number[]): void {
   if (typeof window === "undefined") return
   try {
     localStorage.setItem(CONVERSATION_EXPANDED_KEY, JSON.stringify(ids))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Sub-session subtrees the user collapsed BY HAND.
+ *
+ *  A conversation that has delegation children defaults to open — a sub-task
+ *  belongs under the task that spawned it, and the expand chevron only surfaces
+ *  on hover, so "collapsed unless asked" hid work the user could not discover.
+ *  This set is the exception list to that default: it records the deliberate
+ *  collapse, and it is what keeps a re-opened app from re-expanding a subtree
+ *  the user shut. */
+export function loadConversationCollapsed(): number[] {
+  if (typeof window === "undefined") return []
+  try {
+    const raw = localStorage.getItem(CONVERSATION_COLLAPSED_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    const result: number[] = []
+    for (const v of parsed) {
+      if (typeof v === "number" && Number.isFinite(v)) result.push(v)
+    }
+    return result
+  } catch {
+    return []
+  }
+}
+
+export function saveConversationCollapsed(ids: number[]): void {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.setItem(CONVERSATION_COLLAPSED_KEY, JSON.stringify(ids))
   } catch {
     /* ignore */
   }

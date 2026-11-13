@@ -6,7 +6,7 @@ import {
   useImperativeHandle,
   useState,
 } from "react"
-import { act, fireEvent, render, within } from "@testing-library/react"
+import { act, fireEvent, render, waitFor, within } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { toast } from "sonner"
 import {
@@ -286,6 +286,15 @@ vi.mock("@/components/layout/workspace-folder-dialog", () => ({
 vi.mock("@/hooks/use-subsession-sync", () => ({ useSubsessionSync: () => {} }))
 vi.mock("@/components/shared/directory-browser-dialog", () => ({
   DirectoryBrowserDialog: () => null,
+}))
+// Sub-sessions are fetched lazily per parent. Only the reveal tests below read
+// this; everything else in this file keeps `child_count: 0` and never calls it.
+const listChildren = vi.hoisted(() =>
+  vi.fn(async (_parentId: number) => [] as unknown[])
+)
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listChildConversations: listChildren,
 }))
 
 const MINUTE = 60_000
@@ -2328,5 +2337,102 @@ describe("SidebarConversationList — folder header and folder-tabs mode", () =>
       before === "true" ? "false" : "true"
     )
     expect(useFolderTabsStore.getState().scope).toBe(1)
+  })
+})
+
+describe("SidebarConversationList — a delegation child lands under its parent", () => {
+  const PARENT = () => conv(1, 1)
+  const CHILD = conv(2, 1, { kind: "delegate", parent_id: 1 })
+
+  const card = (id: number) =>
+    document.querySelector<HTMLElement>(`[data-conversation-id="${id}"]`)
+  // The expand/collapse control is a SIBLING of the row button (HTML forbids
+  // nested buttons), so it is found through the row container.
+  const chevron = (id: number) =>
+    card(id)?.parentElement?.querySelector<HTMLElement>(
+      'button[aria-label$="sub-conversations"]'
+    ) ?? null
+
+  beforeEach(() => {
+    localStorage.clear()
+    listChildren.mockReset()
+    listChildren.mockResolvedValue([CHILD] as never)
+    const folders = [folder(1, "Folder 1")]
+    useAppWorkspaceStore.setState({
+      folders,
+      allFolders: folders,
+      conversations: [PARENT()],
+    })
+  })
+
+  it("shows a sub-session under its parent without any clicking", async () => {
+    // The case the desktop app hit: the delegation happened before this window
+    // opened, so nothing "changed" while the list was watching — the parent
+    // simply has children, and that alone has to be enough to show them.
+    useAppWorkspaceStore.setState({
+      conversations: [conv(1, 1, { child_count: 1 })],
+    })
+    render(tree())
+    await waitFor(() => expect(listChildren).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(card(2)).not.toBeNull())
+    // Nested, not merely present: the child row draws its ancestor rail.
+    expect(card(2)!.querySelector("[data-subsession-rail]")).not.toBeNull()
+  })
+
+  it("reveals the subtree when the parent gains a child", async () => {
+    render(tree())
+    // A parent with no children has no subtree to fetch.
+    expect(listChildren).not.toHaveBeenCalled()
+
+    // The backend re-emits the parent with an increased child_count right after
+    // it creates the sub-session.
+    act(() => {
+      useAppWorkspaceStore.setState({
+        conversations: [conv(1, 1, { child_count: 1 })],
+      })
+    })
+    await waitFor(() => expect(listChildren).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(card(2)).not.toBeNull())
+    expect(card(2)!.querySelector("[data-subsession-rail]")).not.toBeNull()
+  })
+
+  it("keeps a subtree the user collapsed by hand closed, across a remount", async () => {
+    const view = render(tree())
+    act(() => {
+      useAppWorkspaceStore.setState({
+        conversations: [conv(1, 1, { child_count: 1 })],
+      })
+    })
+    await waitFor(() => expect(card(2)).not.toBeNull())
+
+    // Collapse it, exactly as the hover chevron does.
+    act(() => {
+      fireEvent.click(chevron(1)!)
+    })
+    expect(card(2)).toBeNull()
+
+    // A second sub-session must not undo that choice.
+    listChildren.mockResolvedValue([
+      { ...CHILD, id: 3, title: "conv-3" },
+      CHILD,
+    ] as never)
+    act(() => {
+      useAppWorkspaceStore.setState({
+        conversations: [conv(1, 1, { child_count: 2 })],
+      })
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(card(3)).toBeNull()
+
+    // …and neither does reopening the app: the collapse is what was stored.
+    view.unmount()
+    render(tree())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(card(2)).toBeNull()
+    expect(card(3)).toBeNull()
   })
 })

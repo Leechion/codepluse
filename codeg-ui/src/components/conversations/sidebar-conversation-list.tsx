@@ -84,6 +84,8 @@ import {
   type SidebarRecentFilter,
   loadConversationExpanded,
   saveConversationExpanded,
+  loadConversationCollapsed,
+  saveConversationCollapsed,
   DEFAULT_SECTION_ORDER,
   SIDEBAR_SECTION_KEYS,
   type SidebarSectionCollapsed,
@@ -1132,21 +1134,45 @@ export function SidebarConversationList({
     setRecentLimit(RECENT_PAGE_SIZE)
   }, [])
   // ── Per-conversation delegation sub-session expansion ───────────────────
-  // Default COLLAPSED (unlike folders): only ids the user opened are tracked
-  // and persisted. Hydrated from localStorage after mount. `childrenByParent`
-  // is the lazily-fetched child cache (key absent = not fetched → renders a
-  // loading row; empty array = no live children → renders nothing, self-heals
-  // on the next refresh). The ref mirror lets the lazy-fetch dedupe read the
-  // latest cache without re-creating its callback.
+  // A conversation with delegation children defaults to OPEN: the sub-task is
+  // part of the task that spawned it, and the expand chevron only surfaces on
+  // hover, so a collapsed-by-default subtree read as "the delegation produced
+  // nothing" — the child row exists in the store but is displayed nowhere (the
+  // root list deliberately drops `parent_id != null` rows). Two override sets,
+  // both persisted and hydrated after mount: ids the user opened by hand, and
+  // ids the user shut by hand, which is the exception list to the default.
+  // `childrenByParent` is the lazily-fetched child cache (key absent = not
+  // fetched → renders a loading row; empty array = no live children → renders
+  // nothing, self-heals on the next refresh). The ref mirror lets the lazy-fetch
+  // dedupe read the latest cache without re-creating its callback.
   const [conversationExpanded, setConversationExpanded] = useState<Set<number>>(
     () => new Set()
   )
+  const [conversationCollapsed, setConversationCollapsed] = useState<
+    Set<number>
+  >(() => new Set())
   const [childrenByParent, setChildrenByParent] = useState<
     Map<number, DbConversationSummary[]>
   >(() => new Map())
   const childrenByParentRef = useRef(childrenByParent)
   childrenByParentRef.current = childrenByParent
   const childrenInFlightRef = useRef<Set<number>>(new Set())
+  // The set every render path actually reads: explicit opens, plus every parent
+  // that has children and was not shut by hand.
+  const subsessionExpanded = useMemo(() => {
+    const next = new Set<number>()
+    for (const conv of conversations) {
+      if (conversationCollapsed.has(conv.id)) continue
+      if (conv.child_count > 0 || conversationExpanded.has(conv.id)) next.add(conv.id)
+    }
+    return next
+  }, [conversations, conversationExpanded, conversationCollapsed])
+  // Mirror for event handlers (never read during render), so a toggle can tell
+  // "currently open" from "currently closed" without taking the set as a
+  // dependency — its identity changes with the list, and `onToggleExpand` must
+  // stay stable or every card's memo would re-render.
+  const subsessionExpandedRef = useRef(subsessionExpanded)
+  subsessionExpandedRef.current = subsessionExpanded
   // In-flight parent fetches → drives the loading spinner. A placeholder empty
   // array is written into `childrenByParent` before the fetch so concurrent child
   // upserts buffer into it (closing the lost-update race); `childrenLoading` then
@@ -1247,6 +1273,7 @@ export function SidebarConversationList({
     setSectionCollapsed(loadSectionCollapsed())
     setRecentFilter(loadRecentFilter())
     setConversationExpanded(new Set(loadConversationExpanded()))
+    setConversationCollapsed(new Set(loadConversationCollapsed()))
   }, [])
 
   const toggleSection = useCallback((section: SidebarSectionKey) => {
@@ -1651,7 +1678,7 @@ export function SidebarConversationList({
         showRecent,
         recentLimit,
         sectionOrder,
-        conversationExpanded,
+        conversationExpanded: subsessionExpanded,
         childrenByParent,
         childrenLoading,
         containerChildren,
@@ -1675,7 +1702,7 @@ export function SidebarConversationList({
       showRecent,
       recentLimit,
       sectionOrder,
-      conversationExpanded,
+      subsessionExpanded,
       childrenByParent,
       childrenLoading,
       containerChildren,
@@ -1983,23 +2010,45 @@ export function SidebarConversationList({
     }
   }, [])
 
-  // Toggle a conversation's sub-session subtree. Expanding kicks off a lazy
-  // fetch; the Set identity changes so `rows` rebuilds, but the per-card
-  // `expanded` boolean is computed per row at render (never the Set passed in),
-  // so only the toggled card's prop flips and every other card memo holds.
+  // Toggle a conversation's sub-session subtree. Both sets only ever hold
+  // deliberate choices — the default (open when there are children) is derived,
+  // so a collapse must be recorded, not merely "the absence of an open".
+  // Expanding kicks off a lazy fetch; the per-card `expanded` boolean is
+  // computed per row at render (never the Set passed in), so only the toggled
+  // card's prop flips and every other card's memo holds.
   const toggleConversation = useCallback(
     (id: number) => {
+      const wasOpen = subsessionExpandedRef.current.has(id)
+      if (wasOpen) {
+        setConversationCollapsed((prev) => {
+          const next = new Set(prev)
+          next.add(id)
+          saveConversationCollapsed([...next])
+          return next
+        })
+        setConversationExpanded((prev) => {
+          if (!prev.has(id)) return prev
+          const next = new Set(prev)
+          next.delete(id)
+          saveConversationExpanded([...next])
+          return next
+        })
+        return
+      }
       setConversationExpanded((prev) => {
         const next = new Set(prev)
-        if (next.has(id)) {
-          next.delete(id)
-        } else {
-          next.add(id)
-          void ensureChildrenLoaded(id)
-        }
+        next.add(id)
         saveConversationExpanded([...next])
         return next
       })
+      setConversationCollapsed((prev) => {
+        if (!prev.has(id)) return prev
+        const next = new Set(prev)
+        next.delete(id)
+        saveConversationCollapsed([...next])
+        return next
+      })
+      void ensureChildrenLoaded(id)
     },
     [ensureChildrenLoaded]
   )
@@ -2019,14 +2068,14 @@ export function SidebarConversationList({
       const c = row.conversation
       if (
         c.child_count > 0 &&
-        conversationExpanded.has(c.id) &&
+        subsessionExpanded.has(c.id) &&
         !childrenByParentRef.current.has(c.id) &&
         !childrenInFlightRef.current.has(c.id)
       ) {
         void ensureChildrenLoaded(c.id)
       }
     }
-  }, [rows, conversationExpanded, loading, ensureChildrenLoaded])
+  }, [rows, subsessionExpanded, loading, ensureChildrenLoaded])
 
   // ── Sticky folder header overlay ──────────────────────────────────────────
   // Resolve the folder currently scrolled through and the iOS handoff offset
@@ -3267,7 +3316,7 @@ export function SidebarConversationList({
         onTogglePin={handleTogglePin}
         depth={row.depth}
         hasChildren={conv.child_count > 0}
-        expanded={conversationExpanded.has(conv.id)}
+        expanded={subsessionExpanded.has(conv.id)}
         onToggleExpand={toggleConversation}
       />
     )
