@@ -1,0 +1,5 @@
+# Git hooks run under `sh`. A CRLF shebang ("#!/bin/sh\r") makes the interpreter
+# unresolvable, so the post-merge auto-update never fires. Keep hooks and shell
+# scripts LF on checkout regardless of core.autocrlf.
+.githooks/* text eol=lf
+*.sh text eol=lf

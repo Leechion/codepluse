@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $existing = git -C $root config --local --get core.hooksPath 2>$null
 if ($LASTEXITCODE -eq 0 -and $existing -and $existing.Trim() -ne '.githooks') {
