@@ -1,7 +1,6 @@
 package codeg
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -20,7 +19,7 @@ func TestDeleteConversationRemovesTreeAndPersistedTabs(t *testing.T) {
 	other := st.createConversationLocked(f, "codex", "unrelated", 0)
 	o := number(other["id"])
 	for _, id := range []int{r, c, g, o} {
-		st.appendTurnLocked(id, "user", "history")
+		st.appendTurnLocked(id, "user", "history", nil)
 		st.Tabs = append(st.Tabs, Row{"id": id, "conversation_id": id})
 	}
 	if err := st.saveLocked(); err != nil {
@@ -39,15 +38,15 @@ func TestDeleteConversationRemovesTreeAndPersistedTabs(t *testing.T) {
 	if len(st.Tabs) != 1 || number(st.Tabs[0]["conversation_id"]) != o {
 		t.Fatal("stale persisted tabs")
 	}
-	if len(st.Turns) != 1 || len(st.Turns[fmt.Sprint(o)]) != 1 {
+	if len(st.allTurnsLocked()) != 1 || len(st.turnsLocked(o)) != 1 {
 		t.Fatal("history cleanup failed")
 	}
 	if len(s.tasks) != 0 || len(s.callers) != 0 || len(s.connections) != 0 {
 		t.Fatal("deleted task can still be resumed")
 	}
-	loaded, err := newStore(st.file)
-	if err != nil || len(loaded.Conversations) != 1 {
-		t.Fatalf("deletion not persisted: %v", err)
+	loaded := reloadStore(t, st.file)
+	if len(loaded.Conversations) != 1 {
+		t.Fatalf("deletion not persisted: %v", loaded.Conversations)
 	}
 	command(t, s, "delete_conversation", Row{"conversationId": r})
 }

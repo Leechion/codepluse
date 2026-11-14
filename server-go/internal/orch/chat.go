@@ -778,5 +778,3 @@ func (c *ChatController) onMission(m *Mission) {
 	c.mu.Unlock()
 	c.emit(chat)
 }
-
-func itoa(i int) string { return strconv.Itoa(i) }

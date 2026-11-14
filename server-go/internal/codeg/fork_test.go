@@ -51,7 +51,7 @@ func TestForkConversationPreservesOriginalAndContinuesFromSelectedTurn(t *testin
 	send("second", conversation)
 	st := s.store
 	st.mu.Lock()
-	sourceTurns := clone(st.Turns[itoa(conversation)])
+	sourceTurns := st.turnsLocked(conversation)
 	originalNative := text(st.conversationLocked(conversation)["external_id"])
 	st.mu.Unlock()
 	if len(sourceTurns) != 4 || text(sourceTurns[1]["source_turn_id"]) != "fixture-message-1" {
@@ -69,7 +69,9 @@ func TestForkConversationPreservesOriginalAndContinuesFromSelectedTurn(t *testin
 	// A native agent rejection must not create a visible sibling or change the
 	// original conversation, even after the temporary MCP identity was created.
 	st.mu.Lock()
-	st.Turns[itoa(conversation)][1]["source_turn_id"] = "fixture-message-99"
+	edited := st.turnsLocked(conversation)
+	edited[1]["source_turn_id"] = "fixture-message-99"
+	_ = st.replaceTurnsLocked(conversation, edited)
 	st.mu.Unlock()
 	if _, err := s.forkConversation(Row{"connectionId": cid, "forkFromTurnId": "fixture-message-99"}); err == nil {
 		t.Fatal("unknown native point was accepted")
@@ -78,7 +80,7 @@ func TestForkConversationPreservesOriginalAndContinuesFromSelectedTurn(t *testin
 	if len(st.Conversations) != 1 || text(st.conversationLocked(conversation)["external_id"]) != originalNative {
 		t.Fatal("rejected fork changed the conversation")
 	}
-	st.Turns[itoa(conversation)][1]["source_turn_id"] = "fixture-message-1"
+	_ = st.replaceTurnsLocked(conversation, sourceTurns)
 	st.mu.Unlock()
 	s.mu.Lock()
 	if len(s.callers) != 1 || s.callers[cid].Token != originalToken {
@@ -95,16 +97,16 @@ func TestForkConversationPreservesOriginalAndContinuesFromSelectedTurn(t *testin
 		t.Fatalf("bad fork result: %v", result)
 	}
 	st.mu.Lock()
-	forkTurns := clone(st.Turns[itoa(conversation)])
-	siblingTurns := clone(st.Turns[itoa(sibling)])
+	forkTurns := st.turnsLocked(conversation)
+	siblingTurns := st.turnsLocked(sibling)
 	forkRow, siblingRow := clone(st.conversationLocked(conversation)), clone(st.conversationLocked(sibling))
 	st.mu.Unlock()
 	if len(forkTurns) != 2 || len(siblingTurns) != 4 || text(forkRow["external_id"]) != forkNative || text(siblingRow["external_id"]) != originalNative {
 		t.Fatalf("wrong histories: %v %v %v %v", forkTurns, siblingTurns, forkRow, siblingRow)
 	}
-	restored, err := newStore(st.file)
-	if err != nil || len(restored.Turns[itoa(conversation)]) != 2 || len(restored.Turns[itoa(sibling)]) != 4 {
-		t.Fatalf("fork histories not persisted: %v", err)
+	restored := reloadStore(t, st.file)
+	if len(restored.turnsLocked(conversation)) != 2 || len(restored.turnsLocked(sibling)) != 4 {
+		t.Fatalf("fork histories not persisted: %v", restored.turnsLocked(conversation))
 	}
 	siblingCID := command(t, s, "acp_connect", Row{"agentType": "codex", "sessionId": originalNative}).(string)
 	s.mu.Lock()
@@ -132,8 +134,8 @@ func TestForkConversationPreservesOriginalAndContinuesFromSelectedTurn(t *testin
 	}
 	send("third", conversation)
 	st.mu.Lock()
-	after := len(st.Turns[itoa(conversation)])
-	preserved := len(st.Turns[itoa(sibling)])
+	after := len(st.turnsLocked(conversation))
+	preserved := len(st.turnsLocked(sibling))
 	st.mu.Unlock()
 	if after != 4 || preserved != 6 {
 		t.Fatalf("branch continuation changed original: %d %d", after, preserved)

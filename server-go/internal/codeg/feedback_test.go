@@ -45,11 +45,8 @@ func TestNativeFeedbackWithImagePersistsAndReachesAgent(t *testing.T) {
 		busy, conv := s.connections[cid].Busy, s.connections[cid].ConversationID
 		s.mu.Unlock()
 		if !busy {
-			restored, err := newStore(s.store.file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			turns := restored.Turns[itoa(conv)]
+			restored := reloadStore(t, s.store.file)
+			turns := restored.turnsLocked(conv)
 			encoded, _ := json.Marshal(turns)
 			if len(turns) != 3 || !bytes.Contains(encoded, []byte("steered:see imageimage:image/png:"+data+"resource:spec:https://example.test/spec"+"embedded:memory://note:note body")) || !bytes.Contains(encoded, []byte(`"mime_type":"image/png"`)) || !bytes.Contains(encoded, []byte("[spec](https://example.test/spec)")) {
 				t.Fatalf("missing image or result: %s", encoded)
@@ -100,7 +97,7 @@ func TestNativeFeedbackSteersAndPersistsBeforeReply(t *testing.T) {
 		s.mu.Unlock()
 		if !busy {
 			s.store.mu.Lock()
-			turns := clone(s.store.Turns[itoa(conv)])
+			turns := s.store.turnsLocked(conv)
 			s.store.mu.Unlock()
 			if len(turns) != 3 || text(turns[1]["role"]) != "user" || text(turns[2]["role"]) != "assistant" {
 				t.Fatalf("wrong turn order: %v", turns)

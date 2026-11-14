@@ -8,6 +8,8 @@ package codeg
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -111,6 +113,11 @@ type taskStore struct {
 	saveMu    sync.Mutex
 	root      string
 	onChange  func(taskID int)
+	// savedMtime/savedSize record the document this process last read or
+	// wrote, so reloadIfChangedLocked can tell whether the Rust front door
+	// (which now owns the work_task_* commands) replaced the file.
+	savedMtime int64
+	savedSize  int64
 	Next      int                                `json:"next"`
 	NextEvent int                                `json:"nextEvent"`
 	NextTpl   int                                `json:"nextTemplate"`
@@ -135,15 +142,81 @@ func newTaskStore(root string) *taskStore {
 				task.liveConn = ""
 				task.cancelFlag = false
 			}
+			st.rememberSavedLocked()
 		}
 	}
 	return st
 }
 
-func (st *taskStore) save() {
+func (st *taskStore) rememberSavedLocked() {
+	info, err := os.Stat(st.filePath())
+	if err != nil {
+		return
+	}
+	st.savedMtime, st.savedSize = info.ModTime().UnixNano(), info.Size()
+}
+
+// reloadIfChangedLocked picks up edits made by the Rust front door.
+//
+// The work_task_* commands are answered by the Rust proxy now; this store only
+// feeds the execution engine (claim/merge/cancel/disconnect) that still runs
+// here. Both sides write the file whole, so a writer that never re-reads would
+// silently discard the other side's changes. Every engine entry point calls
+// this first, keeping exactly one fresh read before any write.
+//
+// Unlike newTaskStore, the interruption normalisation must NOT run here: a
+// "running" row written mid-run is live engine state, not a crash leftover.
+func (st *taskStore) reloadIfChangedLocked() {
+	info, err := os.Stat(st.filePath())
+	if err != nil {
+		return
+	}
+	if mt, size := info.ModTime().UnixNano(), info.Size(); mt == st.savedMtime && size == st.savedSize {
+		return
+	}
+	raw, err := readJSONFileData(st.filePath())
+	if err != nil {
+		return
+	}
+	if err := json.Unmarshal(raw, st); err != nil {
+		return
+	}
+	st.rememberSavedLocked()
+}
+
+func (st *taskStore) filePath() string {
+	return filepath.Join(st.root, ".data", "codeg-worktasks.json")
+}
+
+// saveLocked marshals and persists the store. The caller must hold st.mu:
+// every field below (Tasks, Events, Settings, Templates) is mutated under that
+// lock, and json.Marshal walks those maps. Serializing without the lock races
+// with a concurrent map write, which Go turns into a fatal error rather than a
+// recoverable panic.
+func (st *taskStore) saveLocked() {
+	b, err := json.Marshal(st)
+	if err != nil {
+		return
+	}
 	st.saveMu.Lock()
 	defer st.saveMu.Unlock()
-	_ = atomicWrite(st.root+string(filepathSep)+".data"+string(filepathSep)+"codeg-worktasks.json", st)
+	path := st.filePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, path)
+	st.rememberSavedLocked()
+}
+
+// save is the unlocked entry point for callers that do not already hold st.mu.
+func (st *taskStore) save() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.saveLocked()
 }
 
 func (st *taskStore) find(id int) *WorkTask {
@@ -197,6 +270,10 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 	st := s.tasks2
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	// work_task_* state is owned by the Rust front door now; the engine
+	// triggers below are the only way this process acts on the board. Pick up
+	// its writes before any trigger reads or rewrites the store.
+	st.reloadIfChangedLocked()
 	switch command {
 	case "work_task_list":
 		folderID := number(a["folderId"])
@@ -262,7 +339,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 		st.Next++
 		st.Tasks = append(st.Tasks, task)
 		st.addEvent(task, "created", "user", Row{"title": title})
-		st.save()
+		st.saveLocked()
 		s.emitTaskChanged(task.ID)
 		return task, nil
 	case "work_task_update":
@@ -286,7 +363,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 		}
 		t.UpdatedAt = timestamp()
 		st.addEvent(t, "updated", "user", nil)
-		st.save()
+		st.saveLocked()
 		s.emitTaskChanged(t.ID)
 		return t, nil
 	case "work_task_reorder":
@@ -303,7 +380,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 				}
 			}
 		}
-		st.save()
+		st.saveLocked()
 		return nil, nil
 	case "work_task_delete":
 		t := st.find(number(a["id"]))
@@ -321,7 +398,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 		}
 		st.Tasks = filtered
 		delete(st.Events, fmt.Sprint(t.ID))
-		st.save()
+		st.saveLocked()
 		s.emitTaskChanged(t.ID)
 		return nil, nil
 	case "work_task_start":
@@ -333,7 +410,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 			return nil, fmt.Errorf("仅待办任务可以开始（当前 %s）", t.Status)
 		}
 		st.setStatus(t, "queued", "user", nil)
-		st.save()
+		st.saveLocked()
 		go s.claimTask(t.ID)
 		return nil, nil
 	case "work_task_retry", "work_task_requeue":
@@ -358,7 +435,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 		t.LastError = nil
 		t.FailureReason = nil
 		st.setStatus(t, target, "user", nil)
-		st.save()
+		st.saveLocked()
 		if target == "queued" {
 			go s.claimTask(t.ID)
 		}
@@ -374,7 +451,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 			t.ScheduledAt = strPtr(text(a["scheduledAt"]))
 		}
 		t.UpdatedAt = timestamp()
-		st.save()
+		st.saveLocked()
 		s.emitTaskChanged(t.ID)
 		return nil, nil
 	case "work_task_return":
@@ -393,7 +470,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 		t.LastError = nil
 		t.FailureReason = nil
 		st.setStatus(t, "queued", "user", Row{"feedback": feedback})
-		st.save()
+		st.saveLocked()
 		go s.claimTask(t.ID)
 		return nil, nil
 	case "work_task_cancel":
@@ -413,7 +490,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 		}
 		reason := text(a["reason"])
 		st.setStatus(t, "canceled", "user", Row{"reason": reason})
-		st.save()
+		st.saveLocked()
 		return nil, nil
 	case "work_task_merge":
 		t := st.find(number(a["id"]))
@@ -431,7 +508,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 			return nil, fmt.Errorf("任务不存在")
 		}
 		t.MergeQueued = nil
-		st.save()
+		st.saveLocked()
 		s.emitTaskChanged(t.ID)
 		return nil, nil
 	case "work_task_deliver_pr":
@@ -449,7 +526,13 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 			return nil, fmt.Errorf("仅评审状态可以完成（当前 %s）", t.Status)
 		}
 		if t.worktreePath != "" {
-			if diff, err := s.taskWorktrees(t).Diff(taskWorktreeName(t), t.folderPath); err == nil && diff["hasDiff"] == true {
+			diff, err := s.taskWorktrees(t).Diff(taskWorktreeName(t), t.folderPath)
+			if err != nil {
+				// Fail closed: an unreadable worktree may still hold unmerged
+				// changes, and answering "done" discards them.
+				return nil, fmt.Errorf("无法确认工作树状态，请稍后重试：%v", err)
+			}
+			if diff["hasDiff"] == true {
 				return nil, fmt.Errorf("工作树仍有未合并改动，请合并或丢弃后再完成")
 			}
 		}
@@ -459,7 +542,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 		if deleteWorktree, _ := a["deleteWorktree"].(bool); deleteWorktree && t.worktreePath != "" {
 			s.discardTaskWorktree(t)
 		}
-		st.save()
+		st.saveLocked()
 		return nil, nil
 	case "work_task_archive":
 		t := st.find(number(a["id"]))
@@ -472,7 +555,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 			t.ArchivedAt = nil
 		}
 		t.UpdatedAt = timestamp()
-		st.save()
+		st.saveLocked()
 		s.emitTaskChanged(t.ID)
 		return nil, nil
 	case "work_task_defer":
@@ -486,7 +569,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 			t.DeferredAt = nil
 		}
 		t.UpdatedAt = timestamp()
-		st.save()
+		st.saveLocked()
 		s.emitTaskChanged(t.ID)
 		return nil, nil
 	case "work_task_cleanup":
@@ -499,11 +582,11 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 		}
 		if err := s.discardTaskWorktree(t); err != nil {
 			t.CleanupState = strPtr("failed")
-			st.save()
+			st.saveLocked()
 			return nil, err
 		}
 		t.CleanupState = nil
-		st.save()
+		st.saveLocked()
 		s.emitTaskChanged(t.ID)
 		return nil, nil
 	case "work_task_diff":
@@ -540,11 +623,11 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 		raw, _ := a["settings"].(Row)
 		settings := parseFolderSettings(raw)
 		st.Settings[fmt.Sprint(folderID)] = settings
-		st.save()
+		st.saveLocked()
 		return nil, nil
 	case "work_task_settings_delete":
 		delete(st.Settings, fmt.Sprint(number(a["folderId"])))
-		st.save()
+		st.saveLocked()
 		return nil, nil
 	case "work_task_template_list":
 		return st.Templates, nil
@@ -573,7 +656,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 		tpl.Title = strings.TrimSpace(text(draft["title"]))
 		tpl.Config = config
 		tpl.UpdatedAt = timestamp()
-		st.save()
+		st.saveLocked()
 		return tpl, nil
 	case "work_task_template_delete":
 		id := number(a["id"])
@@ -584,7 +667,7 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 			}
 		}
 		st.Templates = kept
-		st.save()
+		st.saveLocked()
 		return nil, nil
 	case "work_task_lookup_by_source":
 		keys, _ := a["sourceKeys"].([]any)
@@ -602,6 +685,44 @@ func (s *Server) workTaskCommand(command string, a Row) (any, error) {
 	case "work_task_create_from_forge":
 		draft, _ := a["draft"].(Row)
 		return s.createTaskFromForge(draft)
+
+	// ------------------------- engine triggers -------------------------
+	// Internal bridge: the Rust front door owns the board state and hands
+	// execution back to the sidecar through these. They are never called by
+	// the UI, and disappear once the ACP runtime moves to Rust.
+	case "work_task_engine_claim":
+		// The goroutine waits on st.mu (released by the defer above); no
+		// unlock dance needed here.
+		go s.claimTask(number(a["id"]))
+		return nil, nil
+	case "work_task_engine_merge":
+		t := st.find(number(a["id"]))
+		if t == nil {
+			return nil, fmt.Errorf("任务不存在")
+		}
+		queued := s.dispatchTaskMerge(t, text(a["message"]), a["deleteWorktree"] == true)
+		return Row{"queued": queued}, nil
+	case "work_task_engine_cancel_conn":
+		if t := st.find(number(a["id"])); t != nil {
+			if t.liveConn != "" {
+				_ = s.cancel(t.liveConn)
+			}
+			t.cancelFlag = true
+		}
+		return nil, nil
+	case "work_task_engine_discard_worktree":
+		t := st.find(number(a["id"]))
+		if t == nil {
+			return nil, fmt.Errorf("任务不存在")
+		}
+		if err := s.discardTaskWorktree(t); err != nil {
+			t.CleanupState = strPtr("failed")
+			st.saveLocked()
+			return nil, err
+		}
+		t.CleanupState = nil
+		st.saveLocked()
+		return nil, nil
 	}
 	return nil, fmt.Errorf("未知的任务命令：%s", command)
 }
@@ -629,9 +750,15 @@ func (s *Server) createTaskFromForge(draft Row) (any, error) {
 	prompt := buildForgePrompt(source, snapshot)
 	config := &WorkTaskConfig{PromptBlocks: []Row{{"type": "text", "text": prompt}}, DisplayText: prompt, ConfigValues: map[string]string{}}
 	st := s.tasks2
-	if s.store.folderLocked(folderID) == nil {
+	s.store.mu.Lock()
+	folder := s.store.folderLocked(folderID)
+	s.store.mu.Unlock()
+	if folder == nil {
 		return nil, fmt.Errorf("项目文件夹不存在")
 	}
+	// The only caller (workTaskCommand) already holds st.mu; locking again
+	// here deadlocks on Go's non-reentrant mutex (the parity harness caught
+	// exactly that). Same contract as the other command cases.
 	task := &WorkTask{ID: st.Next, FolderID: folderID, Title: title, Config: config, Status: "todo",
 		SortOrder: len(st.Tasks) + 1, CreatedAt: timestamp(), UpdatedAt: timestamp()}
 	st.Next++
@@ -641,7 +768,7 @@ func (s *Server) createTaskFromForge(draft Row) (any, error) {
 	task.SourceMeta = Row{"provider": text(source["provider"]), "server_host": text(source["server_host"]), "owner_repo": text(source["owner_repo"]), "number": number(source["number"]), "title": title, "url": text(snapshot["url"])}
 	st.Tasks = append(st.Tasks, task)
 	st.addEvent(task, "created", "forge", Row{"title": title})
-	st.save()
+	st.saveLocked()
 	s.emitTaskChanged(task.ID)
 	return task, nil
 }

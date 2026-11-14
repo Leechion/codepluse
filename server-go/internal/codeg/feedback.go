@@ -2,6 +2,7 @@ package codeg
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -78,9 +79,9 @@ func (s *Server) submitFeedback(a Row) (any, error) {
 		s.store.mu.Lock()
 		row := s.store.conversationLocked(conversationID)
 		if row != nil {
-			s.store.appendTurnLocked(conversationID, "user", body)
-			turns := s.store.Turns[fmt.Sprint(conversationID)]
-			turns[len(turns)-1]["blocks"] = stored
+			if _, err := s.store.appendTurnLocked(conversationID, "user", body, stored); err != nil {
+				fmt.Fprintln(os.Stderr, "[codeg-store] 保存用户反馈失败：", err)
+			}
 			_ = s.store.saveLocked()
 		}
 		s.store.mu.Unlock()

@@ -298,10 +298,13 @@ func (s *Server) saveCustomAgent(params Row) error {
 func (s *Server) customAgentCommand(command string, a Row) (any, error) {
 	switch command {
 	case "acp_current_platform":
+		// 已翻转 Rust（I 组 custom_agents.rs）；Go 实现留给测试。
 		return currentACPPlatform(), nil
 	case "acp_fetch_registry_catalog":
+		// 已翻转 Rust（B 组 acp_registry.rs）；Go 实现留给测试。
 		return s.registryCatalog()
 	case "acp_list_custom_agents":
+		// 已翻转 Rust（I 组 custom_agents.rs）；Go 实现留给测试。
 		s.store.mu.Lock()
 		defs := clone(s.store.CustomAgents)
 		s.store.mu.Unlock()

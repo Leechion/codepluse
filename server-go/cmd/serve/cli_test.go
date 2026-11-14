@@ -26,7 +26,7 @@ func TestClaudeProviderIsAppliedToLaunch(t *testing.T) {
 	old := acpPackages["claude"]
 	acpPackages["claude"] = []string{entry}
 	t.Cleanup(func() { acpPackages["claude"] = old })
-	if err := providers.Save(ROOT, providers.Provider{Name: "test", Agent: "claude", URL: "https://example.test", Model: "test-model", Key: "test-key"}); err != nil {
+	if _, err := providers.SaveConfiguration(ROOT, providers.Provider{Name: "test", Agent: "claude", URL: "https://example.test", Model: "test-model", Key: "test-key"}); err != nil {
 		t.Fatal(err)
 	}
 	d, err := providers.Public(ROOT)

@@ -8,9 +8,10 @@ import (
 
 // HARNESS_HUB_ALLOW_ANY_PATH is the security boundary for external workspace
 // folders: off (default) keeps a web deployment exposing only the service
-// directory, on lets the picker add any folder. Directory browsing must go
-// through resolveWorkdir — if the listing path ever stops calling it, these
-// assertions are what break first.
+// directory, on lets the picker add any folder. Directory browsing uses
+// resolveBrowseWorkdir (gated on our ALLOW_ANY_DIR_BROWSE) and must never
+// widen resolveWorkdir — if that separation ever regresses, these assertions
+// are what break first.
 func TestResolveWorkdirAllowAnyPathBoundary(t *testing.T) {
 	allowed := t.TempDir()
 	outside := t.TempDir()
@@ -75,5 +76,34 @@ func TestResolveWorkdirSymlinkEscape(t *testing.T) {
 	t.Setenv("HARNESS_HUB_ALLOW_ANY_PATH", "0")
 	if _, err := resolveWorkdir(filepath.Join(link, "secret.txt")); err == nil {
 		t.Fatal("symlink escape resolved inside the allowed root")
+	}
+}
+
+// resolveBrowseWorkdir backs the read-only directory picker: it must resolve
+// paths outside allowedRoot while leaving the workdir boundary untouched, so
+// browse-only deployments cannot use it to gain file/terminal access.
+func TestResolveBrowseWorkdirIsIndependentOfWorkspaceBoundary(t *testing.T) {
+	allowed := t.TempDir()
+	outside := t.TempDir()
+	realAllowed, err := filepath.EvalSymlinks(allowed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realOutside, err := filepath.EvalSymlinks(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := cfgString("allowedRoot")
+	cfgSet("allowedRoot", realAllowed)
+	t.Cleanup(func() { cfgSet("allowedRoot", previous) })
+
+	t.Setenv("HARNESS_HUB_ALLOW_ANY_PATH", "0")
+	t.Setenv("HARNESS_HUB_ALLOW_ANY_DIR_BROWSE", "1")
+
+	if got, err := resolveBrowseWorkdir(realOutside); err != nil || got != realOutside {
+		t.Fatalf("browse resolver rejected external path: %q, %v", got, err)
+	}
+	if _, err := resolveWorkdir(realOutside); err == nil {
+		t.Fatal("browse flag must not widen resolveWorkdir")
 	}
 }

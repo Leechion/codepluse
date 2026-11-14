@@ -68,7 +68,7 @@ func TestSavedProviderPublicFlagsRemainAPIWithoutExposingKey(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	root := t.TempDir()
-	if err := Save(root, Provider{Name: "API", Agent: "codex", URL: "https://provider.test/v1", Model: "model-a", Key: "private-key"}); err != nil {
+	if _, err := SaveConfiguration(root, Provider{Name: "API", Agent: "codex", URL: "https://provider.test/v1", Model: "model-a", Key: "private-key"}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := Public(root)

@@ -99,17 +99,45 @@ type server struct {
 
 // resolveWorkdir constrains workdirs under allowedRoot (lexical + symlink).
 func resolveWorkdir(input string) (string, error) {
+	resolved, err := resolveExistingPath(input)
+	if err != nil {
+		return "", err
+	}
+	root := cfgString("allowedRoot")
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		realRoot = root
+	}
+	// 显式开关：允许把服务根之外的任意文件夹添加为工作空间。默认关闭，
+	// 保持 Web 部署「只暴露服务目录」的安全边界。
+	if os.Getenv("HARNESS_HUB_ALLOW_ANY_PATH") == "1" {
+		return resolved, nil
+	}
+	rel, err := filepath.Rel(realRoot, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("工作目录必须位于 %s 之内", root)
+	}
+	return resolved, nil
+}
+
+// resolveBrowseWorkdir resolves a path for the read-only directory browser:
+// the same absolute-path and symlink handling as resolveWorkdir, but without
+// the workspace-root restriction. It is only installed as codeg.Server's
+// browse resolver and is gated on HARNESS_HUB_ALLOW_ANY_DIR_BROWSE, so it can
+// never widen workdir/terminal/file access.
+func resolveBrowseWorkdir(input string) (string, error) {
+	return resolveExistingPath(input)
+}
+
+// resolveExistingPath turns input into an absolute path with symlinks in the
+// deepest existing ancestor resolved.
+func resolveExistingPath(input string) (string, error) {
 	if input == "" {
 		input = cfgString("workdir")
 	}
 	candidate, err := filepath.Abs(input)
 	if err != nil {
 		return "", fmt.Errorf("无法解析工作目录：%v", err)
-	}
-	root := cfgString("allowedRoot")
-	realRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		realRoot = root
 	}
 	ancestor := candidate
 	for {
@@ -129,15 +157,6 @@ func resolveWorkdir(input string) (string, error) {
 	if resolved != ancestor {
 		rel, _ := filepath.Rel(ancestor, candidate)
 		resolved = filepath.Join(resolved, rel)
-	}
-	// 显式开关：允许把服务根之外的任意文件夹添加为工作空间。默认关闭，
-	// 保持 Web 部署「只暴露服务目录」的安全边界。
-	if os.Getenv("HARNESS_HUB_ALLOW_ANY_PATH") == "1" {
-		return resolved, nil
-	}
-	rel, err := filepath.Rel(realRoot, resolved)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("工作目录必须位于 %s 之内", root)
 	}
 	return resolved, nil
 }

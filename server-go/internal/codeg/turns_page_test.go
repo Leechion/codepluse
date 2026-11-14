@@ -8,13 +8,9 @@ import (
 // seedTurns writes deterministic turns (role + timestamp) straight into the
 // store so pagination and fingerprint tests are reproducible.
 func seedTurns(s *Server, conversationID int, roles []string, millisBase int64) {
-	st := s.store
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	key := fmt.Sprint(conversationID)
-	st.Turns[key] = []Row{}
+	turns := make([]Row, 0, len(roles))
 	for i, role := range roles {
-		st.Turns[key] = append(st.Turns[key], Row{
+		turns = append(turns, Row{
 			"id":        fmt.Sprintf("turn-%d", i),
 			"role":      role,
 			"blocks":    []Row{{"type": "text", "text": fmt.Sprintf("body %d", i)}},
@@ -22,6 +18,9 @@ func seedTurns(s *Server, conversationID int, roles []string, millisBase int64) 
 			// millisBase is unused for timestamps above; kept for future tests.
 			"_millis": millisBase + int64(i),
 		})
+	}
+	if err := s.store.replaceTurnsLocked(conversationID, turns); err != nil {
+		panic(err)
 	}
 }
 
@@ -78,7 +77,7 @@ func TestGetFolderConversationTurns(t *testing.T) {
 	// The prefix fingerprint must equal hashing the prefix slice (turns[0..2)).
 	st := s.store
 	st.mu.Lock()
-	prefixTurns := st.Turns[fmt.Sprint(int(convID))][:2]
+	prefixTurns := st.turnsLocked(int(convID))[:2]
 	expected := prefixFingerprint(prefixTurns, fnvSeed)
 	st.mu.Unlock()
 	if prefixHash != expected {

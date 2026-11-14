@@ -50,6 +50,12 @@ func (s *Server) computerAvailable() Row {
 		"note": "窗口枚举与截图可用；输入驱动层待实现"}
 }
 
+func (s *Server) computerEnabled() bool {
+	s.computer.mu.Lock()
+	defer s.computer.mu.Unlock()
+	return s.computer.enabled
+}
+
 func (s *Server) computerCommand(command string, a Row) (any, error) {
 	switch command {
 	case "computer_available":
@@ -57,11 +63,15 @@ func (s *Server) computerCommand(command string, a Row) (any, error) {
 	case "get_computer_tools_settings":
 		return s.computerSettings(), nil
 	case "set_computer_tools_enabled":
+		s.computer.mu.Lock()
 		s.computer.enabled = a["enabled"] == true
+		s.computer.mu.Unlock()
 		return nil, nil
 	case "set_computer_tools_preferences":
 		if prefs, ok := a["prefs"].(Row); ok {
-			s.computer.prefs = prefs
+			s.computer.mu.Lock()
+			s.computer.prefs = clone(prefs)
+			s.computer.mu.Unlock()
 		}
 		return nil, nil
 	case "computer_status", "computer_shared_state":
@@ -73,6 +83,15 @@ func (s *Server) computerCommand(command string, a Row) (any, error) {
 		return nil, fmt.Errorf("电脑操作权限申请需要桌面助手，当前不可用")
 	case "computer_reveal_helper":
 		return nil, fmt.Errorf("桌面助手未安装")
+	case "computer_list_shareable_windows", "computer_window_thumbnail",
+		"computer_share_window", "computer_share_windows":
+		// The master switch must gate every capture/share path, otherwise the
+		// setting is cosmetic and a disabled user's screen can still be read.
+		if !s.computerEnabled() {
+			return nil, fmt.Errorf("电脑操作未启用")
+		}
+	}
+	switch command {
 	case "computer_list_shareable_windows":
 		return Row{"windows": listShareableWindows()}, nil
 	case "computer_window_thumbnail":

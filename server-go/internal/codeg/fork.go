@@ -74,7 +74,7 @@ func (s *Server) forkConversation(a Row) (Row, error) {
 			return nil, fmt.Errorf("含子任务的会话暂不支持分支")
 		}
 	}
-	turns := clone(st.Turns[fmt.Sprint(conversationID)])
+	turns := st.turnsLocked(conversationID)
 	point, nativeMessage := -1, ""
 	for i, turn := range turns {
 		if text(turn["role"]) != "assistant" {
@@ -128,8 +128,8 @@ func (s *Server) forkConversation(a Row) (Row, error) {
 	st.mu.Lock()
 	s.mu.Lock()
 	row = st.conversationLocked(conversationID)
-	currentTurns := st.Turns[fmt.Sprint(conversationID)]
-	if s.connections[cid] != c || s.callers[cid] != oldCaller || s.callers[tempCallerKey] != forkCaller || c.RuntimeID != sourceRuntime || row == nil || text(row["external_id"]) != originalNative || !reflect.DeepEqual(clone(currentTurns), turns) || number(row["child_count"]) != 0 {
+	currentTurns := st.turnsLocked(conversationID)
+	if s.connections[cid] != c || s.callers[cid] != oldCaller || s.callers[tempCallerKey] != forkCaller || c.RuntimeID != sourceRuntime || row == nil || text(row["external_id"]) != originalNative || !reflect.DeepEqual(currentTurns, turns) || number(row["child_count"]) != 0 {
 		s.mu.Unlock()
 		st.mu.Unlock()
 		return nil, fmt.Errorf("会话在分支过程中发生变化，请重试")
@@ -148,17 +148,30 @@ func (s *Server) forkConversation(a Row) (Row, error) {
 			return nil, fmt.Errorf("会话在分支过程中新增了子任务")
 		}
 	}
-	oldRows, oldTurns, oldNext := clone(st.Conversations), clone(st.Turns), st.Next
+	oldRows, oldNext := clone(st.Conversations), st.Next
 	sibling := clone(row)
 	siblingID := st.allocate()
 	sibling["id"], sibling["created_at"], sibling["updated_at"] = siblingID, timestamp(), timestamp()
 	sibling["external_id"], sibling["pinned_at"] = originalNative, nil
 	st.Conversations = append(st.Conversations, sibling)
-	st.Turns[fmt.Sprint(siblingID)] = clone(turns)
-	st.Turns[fmt.Sprint(conversationID)] = clone(turns[:point+1])
+	if err = st.replaceTurnsLocked(siblingID, turns); err != nil {
+		st.Conversations, st.Next = oldRows, oldNext
+		s.mu.Unlock()
+		st.mu.Unlock()
+		return nil, err
+	}
+	if err = st.replaceTurnsLocked(conversationID, turns[:point+1]); err != nil {
+		_ = st.replaceTurnsLocked(siblingID, nil)
+		st.Conversations, st.Next = oldRows, oldNext
+		s.mu.Unlock()
+		st.mu.Unlock()
+		return nil, err
+	}
 	row["external_id"], row["message_count"], row["updated_at"] = forkNative, point+1, timestamp()
 	if err = st.saveLocked(); err != nil {
-		st.Conversations, st.Turns, st.Next = oldRows, oldTurns, oldNext
+		_ = st.replaceTurnsLocked(conversationID, turns)
+		_ = st.replaceTurnsLocked(siblingID, nil)
+		st.Conversations, st.Next = oldRows, oldNext
 		s.mu.Unlock()
 		st.mu.Unlock()
 		return nil, err
@@ -167,12 +180,18 @@ func (s *Server) forkConversation(a Row) (Row, error) {
 	// disconnected wrapper for the source so reconnecting it cannot inherit
 	// the fork's collaboration identity.
 	siblingCID := id()
-	siblingConn := &Connection{ID: siblingCID, Agent: agent, AgentType: c.AgentType, Status: "disconnected", Options: sourceOptions, RuntimeID: sourceRuntime, ConversationID: siblingID, FolderID: number(row["folder_id"]), Events: []Row{}, Tools: []Row{}, SeenPermissions: map[string]string{}, RootID: fmt.Sprintf("conversation:%d", siblingID), Feedback: []Row{}, ToolClaims: map[string]bool{}}
+	siblingConn := &Connection{ID: siblingCID, Agent: agent, AgentType: c.AgentType, Status: "disconnected", Options: sourceOptions, RuntimeID: sourceRuntime, ConversationID: siblingID, FolderID: number(row["folder_id"]), Events: []Row{}, Tools: []Row{}, RootID: fmt.Sprintf("conversation:%d", siblingID), Feedback: []Row{}, ToolClaims: map[string]bool{}}
 	s.connections[siblingCID] = siblingConn
+	if sourceRuntime != "" {
+		s.byRuntime[sourceRuntime] = siblingConn
+	}
 	oldCaller.ConnectionID, oldCaller.RootID, oldCaller.Depth = siblingCID, siblingConn.RootID, 0
 	s.callers[siblingCID], s.callers[cid] = oldCaller, forkCaller
 	delete(s.callers, tempCallerKey)
 	c.RuntimeID, c.Options.SessionKey = forkRuntime, newKey
+	if forkRuntime != "" {
+		s.byRuntime[forkRuntime] = c
+	}
 	c.ConversationID, c.FolderID = conversationID, number(row["folder_id"])
 	changedRow, changedSibling := clone(row), clone(sibling)
 	s.mu.Unlock()

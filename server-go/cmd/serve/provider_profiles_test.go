@@ -12,7 +12,7 @@ import (
 
 func pinnedTestProvider(t *testing.T, tool string) string {
 	t.Helper()
-	if err := providers.Save(ROOT, providers.Provider{Name: "test", Agent: tool, URL: "https://api.test/v1", Key: "pinned-key", Model: "default-model"}); err != nil {
+	if _, err := providers.SaveConfiguration(ROOT, providers.Provider{Name: "test", Agent: tool, URL: "https://api.test/v1", Key: "pinned-key", Model: "default-model"}); err != nil {
 		t.Fatal(err)
 	}
 	list, err := providers.Public(ROOT)

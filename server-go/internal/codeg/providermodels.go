@@ -81,6 +81,59 @@ type listedModel struct {
 
 // resolveModelListKey 由 keySource 解出访问网关用的密钥。支持内联密钥、本地
 // 模型供应商 store、执行端 store 与 CC Switch；其余来源（pi/opencode）未移植。
+// sameHost reports whether two URLs address the same host (and port, when
+// both specify one). Scheme is intentionally ignored: a provider stored over
+// http may legitimately be reached over https through a gateway.
+func sameHost(a, b string) bool {
+	ua, err := url.Parse(strings.TrimSpace(a))
+	if err != nil || ua.Hostname() == "" {
+		return false
+	}
+	ub, err := url.Parse(strings.TrimSpace(b))
+	if err != nil || ub.Hostname() == "" {
+		return false
+	}
+	if !strings.EqualFold(ua.Hostname(), ub.Hostname()) {
+		return false
+	}
+	if ua.Port() != "" && ub.Port() != "" {
+		return ua.Port() == ub.Port()
+	}
+	return true
+}
+
+// modelListProviderURL returns the destination that was stored together with
+// the credential, so listProviderModels can pin its request to it.
+func (s *Server) modelListProviderURL(keySource map[string]any) (string, error) {
+	switch text(keySource["kind"]) {
+	case "executor", "ccswitch":
+		p, err := providers.Find(s.Root, text(keySource["providerId"]))
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(p.URL) != "" {
+			return p.URL, nil
+		}
+		return p.Env["ANTHROPIC_BASE_URL"], nil
+	case "provider":
+		id := int64(number(keySource["providerId"]))
+		if id == 0 {
+			return "", fmt.Errorf("providerId 无效")
+		}
+		list, err := modelproviders.List(s.Root)
+		if err != nil {
+			return "", err
+		}
+		for _, info := range list {
+			if info.ID == id {
+				return info.ApiURL, nil
+			}
+		}
+		return "", fmt.Errorf("供应商不存在")
+	}
+	return "", nil
+}
+
 func (s *Server) resolveModelListKey(keySource map[string]any) (string, error) {
 	switch text(keySource["kind"]) {
 	case "executor":
@@ -198,6 +251,21 @@ func (s *Server) listProviderModels(a Row) (any, error) {
 	if e != nil {
 		return nil, e
 	}
+	// A stored credential is only ever sent to the host it was stored with.
+	// Letting the request body pick baseUrl turns this endpoint into a
+	// credential-exfiltration primitive: point it at an attacker host and the
+	// Authorization header follows. Only the host is compared — the caller
+	// still controls the path prefix, which providers normalise differently.
+	keyKind := text(keySource["kind"])
+	if keyKind != "" && keyKind != "inline" {
+		stored, e := s.modelListProviderURL(keySource)
+		if e != nil {
+			return nil, e
+		}
+		if !sameHost(baseURL, stored) {
+			return nil, fmt.Errorf("API 地址与密钥来源的供应商不一致")
+		}
+	}
 
 	var listURL string
 	headers := map[string]string{}
@@ -231,7 +299,12 @@ func (s *Server) listProviderModels(a Row) (any, error) {
 	}
 
 	client := &http.Client{Timeout: 12 * time.Second}
-	if transport, ok := http.DefaultTransport.(*http.Transport); ok {
+	if keyKind == "inline" {
+		// A user-typed key has no stored destination, so the request may name
+		// any host; refuse private/loopback targets to keep this from becoming
+		// an SSRF probe.
+		client = safeFetchClient()
+	} else if transport, ok := http.DefaultTransport.(*http.Transport); ok {
 		t := transport.Clone()
 		target, _ := url.Parse(baseURL)
 		ip := net.ParseIP(target.Hostname())

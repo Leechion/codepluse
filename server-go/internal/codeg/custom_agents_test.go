@@ -126,9 +126,9 @@ func TestCustomRegistryAddEditPersistAndACPStream(t *testing.T) {
 			t.Fatal("custom agent misclassified")
 		}
 	}
-	loaded, err := newStore(s.store.file)
-	if err != nil || loaded.CustomAgents["fixture-worker"].Name != "Updated worker" {
-		t.Fatal("definition not persisted", err)
+	loaded := reloadStore(t, s.store.file)
+	if loaded.CustomAgents["fixture-worker"].Name != "Updated worker" {
+		t.Fatal("definition not persisted")
 	}
 	s.Hub.DeleteAgent(agent.ID)
 	s.loadCustomAgents()

@@ -16,6 +16,7 @@ import (
 
 	"harnesshub/internal/acp"
 	"harnesshub/internal/hub"
+	"harnesshub/internal/textutil"
 )
 
 // --- JSON extraction (prose JSON fallback) ---
@@ -1100,10 +1101,10 @@ func (o *Orchestrator) work(m *Mission) error {
 				m.unlock()
 			}
 			outcomes <- waveOutcome{task: t, messages: messages}
-			resultPayload, _ := json.Marshal(map[string]any{"taskId": t.ID, "complete": complete, "output": t.Output})
-			if len(resultPayload) > 20000 {
-				resultPayload = resultPayload[:20000]
-			}
+			// Truncate the payload field, never the serialized bytes: cutting
+			// JSON at 20000 bytes drops the closing brace and makes the event
+			// unparseable downstream.
+			resultPayload, _ := json.Marshal(map[string]any{"taskId": t.ID, "complete": complete, "output": textutil.TruncateRunes(t.Output, 18000)})
 			o.event(m, t.AgentID, m.ManagerID, string(resultPayload), "task.result")
 		}
 		m.lock()
@@ -1498,13 +1499,6 @@ func (o *Orchestrator) Get(id string) *Mission {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.missionLocked(id)
-}
-
-// Missions returns all missions, newest first.
-func (o *Orchestrator) Missions() []*Mission {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return append([]*Mission{}, o.missions...)
 }
 
 // Marshal snapshots one mission as JSON under its own lock.

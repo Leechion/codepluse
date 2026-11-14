@@ -341,7 +341,11 @@ func (s *Server) automationCommand(command string, a Row) (any, error) {
 		return st.runsFor(number(a["automationId"]), limit), nil
 	case "automation_create":
 		item := &Automation{ID: st.nextID, CreatedAt: timestamp(), UpdatedAt: timestamp(), Config: nil}
-		if err := parseDraft(item, a["draft"].(Row), true); err != nil {
+		draft, ok := a["draft"].(Row)
+		if !ok {
+			return nil, fmt.Errorf("draft 无效")
+		}
+		if err := parseDraft(item, draft, true); err != nil {
 			return nil, err
 		}
 		st.nextID++

@@ -56,6 +56,10 @@ func workspaceCommand(s *Server, st *Store, command string, a Row) (any, error) 
 			return nil, fmt.Errorf("项目目录不存在")
 		}
 		f := st.openFolderLocked(p, "regular")
+		// Granting a folder makes it a read/write root (readableRoots), so leave
+		// an audit trail: the local API guard is the boundary, this is the
+		// record of when the boundary was moved.
+		s.emit("audit://folder_open", Row{"folder_id": f["id"], "path": p})
 		return clone(f), st.saveLocked()
 	case "get_folder", "open_folder_by_id":
 		f := st.folderLocked(number(a["folderId"]))

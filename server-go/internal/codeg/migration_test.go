@@ -102,10 +102,7 @@ func TestCanvasTransactionsPersistAndBroadcastDenseRevisions(t *testing.T) {
 		t.Fatal(grouped)
 	}
 	command(t, s, "canvas_detach_member", Row{"regionId": region["id"], "conversationId": conversation["id"], "x": 100, "y": 600})
-	restored, err := newStore(s.store.file)
-	if err != nil {
-		t.Fatal(err)
-	}
+	restored := reloadStore(t, s.store.file)
 	if len(restored.CanvasNodes) != 3 {
 		t.Fatal(restored.CanvasNodes)
 	}

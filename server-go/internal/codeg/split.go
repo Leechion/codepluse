@@ -503,9 +503,31 @@ func (s *Server) respondTaskSplit(a Row) (any, error) {
 	}
 	// Take the card out of the registry first, under one lock, so a second
 	// respond (double click, two windows) cannot launch the plan twice.
+	// Snapshot what clearSplitLocked touches so a failed save can restore all
+	// of it, not just the registry entry: leaving PendingSplit cleared while
+	// the split still exists locks the user out of proposing anything new.
+	var savedPending Row
+	savedClaim := false
+	if current := s.connections[sp.Parent]; current != nil {
+		savedPending = current.PendingSplit
+		if sp.ParentToolUseID != "" {
+			savedClaim = current.ToolClaims[sp.ParentToolUseID]
+		}
+	}
 	s.clearSplitLocked(sp)
 	if err := s.saveSplitsLocked(); err != nil {
 		s.splits[sp.ID] = sp
+		if current := s.connections[sp.Parent]; current != nil {
+			if savedPending != nil {
+				current.PendingSplit = savedPending
+			}
+			if sp.ParentToolUseID != "" && savedClaim {
+				if current.ToolClaims == nil {
+					current.ToolClaims = map[string]bool{}
+				}
+				current.ToolClaims[sp.ParentToolUseID] = true
+			}
+		}
 		s.mu.Unlock()
 		return nil, err
 	}

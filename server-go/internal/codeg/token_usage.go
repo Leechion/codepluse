@@ -36,8 +36,7 @@ func (s *Server) collectUsageFacts() ([]usageFact, bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	facts := []usageFact{}
-	for key, rows := range st.Turns {
-		convID := atoiSafe(key)
+	for convID, rows := range st.allTurnsLocked() {
 		var conv Row
 		if convID > 0 {
 			conv = st.conversationLocked(convID)
@@ -648,16 +647,9 @@ func (s *Server) tokenUsageStatus() (any, error) {
 // facts store, so both modes complete immediately.
 func (s *Server) tokenUsageSync(a Row) (any, error) {
 	facts, _ := s.collectUsageFacts()
-	total := 0
 	st := s.store
 	st.mu.Lock()
-	for _, rows := range st.Turns {
-		for _, t := range rows {
-			if text(t["role"]) == "assistant" {
-				total++
-			}
-		}
-	}
+	total := st.assistantTurnCountLocked()
 	st.mu.Unlock()
 	tokens := 0.0
 	for _, f := range facts {

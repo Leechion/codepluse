@@ -22,6 +22,8 @@ import (
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/encoding/traditionalchinese"
+
+	"harnesshub/internal/textutil"
 )
 
 const (
@@ -47,20 +49,20 @@ func (s *Server) fetchURL(a Row) (Row, error) {
 		return nil, fmt.Errorf("只支持 http/https URL：%s", raw)
 	}
 	limit := fetchMaxText
-	if v, ok := a["max_chars"].(float64); ok && v > 0 {
-		limit = int(v)
-		if limit > fetchMaxText {
+	if v, ok := a["max_chars"].(float64); ok && v >= 1 {
+		// Compare in float space: int(v) overflows to MinInt64 for huge
+		// values (1e300), and a negative limit makes the slice below panic.
+		if v >= float64(fetchMaxText) {
 			limit = fetchMaxText
+		} else {
+			limit = int(v)
 		}
 	}
-	client := &http.Client{
-		Timeout: fetchTimeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= fetchMaxRedirect {
-				return fmt.Errorf("重定向次数过多")
-			}
-			return nil
-		},
+	// s.fetchClient blocks private/loopback/link-local targets at dial time;
+	// tests inject a permissive client through the same seam.
+	client := s.fetchClient
+	if client == nil {
+		client = safeFetchClient()
 	}
 	req, err := http.NewRequest(http.MethodGet, parsed.String(), nil)
 	if err != nil {
@@ -88,8 +90,10 @@ func (s *Server) fetchURL(a Row) (Row, error) {
 		text = htmlToText(payload)
 	}
 	truncated := false
-	if len(text) > limit {
-		text = text[:limit]
+	if utf8.RuneCountInString(text) > limit {
+		// limit is a character budget (see "chars" below); byte slicing would
+		// split a multi-byte rune and produce invalid UTF-8.
+		text = textutil.TruncateRunes(text, limit)
 		truncated = true
 	}
 	finalURL := parsed.String()

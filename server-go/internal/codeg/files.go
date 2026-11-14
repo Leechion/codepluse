@@ -60,6 +60,30 @@ func (s *Server) resolveFile(root, input string) (string, error) {
 	}
 	return "", fmt.Errorf("文件超出工作区目录")
 }
+
+func (s *Server) withinReadableRoots(p string) bool {
+	for _, base := range s.readableRoots() {
+		resolved, err := s.Resolve(base)
+		if err != nil {
+			continue
+		}
+		if withinRoot(resolved, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// diskBrowseAllowed reports whether the read-only directory browser may list
+// paths outside the authorised roots. It is separate from ALLOW_ANY_PATH
+// (which grants read/write by letting arbitrary folders become workspaces),
+// so a deployment can offer a whole-disk folder picker without widening file
+// access. ALLOW_ANY_PATH implies browse for convenience.
+func (s *Server) diskBrowseAllowed() bool {
+	return os.Getenv("HARNESS_HUB_ALLOW_ANY_PATH") == "1" ||
+		os.Getenv("HARNESS_HUB_ALLOW_ANY_DIR_BROWSE") == "1"
+}
+
 func (s *Server) files(command string, a Row) (any, error) {
 	root := text(a["rootPath"])
 	input := text(a["path"])
@@ -69,8 +93,10 @@ func (s *Server) files(command string, a Row) (any, error) {
 	var path string
 	var err error
 	if command == "list_directory_entries" || command == "list_directory_with_files" {
-		// 目录浏览是只读的，放开到任意路径：要能把服务根之外的文件夹
-		// 添加为工作空间，先得能看见并进得去。
+		// The read-only browser backs the "open folder" picker: listing outside
+		// the authorised roots requires an explicit switch. Written as a check
+		// here rather than relying on Resolve's side effect, so a future change
+		// to Resolve cannot silently widen this path again.
 		target := input
 		if target == "" {
 			target = root
@@ -81,7 +107,16 @@ func (s *Server) files(command string, a Row) (any, error) {
 		if !filepath.IsAbs(target) {
 			target = filepath.Join(s.Root, target)
 		}
-		path, err = s.Resolve(target)
+		resolve := s.Resolve
+		if s.diskBrowseAllowed() && s.BrowseResolve != nil {
+			// Browse-only deployment: list outside the workspace without
+			// granting workdir/terminal/file access to those paths.
+			resolve = s.BrowseResolve
+		}
+		path, err = resolve(target)
+		if err == nil && !s.diskBrowseAllowed() && !s.withinReadableRoots(path) {
+			err = fmt.Errorf("目录超出工作区范围：%s", path)
+		}
 	} else {
 		path, err = s.resolveFile(root, input)
 	}

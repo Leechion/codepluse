@@ -24,13 +24,17 @@ func seedUsage(t *testing.T, s *Server) {
 		return Row{"id": id(), "role": "assistant", "blocks": []Row{}, "timestamp": at,
 			"usage": u, "model": model, "duration_ms": dur}
 	}
-	st.Turns["11"] = []Row{
+	if err := st.replaceTurnsLocked(11, []Row{
 		mk(11, "2026-03-02T01:00:00Z", "glm-5.3-flash", usage(100, 20, 10, 30), 1500),
 		mk(11, "2026-03-03T01:30:00Z", "glm-5.3-flash", usage(200, 40, 20, 60), 2500),
+	}); err != nil {
+		t.Fatal(err)
 	}
-	st.Turns["12"] = []Row{
+	if err := st.replaceTurnsLocked(12, []Row{
 		mk(12, "2026-03-04T03:00:00Z", "deepseek-flash", usage(50, 5, 0, 10), 800),
 		mk(12, "2026-03-05T03:00:00Z", "deepseek-flash", usage(70, 7, 0, 14), 900),
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

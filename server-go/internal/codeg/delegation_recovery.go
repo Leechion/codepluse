@@ -122,7 +122,7 @@ func (s *Server) loadDelegations() error {
 		result := ""
 		if text(row["status"]) == "pending_review" {
 			status = "completed"
-			for _, turn := range st.Turns[fmt.Sprint(number(row["id"]))] {
+			for _, turn := range st.turnsLocked(number(row["id"])) {
 				if turn["role"] == "assistant" {
 					blocks, _ := turn["blocks"].([]any)
 					for _, raw := range blocks {

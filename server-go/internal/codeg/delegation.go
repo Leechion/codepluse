@@ -56,6 +56,7 @@ func (s *Server) extraMCP(agent *hub.Agent, o acp.Options, runtimeID string) []m
 		return nil
 	}
 	c.RuntimeID = runtimeID
+	s.byRuntime[runtimeID] = c
 	caller := s.callers[c.ID]
 	if caller == nil {
 		root := c.ID
@@ -501,6 +502,15 @@ func (s *Server) runDelegation(d *Delegation) {
 	cancelled := d.Status == "canceled"
 	s.mu.Unlock()
 	if cancelled {
+		// The session was created above; a cancel that raced in must not
+		// leave it (and its harness process) attached to nothing.
+		_ = s.disconnect(cid)
+		s.mu.Lock()
+		if d.ConnectionID == cid {
+			d.ConnectionID = ""
+		}
+		_ = s.saveDelegationsLocked()
+		s.mu.Unlock()
 		return
 	}
 	st := s.store
@@ -512,6 +522,14 @@ func (s *Server) runDelegation(d *Delegation) {
 	}
 	if d.ParentConversationID > 0 && st.conversationLocked(d.ParentConversationID) == nil {
 		st.mu.Unlock()
+		// Previously this returned with Status still "running", so the
+		// delegation never finished and resumeDelegation kept replaying an
+		// empty report forever.
+		s.mu.Lock()
+		d.Status = "failed"
+		d.Error = "父会话已删除，委派终止"
+		_ = s.saveDelegationsLocked()
+		s.mu.Unlock()
 		return
 	}
 	row := st.conversationLocked(d.ConversationID)
@@ -539,7 +557,7 @@ func (s *Server) runDelegation(d *Delegation) {
 	}
 	view := s.runtimeView(c.RuntimeID)
 	row["external_id"] = text(view["nativeSessionId"])
-	st.appendTurnLocked(number(row["id"]), "user", input)
+	st.appendTurnLocked(number(row["id"]), "user", input, nil)
 	_ = st.saveLocked()
 	s.changed(row)
 	if parentRow := st.conversationLocked(parentConv); parentRow != nil {

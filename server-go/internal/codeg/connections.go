@@ -48,7 +48,6 @@ type Connection struct {
 	// the question resolves or the turn/session goes.
 	PendingQuestion Row
 	Busy            bool
-	SeenPermissions map[string]string
 	Depth           int
 	RootID          string
 	Feedback        []Row
@@ -102,7 +101,7 @@ func (s *Server) connect(a Row) (string, error) {
 			model = ""
 		}
 	}
-	c := &Connection{ID: id(), Agent: agent, AgentType: wireAgent(agent), Status: "connecting", Options: acp.Options{SessionKey: key, Permission: permission, Workdir: cwd, Model: model, Mode: mode, Structured: false, Role: "manager"}, Events: []Row{}, Tools: []Row{}, SeenPermissions: map[string]string{}}
+	c := &Connection{ID: id(), Agent: agent, AgentType: wireAgent(agent), Status: "connecting", Options: acp.Options{SessionKey: key, Permission: permission, Workdir: cwd, Model: model, Mode: mode, Structured: false, Role: "manager"}, Events: []Row{}, Tools: []Row{}}
 	c.Depth = number(a["_depth"])
 	c.RootID = text(a["_root"])
 	c.Feedback = []Row{}
@@ -186,6 +185,7 @@ func (s *Server) connect(a Row) (string, error) {
 	s.mu.Lock()
 	c.RuntimeID = native
 	c.Status = "connected"
+	s.byRuntime[native] = c
 	s.mu.Unlock()
 	if warm {
 		s.putWarm(poolKey, c.ID)
@@ -281,6 +281,7 @@ func (s *Server) releaseWarm(cid string) {
 		c.Warm = false
 		runtimeID = c.RuntimeID
 		delete(s.connections, cid)
+		delete(s.byRuntime, runtimeID)
 	}
 	s.mu.Unlock()
 	if c != nil && runtimeID != "" {
@@ -450,18 +451,11 @@ func (s *Server) event(connectionID string, e Row) {
 	}
 }
 func (s *Server) nativeUpdate(runtimeID string, u map[string]any) {
-	s.mu.Lock()
-	cid := ""
-	for _, c := range s.connections {
-		if c.RuntimeID == runtimeID {
-			cid = c.ID
-			break
-		}
-	}
-	s.mu.Unlock()
-	if cid == "" {
+	c := s.connectionByRuntime(runtimeID)
+	if c == nil {
 		return
 	}
+	cid := c.ID
 	meta, _ := u["_meta"].(map[string]any)
 	claude, _ := meta["claudeCode"].(map[string]any)
 	parent := text(claude["parentToolUseId"])
@@ -494,6 +488,41 @@ func (s *Server) nativeUpdate(runtimeID string, u map[string]any) {
 		s.publishSession(cid)
 	}
 }
+
+// connectionByRuntime resolves a runtime session id to its connection in O(1).
+// Streaming updates arrive per chunk, so a linear scan here made every token
+// pay for the total number of open connections.
+func (s *Server) connectionByRuntime(runtimeID string) *Connection {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.byRuntime[runtimeID]
+}
+
+// nativePermission pushes permission-card changes to the UI. It replaces the
+// former 200ms loop that re-serialised every session record to discover the
+// same transitions.
+func (s *Server) nativePermission(runtimeID string, card *acp.PermissionCard, resolved bool, optionID string) {
+	c := s.connectionByRuntime(runtimeID)
+	if c == nil {
+		return
+	}
+	if resolved {
+		s.mu.Lock()
+		if c.Pending != nil && text(c.Pending["request_id"]) == card.ID {
+			c.Pending = nil
+		}
+		s.mu.Unlock()
+		s.event(c.ID, Row{"type": "permission_resolved", "request_id": card.ID, "option_id": optionID})
+		return
+	}
+	options := permissionOptions(card.Options)
+	row := Row{"request_id": card.ID, "tool_call": card.ToolCall, "options": options, "created_at": timestamp(), "queued": 0}
+	s.mu.Lock()
+	c.Pending = row
+	s.mu.Unlock()
+	s.event(c.ID, Row{"type": "permission_request", "request_id": card.ID, "tool_call": card.ToolCall, "options": options, "queued": 0})
+}
+
 func (s *Server) prompt(a Row) error {
 	cid := text(a["connectionId"])
 	s.mu.Lock()
@@ -607,9 +636,11 @@ func (s *Server) prompt(a Row) error {
 		s.releaseRun(c, mySeq)
 		return fmt.Errorf("会话不存在")
 	}
-	st.appendTurnLocked(convID, "user", prompt.String())
-	turns := st.Turns[fmt.Sprint(convID)]
-	turns[len(turns)-1]["blocks"] = userBlocks
+	if _, err := st.appendTurnLocked(convID, "user", prompt.String(), userBlocks); err != nil {
+		st.mu.Unlock()
+		s.releaseRun(c, mySeq)
+		return err
+	}
 	row["status"] = "in_progress"
 	row["external_id"] = text(s.runtimeView(c.RuntimeID)["nativeSessionId"])
 	s.changed(row)
@@ -684,23 +715,32 @@ func (s *Server) runWithContent(c *Connection, prompt string, content []map[stri
 	row := st.conversationLocked(c.ConversationID)
 	if row != nil {
 		if result.OK {
-			st.appendTurnLocked(c.ConversationID, "assistant", result.Output)
-			turns := st.Turns[fmt.Sprint(c.ConversationID)]
-			turns[len(turns)-1]["blocks"] = blocks
+			turn := Row{
+				"id":        id(),
+				"role":      "assistant",
+				"blocks":    blocks,
+				"timestamp": timestamp(),
+			}
 			if createdAt != "" {
-				turns[len(turns)-1]["timestamp"] = createdAt
+				turn["timestamp"] = createdAt
 			}
 			if sourceTurnID != "" {
-				turns[len(turns)-1]["source_turn_id"] = sourceTurnID
+				turn["source_turn_id"] = sourceTurnID
 			}
 			if usage, ok := result.Meta["usage"].(map[string]any); ok && len(usage) > 0 {
-				turns[len(turns)-1]["usage"] = usage
+				turn["usage"] = usage
 			}
 			if m := text(result.Meta["model"]); m != "" {
-				turns[len(turns)-1]["model"] = m
+				turn["model"] = m
 			}
 			if dm, ok := result.Meta["durationMs"]; ok {
-				turns[len(turns)-1]["duration_ms"] = dm
+				turn["duration_ms"] = dm
+			}
+			if err := st.insertTurnLocked(c.ConversationID, turn); err != nil {
+				fmt.Fprintln(os.Stderr, "[codeg-store] 保存助手回复失败：", err)
+			} else {
+				row["message_count"] = st.turnCountLocked(c.ConversationID)
+				row["updated_at"] = timestamp()
 			}
 			row["status"] = "pending_review"
 		} else {
@@ -735,15 +775,26 @@ func (s *Server) runWithContent(c *Connection, prompt string, content []map[stri
 func (s *Server) cancel(cid string) error {
 	s.mu.Lock()
 	c := s.connections[cid]
+	runtimeID := ""
+	if c != nil {
+		runtimeID = c.RuntimeID
+	}
 	s.mu.Unlock()
-	if c == nil {
+	if c == nil || runtimeID == "" {
 		return fmt.Errorf("连接不存在")
 	}
-	return s.Runtime.Cancel(c.RuntimeID)
+	// Read under the lock: connect() and prompt() rewrite these fields.
+	return s.Runtime.Cancel(runtimeID)
 }
 func (s *Server) disconnect(cid string) error {
 	s.mu.Lock()
 	c := s.connections[cid]
+	runtimeID := ""
+	busy := false
+	if c != nil {
+		runtimeID = c.RuntimeID
+		busy = c.Busy
+	}
 	s.mu.Unlock()
 	if c == nil {
 		return nil
@@ -751,8 +802,8 @@ func (s *Server) disconnect(cid string) error {
 	// The card can no longer be answered once the session is gone.
 	s.dropConnectionSplits(cid)
 	s.releaseQuestionsForConnection(cid)
-	if c.Busy {
-		_ = s.Runtime.Cancel(c.RuntimeID)
+	if busy && runtimeID != "" {
+		_ = s.Runtime.Cancel(runtimeID)
 	}
 	s.mu.Lock()
 	c.Status = "disconnected"
@@ -773,14 +824,9 @@ func (s *Server) connectionList() []Row {
 	return out
 }
 func (s *Server) runtimeView(runtimeID string) Row {
-	var views []Row
-	_ = json.Unmarshal(s.Runtime.ListJSON(""), &views)
-	for _, v := range views {
-		if text(v["id"]) == runtimeID {
-			return v
-		}
-	}
-	return Row{}
+	var v Row
+	_ = json.Unmarshal(s.Runtime.RecordJSON(runtimeID), &v)
+	return v
 }
 func (s *Server) publishSession(cid string) {
 	s.mu.Lock()
@@ -837,41 +883,4 @@ func (s *Server) snapshot(cid string) Row {
 		out["current_mode"] = m["currentModeId"]
 	}
 	return out
-}
-func (s *Server) permissionsLoop() {
-	for range time.NewTicker(200 * time.Millisecond).C {
-		s.mu.Lock()
-		connections := make([]*Connection, 0, len(s.connections))
-		for _, c := range s.connections {
-			connections = append(connections, c)
-		}
-		s.mu.Unlock()
-		for _, c := range connections {
-			v := s.runtimeView(c.RuntimeID)
-			cards, _ := v["permissions"].([]any)
-			for _, raw := range cards {
-				p, _ := raw.(map[string]any)
-				pid, state := text(p["id"]), text(p["state"])
-				s.mu.Lock()
-				previous := c.SeenPermissions[pid]
-				c.SeenPermissions[pid] = state
-				s.mu.Unlock()
-				if previous == state {
-					continue
-				}
-				if state == "pending" {
-					card := Row{"request_id": pid, "tool_call": p["toolCall"], "options": permissionOptions(p["options"]), "created_at": timestamp(), "queued": 0}
-					s.mu.Lock()
-					c.Pending = card
-					s.mu.Unlock()
-					s.event(c.ID, Row{"type": "permission_request", "request_id": pid, "tool_call": p["toolCall"], "options": permissionOptions(p["options"]), "queued": 0})
-				} else if previous == "pending" {
-					s.mu.Lock()
-					c.Pending = nil
-					s.mu.Unlock()
-					s.event(c.ID, Row{"type": "permission_resolved", "request_id": pid, "option_id": p["selected"]})
-				}
-			}
-		}
-	}
 }

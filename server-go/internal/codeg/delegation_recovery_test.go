@@ -94,6 +94,7 @@ func TestInterruptedDelegationRestartsInOriginalConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { restored.Close() })
 	restoredCID := command(t, restored, "acp_connect", Row{"agentType": "codex", "sessionId": native, "workingDir": s.Root}).(string)
 	restored.mu.Lock()
 	restoredCaller := *restored.callers[restoredCID]

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -46,6 +45,11 @@ func testServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Tests exercise fetch_url against httptest servers on 127.0.0.1, which the
+	// production dial guard deliberately blocks. Inject a permissive client
+	// instead of weakening safeFetchClient.
+	s.fetchClient = &http.Client{Timeout: 5 * time.Second}
+	t.Cleanup(func() { s.Close() })
 	t.Cleanup(rt.Shutdown)
 	return s
 }
@@ -86,9 +90,9 @@ func TestOriginalConversationContractsPersistAcrossRestart(t *testing.T) {
 	if stale["accepted"] != false {
 		t.Fatal("lost tab CAS")
 	}
-	loaded, err := newStore(s.store.file)
-	if err != nil || len(loaded.Conversations) != 1 || len(loaded.Tabs) != 1 {
-		t.Fatalf("persistence: %v %v", loaded, err)
+	loaded := reloadStore(t, s.store.file)
+	if len(loaded.Conversations) != 1 || len(loaded.Tabs) != 1 {
+		t.Fatalf("persistence: %v", loaded.Conversations)
 	}
 }
 func TestOriginalWebSocketReceivesRealACPStream(t *testing.T) {
@@ -287,20 +291,22 @@ func TestHistoryRestoresDelegationCardsFromPersistedChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = st.Close() })
 	f := st.openFolderLocked(t.TempDir(), "regular")
 	p := st.createConversationLocked(number(f["id"]), "claude_code", "parent", 0)
 	parentID := number(p["id"])
-	st.appendTurnLocked(parentID, "assistant", "")
-	st.Turns[fmt.Sprint(parentID)][0]["blocks"] = []Row{{"type": "tool_use", "tool_use_id": "native-call-1", "tool_name": "mcp__codeg-mcp__delegate_to_agent"}}
+	if err := st.insertTurnLocked(parentID, Row{
+		"id": id(), "role": "assistant", "timestamp": timestamp(),
+		"blocks": []Row{{"type": "tool_use", "tool_use_id": "native-call-1", "tool_name": "mcp__codeg-mcp__delegate_to_agent"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	child := st.createConversationLocked(number(f["id"]), "codex", "calculate", parentID)
 	child["parent_tool_use_id"], child["delegation_call_id"], child["status"] = "native-call-1", "task-1", "pending_review"
 	if err := st.saveLocked(); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := newStore(st.file)
-	if err != nil {
-		t.Fatal(err)
-	}
+	restored := reloadStore(t, st.file)
 	turns := restored.turnsWithDelegationsLocked(parentID)
 	block := turns[0]["blocks"].([]any)[0].(map[string]any)
 	meta := block["meta"].(map[string]any)["codeg.delegation"].(map[string]any)

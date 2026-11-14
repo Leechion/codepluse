@@ -56,17 +56,14 @@ func TestImagePromptHydratesUploadedImageAndPersistsHistory(t *testing.T) {
 		s.mu.Unlock()
 		if !busy {
 			s.store.mu.Lock()
-			turns := clone(s.store.Turns[itoa(conversation)])
+			turns := s.store.turnsLocked(conversation)
 			s.store.mu.Unlock()
 			encoded, _ := json.Marshal(turns)
 			if len(turns) != 2 || !bytes.Contains(encoded, []byte("image:image/png:"+base64.StdEncoding.EncodeToString(image)+"|text:then|image:image/jpeg:"+other)) || !bytes.Contains(encoded, []byte(`"mime_type":"image/png"`)) {
 				t.Fatalf("missing image in prompt or history: %s", encoded)
 			}
-			restored, err := newStore(s.store.file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			persisted, _ := json.Marshal(restored.Turns[itoa(conversation)])
+			restored := reloadStore(t, s.store.file)
+			persisted, _ := json.Marshal(restored.turnsLocked(conversation))
 			if !bytes.Contains(persisted, []byte(other)) {
 				t.Fatalf("second image lost after reload: %s", persisted)
 			}
@@ -118,11 +115,8 @@ func TestResourceLinkIsSentAndRestored(t *testing.T) {
 		busy, conv := s.connections[cid].Busy, s.connections[cid].ConversationID
 		s.mu.Unlock()
 		if !busy {
-			restored, err := newStore(s.store.file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			turns := restored.Turns[itoa(conv)]
+			restored := reloadStore(t, s.store.file)
+			turns := restored.turnsLocked(conv)
 			if len(turns) != 2 {
 				t.Fatalf("unexpected turns: %v", turns)
 			}
@@ -171,11 +165,8 @@ func TestEmbeddedResourcesReachAgentAndRestore(t *testing.T) {
 		busy, conv := s.connections[cid].Busy, s.connections[cid].ConversationID
 		s.mu.Unlock()
 		if !busy {
-			restored, err := newStore(s.store.file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			turns := restored.Turns[itoa(conv)]
+			restored := reloadStore(t, s.store.file)
+			turns := restored.turnsLocked(conv)
 			if len(turns) != 2 {
 				t.Fatalf("unexpected turns: %v", turns)
 			}
@@ -245,7 +236,7 @@ func TestUploadAttachmentStoresBytesOnAgentHost(t *testing.T) {
 		s.mu.Unlock()
 		if !busy {
 			s.store.mu.Lock()
-			turns := clone(s.store.Turns[itoa(conversation)])
+			turns := s.store.turnsLocked(conversation)
 			s.store.mu.Unlock()
 			if len(turns) < 2 {
 				t.Fatalf("agent did not produce an answer: %v", turns)

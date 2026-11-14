@@ -205,7 +205,13 @@ func (s *Server) browserAgentSnapshot(tabID string, maxChars int) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	value := text(result["result"].(Row)["value"])
+	inner, ok := result["result"].(Row)
+	if !ok {
+		// CDP omits "result" when the page crashed or the context is gone;
+		// a blind assertion would panic the request instead of reporting it.
+		return nil, fmt.Errorf("浏览器返回结果格式异常")
+	}
+	value := text(inner["value"])
 	var snapshot Row
 	_ = json.Unmarshal([]byte(value), &snapshot)
 	return snapshot, nil
@@ -235,7 +241,13 @@ func (s *Server) browserAgentAct(tabID string, request any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	value := text(result["result"].(Row)["value"])
+	inner, ok := result["result"].(Row)
+	if !ok {
+		// CDP omits "result" when the page crashed or the context is gone;
+		// a blind assertion would panic the request instead of reporting it.
+		return nil, fmt.Errorf("浏览器返回结果格式异常")
+	}
+	value := text(inner["value"])
 	var outcome Row
 	_ = json.Unmarshal([]byte(value), &outcome)
 	return outcome, nil

@@ -95,6 +95,33 @@ func waitForTaskStatus(t *testing.T, s *Server, id int, statuses ...string) *Wor
 	}
 }
 
+// waitForTaskSettledAfter waits for an asynchronous operation to start (the
+// task leaves `from`) and then settle on one of `statuses`. waitForTaskStatus
+// returns immediately when the current status is already in the accepted set,
+// which races a merge goroutine that has not run yet.
+func waitForTaskSettledAfter(t *testing.T, s *Server, id int, from string, statuses ...string) *WorkTask {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	left := false
+	for {
+		task := taskOf(t, command(t, s, "work_task_get", Row{"id": id}))
+		if task.Status != from {
+			left = true
+		}
+		if left {
+			for _, want := range statuses {
+				if task.Status == want {
+					return task
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("任务 30 秒内未从 %s 到达 %v，当前 %s", from, statuses, task.Status)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 func TestWorkTaskBoardOperations(t *testing.T) {
 	s := testServer(t)
 	command(t, s, "open_folder", Row{"path": s.Root})
@@ -196,7 +223,7 @@ func TestWorkTaskLifecycleWithWorktree(t *testing.T) {
 
 	// Merge lands the branch and finishes the task.
 	command(t, s, "work_task_merge", Row{"id": task.ID, "message": "合并测试", "deleteWorktree": false})
-	task = waitForTaskStatus(t, s, task.ID, "done", "failed", "review")
+	task = waitForTaskSettledAfter(t, s, task.ID, "review", "done", "failed", "review")
 	if task.Status != "done" {
 		lastErr := ""
 		if task.LastError != nil {

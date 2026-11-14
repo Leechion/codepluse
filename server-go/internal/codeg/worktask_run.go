@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"harnesshub/internal/extra"
+	"harnesshub/internal/textutil"
 )
 
 func taskWorktreeName(t *WorkTask) string { return fmt.Sprintf("task-%d", t.ID) }
@@ -56,6 +57,10 @@ func execGit(cwd string, args ...string) (string, error) {
 func (s *Server) claimTask(taskID int) {
 	st := s.tasks2
 	st.mu.Lock()
+	// The queued flip was written by the Rust front door; re-read before the
+	// engine claims against a stale copy. Called from a fresh goroutine, so
+	// the lock is ours and the read stays consistent with the reload.
+	st.reloadIfChangedLocked()
 	t := st.find(taskID)
 	if t == nil || t.Status != "queued" {
 		st.mu.Unlock()
@@ -87,7 +92,8 @@ func (s *Server) claimTask(taskID int) {
 		t.LastError = strPtr(err.Error())
 		t.FailureReason = strPtr("setup_error")
 		st.setStatus(t, "failed", "engine", Row{"error": err.Error()})
-		st.save()
+		st.saveLocked()
+		st.mu.Unlock()
 	}
 }
 
@@ -140,10 +146,7 @@ func (s *Server) runTask(t *WorkTask) error {
 	t.ConnectionID = strPtr(cid)
 	st.mu.Unlock()
 
-	title := t.Title
-	if len(title) > 80 {
-		title = title[:80]
-	}
+	title := textutil.TruncateRunes(t.Title, 80)
 	s.store.mu.Lock()
 	row := s.store.createConversationLocked(t.FolderID, agentType, title, 0)
 	convID := number(row["id"])
@@ -207,7 +210,8 @@ func (s *Server) runTask(t *WorkTask) error {
 			t.LastError = strPtr("会话执行失败或被取消")
 			t.FailureReason = strPtr("agent_error")
 			st.setStatus(t, "failed", "engine", nil)
-			st.save()
+			st.saveLocked()
+			st.mu.Unlock()
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -218,7 +222,8 @@ func (s *Server) runTask(t *WorkTask) error {
 			t.FailureReason = strPtr("agent_error")
 			t.LastError = strPtr("运行超过 24 小时上限")
 			st.setStatus(t, "failed", "engine", nil)
-			st.save()
+			st.saveLocked()
+			st.mu.Unlock()
 			return nil
 		}
 	}
@@ -279,7 +284,7 @@ func (s *Server) settleTask(t *WorkTask, convID int) {
 func (s *Server) lastAssistantText(convID int) string {
 	s.store.mu.Lock()
 	defer s.store.mu.Unlock()
-	turns := s.store.Turns[fmt.Sprint(convID)]
+	turns := s.store.turnsLocked(convID)
 	for i := len(turns) - 1; i >= 0; i-- {
 		if text(turns[i]["role"]) != "assistant" {
 			continue
@@ -312,11 +317,18 @@ func diffStats(folderPath, name string) (files, additions, deletions int) {
 		parts := strings.Fields(line)
 		if len(parts) >= 3 {
 			files++
+			// Accumulate: Sscanf into the named return values overwrote them,
+			// so a multi-file diff reported only the last file's line counts.
+			var add, del int
 			if parts[0] != "-" {
-				fmt.Sscanf(parts[0], "%d", &additions)
+				if _, err := fmt.Sscanf(parts[0], "%d", &add); err == nil {
+					additions += add
+				}
 			}
 			if parts[1] != "-" {
-				fmt.Sscanf(parts[1], "%d", &deletions)
+				if _, err := fmt.Sscanf(parts[1], "%d", &del); err == nil {
+					deletions += del
+				}
 			}
 		}
 	}
@@ -325,20 +337,25 @@ func diffStats(folderPath, name string) (files, additions, deletions int) {
 
 // ----------------------------- merge -----------------------------
 
-var taskMergeLocks = map[string]*sync.Mutex{}
+// mergeLock returns the per-folder merge mutex, creating it on first use.
+// The map lives on Server (not at package scope) so two servers -- including
+// parallel tests -- never share a lock, and sync.Map keeps concurrent
+// dispatchTaskMerge calls race-free. Entries are intentionally not deleted:
+// their count is bounded by the number of folders, and deleting a lock that
+// another goroutine just loaded would hand out two different mutexes.
+func (s *Server) mergeLock(folderID int) *sync.Mutex {
+	v, _ := s.mergeLocks.LoadOrStore(folderID, new(sync.Mutex))
+	return v.(*sync.Mutex)
+}
 
 // dispatchTaskMerge runs or queues a merge; returns true when queued.
 func (s *Server) dispatchTaskMerge(t *WorkTask, message string, deleteWorktree bool) bool {
 	st := s.tasks2
-	key := fmt.Sprint(t.FolderID)
-	lock := taskMergeLocks[key]
-	if lock == nil {
-		lock = &sync.Mutex{}
-		taskMergeLocks[key] = lock
-	}
+	lock := s.mergeLock(t.FolderID)
 	if !lock.TryLock() {
+		// Called from workTaskCommand, which already holds st.mu.
 		t.MergeQueued = Row{"message": message, "delete_worktree": deleteWorktree, "queued_at": timestamp()}
-		st.save()
+		st.saveLocked()
 		s.emitTaskChanged(t.ID)
 		return true
 	}
@@ -352,6 +369,10 @@ func (s *Server) dispatchTaskMerge(t *WorkTask, message string, deleteWorktree b
 // processTaskMerge lands the worktree branch onto the base and finishes the task.
 func (s *Server) processTaskMerge(t *WorkTask, message string, deleteWorktree bool) {
 	st := s.tasks2
+	// Run the queue on every exit path, including a failed merge. Previously
+	// only the success path drained it, so one failure stranded every task
+	// already queued for the same folder until the app restarted.
+	defer s.drainMergeQueue(t.FolderID)
 	st.mu.Lock()
 	st.setStatus(t, "merging", "engine", nil)
 	st.mu.Unlock()
@@ -407,18 +428,39 @@ func (s *Server) processTaskMerge(t *WorkTask, message string, deleteWorktree bo
 	}
 	st.mu.Unlock()
 	st.save()
-	// Pull the next queued merge of the same project, if any.
+}
+
+// drainMergeQueue starts the next queued merge for a folder. It takes the
+// same per-folder lock the dispatcher uses, so the queued merge runs strictly
+// after the current one releases it.
+func (s *Server) drainMergeQueue(folderID int) {
+	st := s.tasks2
+	st.mu.Lock()
+	var next *WorkTask
+	var message string
+	var deleteWorktree bool
 	for _, other := range st.Tasks {
-		if other.FolderID == t.FolderID && other.MergeQueued != nil {
-			msg := text(other.MergeQueued["message"])
-			del := other.MergeQueued["delete_worktree"] == true
+		if other.FolderID == folderID && other.MergeQueued != nil {
+			next = other
+			message = text(other.MergeQueued["message"])
+			deleteWorktree = other.MergeQueued["delete_worktree"] == true
 			other.MergeQueued = nil
-			go func(task *WorkTask, m string, d bool) {
-				s.processTaskMerge(task, m, d)
-			}(other, msg, del)
 			break
 		}
 	}
+	if next != nil {
+		st.saveLocked()
+	}
+	st.mu.Unlock()
+	if next == nil {
+		return
+	}
+	go func() {
+		lock := s.mergeLock(folderID)
+		lock.Lock()
+		defer lock.Unlock()
+		s.processTaskMerge(next, message, deleteWorktree)
+	}()
 }
 
 // squashMerge lands a branch as a single commit on the base workdir.
@@ -497,6 +539,9 @@ func (s *Server) taskChangedFiles(t *WorkTask) (any, error) {
 func (s *Server) TickWorkTasks() {
 	st := s.tasks2
 	st.mu.Lock()
+	// Board state is Rust-owned; pick up its writes before acting on
+	// scheduled/queued rows.
+	st.reloadIfChangedLocked()
 	items := append([]*WorkTask{}, st.Tasks...)
 	st.mu.Unlock()
 	now := time.Now()
@@ -507,7 +552,7 @@ func (s *Server) TickWorkTasks() {
 				if t.Status == "todo" {
 					t.ScheduledAt = nil
 					st.setStatus(t, "queued", "scheduler", nil)
-					st.save()
+					st.saveLocked()
 					st.mu.Unlock()
 					s.claimTask(t.ID)
 					continue

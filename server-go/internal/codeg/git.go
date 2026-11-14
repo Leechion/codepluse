@@ -187,6 +187,8 @@ func (s *Server) gitCommand(command string, a Row) (any, error) {
 		}
 		return Row{"exists": exists, "ref_missing": refErr != nil, "data": encoded, "byte_size": len(data), "too_large": len(data) > cap}, nil
 	case "git_add_files", "git_commit":
+		// git_commit 已翻转 Rust（I 组，git.rs:commit_command，含
+		// folder://git-commit-succeeded 事件）；Go 实现留给测试。
 		files := []string{}
 		for _, raw := range array(a["files"]) {
 			p, e := s.resolveFile(path, text(raw))

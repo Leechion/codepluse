@@ -173,6 +173,11 @@ func (s *Server) instanceCommand(command string, a Row) (any, error) {
 		s.mu.Lock()
 		s.Hub.CreateAgent(agent)
 		err := s.saveInstancesLocked()
+		if err != nil {
+			// Disk and memory must agree; otherwise the instance shows up in
+			// the UI and disappears after a restart.
+			s.Hub.DeleteAgent(agent.ID)
+		}
 		s.mu.Unlock()
 		if err != nil {
 			return nil, err
@@ -226,6 +231,11 @@ func (s *Server) instanceCommand(command string, a Row) (any, error) {
 		}
 		var updated *hub.Agent
 		s.mu.Lock()
+		var before *hub.Agent
+		if existing := s.Hub.Agent(agentID); existing != nil {
+			snapshot := *existing
+			before = &snapshot
+		}
 		s.Hub.UpdateAgent(agentID, func(ag *hub.Agent) {
 			if ag.Wire == "" || !strings.HasPrefix(ag.Wire, "inst_") {
 				return // never mutate a built-in
@@ -250,6 +260,9 @@ func (s *Server) instanceCommand(command string, a Row) (any, error) {
 		}
 		view := s.instanceView(updated)
 		err := s.saveInstancesLocked()
+		if err != nil && before != nil {
+			*updated = *before // roll the in-memory edit back
+		}
 		s.mu.Unlock()
 		if err != nil {
 			return nil, err
@@ -273,6 +286,9 @@ func (s *Server) instanceCommand(command string, a Row) (any, error) {
 		s.Hub.DeleteAgent(agentID)
 		wire := agent.Wire
 		err := s.saveInstancesLocked()
+		if err != nil {
+			s.Hub.CreateAgent(agent) // restore so memory matches the file again
+		}
 		s.mu.Unlock()
 		if err != nil {
 			return nil, err

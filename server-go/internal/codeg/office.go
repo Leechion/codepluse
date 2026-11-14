@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -92,11 +93,18 @@ func (s *Server) officeSkills() (any, error) {
 	return Row{"skills": skills}, nil
 }
 
+// Skill ids are flat directory entries, never paths: anything with a
+// separator, a drive letter or ".." could walk out of the skill directory.
+var officeSkillName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+
 func (s *Server) officeSkillContent(skillID string) (any, error) {
 	if !strings.HasPrefix(skillID, "office-skill-") {
 		return nil, fmt.Errorf("未知的技能：%s", skillID)
 	}
 	name := strings.TrimPrefix(skillID, "office-skill-")
+	if !officeSkillName.MatchString(name) {
+		return nil, fmt.Errorf("技能 ID 无效")
+	}
 	for _, dir := range s.officeSkillDirs() {
 		data, err := os.ReadFile(filepath.Join(dir, name+".md"))
 		if err == nil {

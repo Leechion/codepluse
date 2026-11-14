@@ -42,7 +42,19 @@ func terminalShell(shell string) (string, error) {
 	if strings.ContainsAny(shell, "\r\n\x00") {
 		return "", fmt.Errorf("Shell 路径无效")
 	}
-	return exec.LookPath(shell)
+	resolved, err := exec.LookPath(shell)
+	if err != nil {
+		return "", err
+	}
+	// A custom path used to be accepted verbatim, which let any caller point
+	// the "shell" at an arbitrary executable (including one dropped by a
+	// previous write). Restrict it to known interactive shells.
+	switch strings.ToLower(filepath.Base(resolved)) {
+	case "pwsh.exe", "pwsh", "powershell.exe", "powershell",
+		"cmd.exe", "cmd", "bash.exe", "bash", "wsl.exe", "sh", "zsh":
+		return resolved, nil
+	}
+	return "", fmt.Errorf("不支持的自定义 Shell：%s", filepath.Base(resolved))
 }
 func (s *Server) terminalCommand(command string, a Row) (any, error) {
 	tid := text(a["terminalId"])
@@ -120,6 +132,7 @@ func (s *Server) terminalCommand(command string, a Row) (any, error) {
 				exitText = fmt.Sprint(code)
 			}
 			s.emit("terminal://exit/"+tid, Row{"terminal_id": tid, "data": exitText, "seq": 0, "generation": generation})
+			s.pruneTerminals(tid)
 		}()
 		if initial := text(a["initialCommand"]); initial != "" {
 			go func() { t.writeMu.Lock(); defer t.writeMu.Unlock(); _, _ = pty.Write([]byte(initial + "\r")) }()
@@ -182,6 +195,33 @@ func (s *Server) terminalCommand(command string, a Row) (any, error) {
 	}
 	return nil, fmt.Errorf("未知终端接口：%s", command)
 }
+// maxRetainedTerminals bounds the exited-session table. Each entry keeps up to
+// 2 MB of output, and nothing removed them unless the user killed the tab, so
+// a long-running window grew without limit.
+const maxRetainedTerminals = 64
+
+func (s *Server) pruneTerminals(keep string) {
+	s.terminalMu.Lock()
+	defer s.terminalMu.Unlock()
+	if len(s.terminals) <= maxRetainedTerminals {
+		return
+	}
+	for id, t := range s.terminals {
+		if len(s.terminals) <= maxRetainedTerminals {
+			return
+		}
+		if id == keep {
+			continue
+		}
+		t.mu.Lock()
+		alive := t.Alive
+		t.mu.Unlock()
+		if !alive {
+			delete(s.terminals, id)
+		}
+	}
+}
+
 func (s *Server) readTerminal(t *TerminalSession) {
 	defer close(t.readDone)
 	reader := bufio.NewReader(t.pty)
@@ -208,8 +248,11 @@ func (s *Server) readTerminal(t *TerminalSession) {
 				t.Output = t.Output[cut:]
 			}
 			t.Seq++
-			s.emit("terminal://output/"+t.ID, Row{"terminal_id": t.ID, "data": chunk, "seq": t.Seq, "generation": t.Generation})
+			seq := t.Seq
 			t.mu.Unlock()
+			// Emit outside t.mu: emit takes s.mu, and holding a session lock
+			// while acquiring the server lock inverts the spawn path's order.
+			s.emit("terminal://output/"+t.ID, Row{"terminal_id": t.ID, "data": chunk, "seq": seq, "generation": t.Generation})
 		}
 		if err != nil {
 			return
@@ -230,5 +273,8 @@ func (s *Server) Close() {
 	s.terminalMu.Unlock()
 	for _, t := range all {
 		t.close()
+	}
+	if s.store != nil {
+		_ = s.store.Close()
 	}
 }

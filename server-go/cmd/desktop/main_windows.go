@@ -154,10 +154,14 @@ func ensureBackend(root, base string, port int) error {
 	}
 	// 桌面版是本机单用户、后端只绑 127.0.0.1，默认放开目录浏览，「打开文件夹」
 	// 才能选到服务根之外的整机路径（与 scripts/start-codeg.ps1 的行为对齐）。
-	// 外部已显式设置 HARNESS_HUB_ALLOW_ANY_PATH 时尊重其值（设 0 可收回边界）。
-	// 注意这只放开只读的目录列举；文件读写仍要求目标位于服务根或已添加的工作空间内。
+	// 外部已显式设置时尊重其值（设 0 可收回边界）。
+	// ALLOW_ANY_PATH 让根外目录可被加入工作空间（随后可读写）；
+	// ALLOW_ANY_DIR_BROWSE 只放开只读列举，两者分开以便单独收紧。
 	if _, ok := os.LookupEnv("HARNESS_HUB_ALLOW_ANY_PATH"); !ok {
 		env = append(env, "HARNESS_HUB_ALLOW_ANY_PATH=1")
+	}
+	if _, ok := os.LookupEnv("HARNESS_HUB_ALLOW_ANY_DIR_BROWSE"); !ok {
+		env = append(env, "HARNESS_HUB_ALLOW_ANY_DIR_BROWSE=1")
 	}
 	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = log, log

@@ -22,6 +22,11 @@ type Server struct {
 	Hub        *hub.Hub
 	Root, Base string
 	Resolve    func(string) (string, error)
+	// BrowseResolve resolves paths for the read-only directory browser when
+	// HARNESS_HUB_ALLOW_ANY_DIR_BROWSE is enabled. It has no workspace-root
+	// restriction and is never used for terminal/workdir/file access; nil
+	// falls back to Resolve.
+	BrowseResolve func(string) (string, error)
 	// AgentAvailable reports whether an agent's backing adapter/executable is
 	// actually present on this machine. It is injected by the wiring layer,
 	// which owns the binary-resolution logic. When nil, every enabled agent is
@@ -32,6 +37,7 @@ type Server struct {
 	store          *Store
 	mu             sync.Mutex
 	connections    map[string]*Connection
+	byRuntime      map[string]*Connection // runtime session id -> connection
 	subscribers    map[chan Row]bool
 	tasks          map[string]*Delegation
 	callers        map[string]*Caller
@@ -56,6 +62,12 @@ type Server struct {
 	warm    map[string][]warmEntry
 	warming map[string]bool
 	started bool // guarded by warmMu; prewarming is a runtime-only behavior
+	// mergeLocks serialises work-task merges per folder (see worktask_run.go).
+	mergeLocks sync.Map
+	// fetchClient is the outbound HTTP client used by fetch_url. It defaults
+	// to safeFetchClient (private/loopback addresses blocked); tests inject a
+	// permissive client here instead of weakening the production default.
+	fetchClient *http.Client
 	// devOnce/devHTTP back the optional HARNESS_HUB_DEV_FRONTEND reverse proxy
 	// that forwards non-API traffic to a `next dev` server (see ServeHTTP).
 	devOnce sync.Once
@@ -67,7 +79,7 @@ func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (s
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{Runtime: rt, Hub: h, Root: root, Base: base, Resolve: resolve, store: st, connections: map[string]*Connection{}, subscribers: map[chan Row]bool{}, tasks: map[string]*Delegation{}, callers: map[string]*Caller{}, splits: map[string]*taskSplit{}, questions: map[string]*parkedQuestion{}, terminals: map[string]*TerminalSession{}, warm: map[string][]warmEntry{}, warming: map[string]bool{}}
+	s := &Server{Runtime: rt, Hub: h, Root: root, Base: base, Resolve: resolve, store: st, connections: map[string]*Connection{}, byRuntime: map[string]*Connection{}, subscribers: map[chan Row]bool{}, tasks: map[string]*Delegation{}, callers: map[string]*Caller{}, splits: map[string]*taskSplit{}, questions: map[string]*parkedQuestion{}, terminals: map[string]*TerminalSession{}, warm: map[string][]warmEntry{}, warming: map[string]bool{}}
 	s.auto = newAutoStore(root)
 	s.forge = newForgeStore(root)
 	s.tasks2 = newTaskStore(root)
@@ -75,6 +87,13 @@ func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (s
 	s.tasks2.onChange = func(taskID int) { s.emit("task://changed", Row{"id": taskID}) }
 	s.browser = &browserManager{console: map[string][]Row{}}
 	s.computer = &computerState{}
+	s.fetchClient = safeFetchClient()
+	if os.Getenv("HARNESS_HUB_FETCH_ALLOW_PRIVATE") == "1" {
+		// Explicit opt-out for users who need fetch_url against a local service.
+		// The default stays hardened; this is never set by the desktop launcher.
+		fmt.Fprintln(os.Stderr, "[codeg] 警告：fetch_url 已放开内网地址（HARNESS_HUB_FETCH_ALLOW_PRIVATE=1）")
+		s.fetchClient = &http.Client{Timeout: fetchTimeout}
+	}
 	if err := s.loadDelegations(); err != nil {
 		return nil, err
 	}
@@ -84,12 +103,12 @@ func New(root, base string, rt *acp.Runtime, h *hub.Hub, resolve func(string) (s
 	s.loadSplits()
 	s.applyEnabledOverrides()
 	rt.OnUpdate = s.nativeUpdate
+	rt.OnPermission = s.nativePermission
 	rt.ExtraMCP = s.extraMCP
 	rt.AllowInternalTool = s.allowInternalTool
 	return s, nil
 }
 func (s *Server) Start() {
-	go s.permissionsLoop()
 	if os.Getenv("HARNESS_HUB_WARM") != "0" {
 		s.warmMu.Lock()
 		s.started = true
@@ -103,6 +122,14 @@ func respond(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+// pathBoundary exposes the active filesystem boundary so the UI and support
+// logs can read it instead of inferring it from behaviour.
+func pathBoundary() Row {
+	return Row{
+		"allow_any_path":   os.Getenv("HARNESS_HUB_ALLOW_ANY_PATH") == "1",
+		"allow_any_browse": os.Getenv("HARNESS_HUB_ALLOW_ANY_DIR_BROWSE") == "1",
+	}
 }
 func (s *Server) emit(channel string, payload any) {
 	s.mu.Lock()
@@ -227,6 +254,20 @@ func (s *Server) installedVersion(a *hub.Agent) string {
 	return "local"
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// A panic in one command must not tear down the connection silently or
+	// leave the caller without an answer: answer 500 and keep serving.
+	defer func() {
+		if rec := recover(); rec != nil {
+			fmt.Fprintln(os.Stderr, "[codeg-api] panic:", rec, r.URL.Path)
+			respond(w, 500, Row{"code": "internal_error", "message": "internal error"})
+		}
+	}()
+	// Reject cross-site callers before dispatch. See guard.go for why a
+	// loopback bind alone is not a boundary.
+	if err := s.checkLocalRequest(r); err != nil {
+		respond(w, 403, Row{"code": "forbidden", "message": err.Error()})
+		return
+	}
 	if r.URL.Path == "/ws" || r.URL.Path == "/ws/events" {
 		s.websocket(w, r)
 		return
@@ -236,7 +277,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/api/health" {
-		respond(w, 200, Row{"ok": true, "app": "codepluse", "data": Row{"status": "ok", "version": "2.0.0-go", "sessionRuntime": "acp-v1"}, "backend": "go", "codeg_version": "0.42.0"})
+		respond(w, 200, Row{"ok": true, "app": "codepluse", "data": Row{"status": "ok", "version": "2.0.0-go", "sessionRuntime": "acp-v1"}, "backend": "go", "codeg_version": "0.42.0", "path_boundary": pathBoundary()})
 		return
 	}
 	if r.URL.Path == "/api/upload_attachment" {
@@ -257,6 +298,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != "POST" {
 		respond(w, 405, Row{"code": "invalid_input", "message": "Use POST"})
+		return
+	}
+	if err := requireJSONBody(r); err != nil {
+		respond(w, 415, Row{"code": "invalid_input", "message": err.Error()})
 		return
 	}
 	var args Row
@@ -329,6 +374,14 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, file)
 }
 func (s *Server) command(command string, a Row) (any, error) {
+	// Pick up edits the Rust front door made since our last save, before this
+	// request can overwrite them. See Store.reloadIfChangedLocked.
+	s.store.mu.Lock()
+	s.store.reloadIfChangedLocked()
+	s.store.mu.Unlock()
+	// acp_fetch_registry_catalog（B 组）、acp_current_platform /
+	// acp_list_custom_agents（I 组）已翻转 Rust——生产路径 Rust 先应答；
+	// Go 的 handler 留给测试（仓库惯例：收尾阶段才删 Go 实现）。
 	if command == "acp_current_platform" || command == "acp_fetch_registry_catalog" || command == "acp_add_registry_agent" || command == "acp_list_custom_agents" || command == "acp_save_custom_agent" || command == "acp_delete_custom_agent" {
 		return s.customAgentCommand(command, a)
 	}
@@ -344,18 +397,21 @@ func (s *Server) command(command string, a Row) (any, error) {
 		return s.commitSettings(command, a)
 	}
 	if command == "start_workspace_state_stream" || command == "stop_workspace_state_stream" || command == "get_workspace_snapshot" {
+		// 已翻转 Rust（I 组 workspace_state.rs）；Go 实现留给测试。
 		return s.workspaceCommand(command, a)
 	}
 	if command == "open_commit_window" || command == "open_push_window" || command == "open_stash_window" || command == "open_merge_window" {
 		return gitWindow(command, a), nil
 	}
 	if strings.HasPrefix(command, "terminal_") || command == "get_available_terminal_shells" || command == "probe_terminal_shell_path" {
+		// 已翻转 Rust（G 组 terminal.rs，ConPTY）；Go 实现留给测试。
 		return s.terminalCommand(command, a)
 	}
 	if strings.HasPrefix(command, "canvas_") {
 		return s.canvasCommand(command, a)
 	}
 	if strings.HasPrefix(command, "automation_") {
+		// 已翻转 Rust（H 组 automations.rs，含调度器）；Go 实现留给测试。
 		return s.automationCommand(command, a)
 	}
 	if strings.HasPrefix(command, "work_task_") {
@@ -426,7 +482,9 @@ func (s *Server) command(command string, a Row) (any, error) {
 	case "delete_model_provider":
 		return nil, modelproviders.Delete(s.Root, int64(number(a["id"])))
 	case "ccswitch_provider_config":
-		// 取回单个 CC Switch 供应商的明文配置（仅限 ccswitch: 前缀，防止借此读 store 密钥）。
+		// 取回单个 CC Switch 供应商的配置（仅限 ccswitch: 前缀，防止借此读 store 密钥）。
+		// 密钥只回显掩码：该接口在本地 API 上可被任何本机进程调用，明文回显等于
+		// 把凭据交给调用方；前端编辑时用空值表示"保持不变"。
 		id := text(a["id"])
 		if !strings.HasPrefix(id, "ccswitch:") {
 			return nil, fmt.Errorf("仅支持 CC Switch 供应商")
@@ -439,7 +497,7 @@ func (s *Server) command(command string, a Row) (any, error) {
 		if key == "" {
 			key = p.Env["ANTHROPIC_API_KEY"]
 		}
-		return Row{"url": p.Env["ANTHROPIC_BASE_URL"], "apiKey": key, "model": p.Model, "hasKey": key != ""}, nil
+		return Row{"url": p.Env["ANTHROPIC_BASE_URL"], "apiKey": maskSecret(key), "model": p.Model, "hasKey": key != ""}, nil
 	case "acp_list_agents":
 		return s.agents(), nil
 	case "acp_detect_agent_local_version":
@@ -464,6 +522,7 @@ func (s *Server) command(command string, a Row) (any, error) {
 		"science_link_to_agent", "science_unlink_from_agent", "science_apply_links":
 		return s.skills(command, a)
 	case "pick_directory":
+		// 已翻转 Rust（I 组 misc.rs）；Go 实现留给测试。
 		return s.pickDirectory()
 	case "get_home_directory", "list_directory_entries", "list_directory_with_files", "get_file_tree", "list_workspace_files", "read_file_preview", "read_file_for_edit", "read_file_base64", "read_workspace_file_base64", "save_file_content", "save_file_copy", "get_git_head":
 		return s.files(command, a)

@@ -599,7 +599,8 @@ func main() {
 				defer func() { recover() }() // tick must never crash the server
 				srv.automations.Tick()
 				if srv.codeg != nil {
-					srv.codeg.TickAutomations()
+					// TickAutomations 已随 H 组翻转 Rust（automations.rs 的
+					// spawn_scheduler）；保留 TickWorkTasks（D 组仍在 Go）。
 					srv.codeg.TickWorkTasks()
 				}
 			}()
@@ -618,11 +619,14 @@ func main() {
 		// environment so the new-conversation page lists only harnesses that
 		// are actually installed on this machine.
 		srv.codeg.AgentAvailable = srv.agentAvailable
+		// The directory picker may browse the whole disk when the browse flag
+		// is on, but that resolver is never used for workdirs or file access.
+		srv.codeg.BrowseResolve = resolveBrowseWorkdir
 		srv.codeg.Start()
 	}
 	mux.HandleFunc("/", srv.handle)
 	addr := HOST + ":" + strconv.Itoa(PORT)
-	httpSrv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	httpSrv := &http.Server{Addr: addr, Handler: newLocalGuard(PORT).wrap(mux), ReadHeaderTimeout: 10 * time.Second}
 
 	appName := "Harness Hub"
 	if CODEG_MODE {

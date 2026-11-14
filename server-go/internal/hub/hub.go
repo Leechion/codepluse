@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"harnesshub/internal/textutil"
 )
 
 // Event is a change notification fanned out to SSE subscribers.
@@ -512,8 +514,10 @@ func (h *Hub) RealEnabled() bool {
 }
 
 func TrimResult(s string, n int) string {
-	if len(s) > n {
-		return s[:n] + "…"
+	// Byte slicing splits multi-byte characters; tool output is routinely
+	// Chinese, so cut on a rune boundary.
+	if trimmed := textutil.TruncateRunes(s, n); trimmed != s {
+		return trimmed + "…"
 	}
 	return strings.TrimSpace(s)
 }

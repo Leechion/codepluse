@@ -24,14 +24,22 @@ func (s *Server) deleteConversation(conversationID int) error {
 		}
 	}
 	// Retain a rollback snapshot until the persisted conversation transaction succeeds.
-	oldRows, oldTurns, oldTabs, oldVersion := clone(st.Conversations), clone(st.Turns), clone(st.Tabs), st.TabsVersion
+	oldRows, oldTabs, oldVersion := clone(st.Conversations), clone(st.Tabs), st.TabsVersion
+	removedTurns := map[int][]Row{}
 	kept := []Row{}
 	parents := map[int]bool{}
 	for _, row := range st.Conversations {
 		id := number(row["id"])
 		if removed[id] {
 			parents[number(row["parent_id"])] = true
-			delete(st.Turns, fmt.Sprint(id))
+			removedTurns[id] = st.turnsLocked(id)
+			if err := st.deleteTurnsLocked(id); err != nil {
+				for cid, turns := range removedTurns {
+					_ = st.replaceTurnsLocked(cid, turns)
+				}
+				st.mu.Unlock()
+				return err
+			}
 		} else {
 			kept = append(kept, row)
 		}
@@ -61,7 +69,10 @@ func (s *Server) deleteConversation(conversationID int) error {
 		}
 	}
 	if err := st.saveLocked(); err != nil {
-		st.Conversations, st.Turns, st.Tabs, st.TabsVersion = oldRows, oldTurns, oldTabs, oldVersion
+		st.Conversations, st.Tabs, st.TabsVersion = oldRows, oldTabs, oldVersion
+		for cid, turns := range removedTurns {
+			_ = st.replaceTurnsLocked(cid, turns)
+		}
 		st.mu.Unlock()
 		return err
 	}
@@ -72,6 +83,7 @@ func (s *Server) deleteConversation(conversationID int) error {
 		if removed[c.ConversationID] {
 			runtimeIDs = append(runtimeIDs, c.RuntimeID)
 			delete(s.connections, cid)
+			delete(s.byRuntime, c.RuntimeID)
 			delete(s.callers, cid)
 		}
 	}

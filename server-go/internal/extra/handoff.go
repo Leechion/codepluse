@@ -7,6 +7,7 @@ import (
 	"harnesshub/internal/acp"
 	"harnesshub/internal/hub"
 	"harnesshub/internal/orch"
+	"harnesshub/internal/textutil"
 )
 
 // HandoffSession moves an ongoing native conversation from one agent to
@@ -100,10 +101,7 @@ func pickManager(source *acp.SessionRecord, chats *orch.ChatController, h *hub.H
 }
 
 func clip(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
-	}
-	return s
+	return textutil.TruncateRunes(s, n)
 }
 
 func firstNonEmpty(a, b string) string {

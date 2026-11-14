@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"harnesshub/internal/textutil"
 )
 
 const MAX_DIFF = 200000
@@ -189,7 +191,10 @@ func (w *Worktrees) Merge(id, base, message string) (map[string]any, error) {
 		return nil, err
 	}
 	if err := w.cleanup(id, base); err != nil {
-		return nil, err
+		// The merge has already landed. Reporting an error here made the task
+		// fall back to "review" and invited the user to merge the same branch
+		// twice, so cleanup is best-effort once HEAD contains the commit.
+		return map[string]any{"merged": true, "cleanup_error": err.Error()}, nil
 	}
 	return map[string]any{"merged": true}, nil
 }
@@ -214,8 +219,5 @@ func (w *Worktrees) cleanup(id, base string) error {
 }
 
 func short(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
-	}
-	return s
+	return textutil.TruncateRunes(s, n)
 }

@@ -6,7 +6,7 @@ func TestSaveSwitchAndKeepKey(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("USERPROFILE", root)
 	p := Provider{Name: "first", Agent: "dsh", URL: "https://example.test/v1", Model: "model-a", Key: "secret"}
-	if err := Save(root, p); err != nil {
+	if _, err := SaveConfiguration(root, p); err != nil {
 		t.Fatal(err)
 	}
 	pub, err := Public(root)
@@ -23,7 +23,7 @@ func TestSaveSwitchAndKeepKey(t *testing.T) {
 	p.ID = id
 	p.Model = "model-b"
 	p.Key = ""
-	if err = Save(root, p); err != nil {
+	if _, err = SaveConfiguration(root, p); err != nil {
 		t.Fatal(err)
 	}
 	active, ok, err := Active(root, "dsh")

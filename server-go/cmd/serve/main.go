@@ -25,7 +25,10 @@ import (
 
 func setHeaders(w http.ResponseWriter) {
 	h := w.Header()
-	h.Set("Access-Control-Allow-Origin", "*")
+	// Same-origin only. The previous Access-Control-Allow-Origin: * let any
+	// website read every response from this local service; the UI is served
+	// from the same origin and needs no CORS grant at all.
+	h.Set("Vary", "Origin")
 	h.Set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
 	h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Harness-Id")
 	h.Set("X-Harness-Hub", "2.0.0-go")

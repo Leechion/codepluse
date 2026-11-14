@@ -16,7 +16,7 @@ func profileProvider(t *testing.T, s *Server, agent, url string) string {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	t.Setenv("USERPROFILE", t.TempDir())
-	if err := providers.Save(s.Root, providers.Provider{Name: "gateway", Agent: agent, URL: url, Key: "test-key", Model: "model-a"}); err != nil {
+	if _, err := providers.SaveConfiguration(s.Root, providers.Provider{Name: "gateway", Agent: agent, URL: url, Key: "test-key", Model: "model-a"}); err != nil {
 		t.Fatal(err)
 	}
 	list, err := providers.Public(s.Root)

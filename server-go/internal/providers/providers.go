@@ -74,7 +74,9 @@ func write(root string, d Data) error {
 	if e != nil {
 		return e
 	}
-	return os.WriteFile(path(root), b, 0600)
+	// Temp file + rename: a crash mid-write used to leave a truncated
+	// api-providers.json, and read() then failed for every provider.
+	return replaceFile(path(root), b)
 }
 func Public(root string) (Data, error) {
 	mu.Lock()
@@ -116,10 +118,6 @@ func Public(root string) (Data, error) {
 		p.Native = nil
 	}
 	return d, e
-}
-func Save(root string, p Provider) error {
-	_, err := SaveConfiguration(root, p)
-	return err
 }
 
 func SaveConfiguration(root string, p Provider) (Provider, error) {

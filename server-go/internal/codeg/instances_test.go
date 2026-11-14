@@ -40,7 +40,7 @@ func TestHarnessInstanceLifecycle(t *testing.T) {
 	if _, err := s.command("codepluse_instance_create", Row{"realTool": "claude", "providerId": "missing"}); err == nil {
 		t.Fatal("unknown provider id accepted")
 	}
-	if err := providers.Save(s.Root, providers.Provider{Name: "pinned", Agent: "claude", URL: "https://example.test", Model: "m", Key: "k"}); err != nil {
+	if _, err := providers.SaveConfiguration(s.Root, providers.Provider{Name: "pinned", Agent: "claude", URL: "https://example.test", Model: "m", Key: "k"}); err != nil {
 		t.Fatal(err)
 	}
 	d, err := providers.Public(s.Root)

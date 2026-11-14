@@ -298,6 +298,11 @@ type Runtime struct {
 	ExtraMCP          func(agent *hub.Agent, o Options, sessionID string) []map[string]any
 	OnUpdate          func(sessionID string, update map[string]any)
 	AllowInternalTool func(sessionID string, toolCall map[string]any) bool
+	// OnPermission is called when a human-decision card becomes pending
+	// (resolved=false) and when it leaves that state (resolved=true).
+	// optionID is the selected option, or "" when cancelled. It runs without
+	// runtime locks held, so the sink may call back into the runtime.
+	OnPermission func(sessionID string, card *PermissionCard, resolved bool, optionID string)
 
 	mu            sync.Mutex
 	saveMu        sync.Mutex
@@ -804,6 +809,9 @@ func (r *Runtime) requestPermission(d *Driver, p map[string]any) (map[string]any
 		return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}, nil
 	}
 	rec.State = "requires_action"
+	// Snapshot under the lock: the sink marshals it on another goroutine while
+	// RespondPermission may be updating the live card.
+	snapshot := *card
 	rec.activeMu.Unlock()
 	r.changed(rec)
 	r.save()
@@ -811,6 +819,7 @@ func (r *Runtime) requestPermission(d *Driver, p map[string]any) (map[string]any
 	r.mu.Lock()
 	r.approvals[card.ID] = app
 	r.mu.Unlock()
+	r.notifyPermission(rec.ID, &snapshot, false, "")
 	select {
 	case outcome := <-app.reply:
 		return outcome, nil
@@ -828,9 +837,6 @@ func (r *Runtime) RespondPermission(id string, optionID *string) error {
 		return fmt.Errorf("该权限请求已失效")
 	}
 	r.mu.Unlock()
-	if app.card.State != "pending" {
-		return fmt.Errorf("该权限请求已失效")
-	}
 	if optionID != nil {
 		valid := false
 		for _, o := range app.card.Options {
@@ -842,26 +848,52 @@ func (r *Runtime) RespondPermission(id string, optionID *string) error {
 			return fmt.Errorf("无效的权限选项")
 		}
 	}
-	r.mu.Lock()
-	delete(r.approvals, id)
-	r.mu.Unlock()
 	rec := app.rec
+	selected := ""
+	// Card fields are read by the pending-event sink and by ListJSON under
+	// activeMu, so mutate them under the same lock.
+	rec.activeMu.Lock()
+	if app.card.State != "pending" {
+		rec.activeMu.Unlock()
+		return fmt.Errorf("该权限请求已失效")
+	}
 	if optionID == nil {
 		app.card.State = "cancelled"
-		app.reply <- map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
 	} else {
 		app.card.State = "answered"
 		app.card.Selected = optionID
-		app.reply <- map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": *optionID}}
+		selected = *optionID
 	}
-	rec.activeMu.Lock()
 	if rec.State != "cancelling" {
 		rec.State = "running"
 	}
+	snapshot := *app.card
 	rec.activeMu.Unlock()
+
+	r.mu.Lock()
+	delete(r.approvals, id)
+	r.mu.Unlock()
+	// Publish the resolution before letting the agent continue, so the UI
+	// cannot receive turn_complete ahead of the card it is still showing.
+	r.notifyPermission(rec.ID, &snapshot, true, selected)
+	if optionID == nil {
+		app.reply <- map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
+	} else {
+		app.reply <- map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": *optionID}}
+	}
 	r.changed(rec)
 	r.save()
 	return nil
+}
+
+// notifyPermission fans a card state change to the host without holding any
+// runtime lock; a panic in the sink must not take down the agent's read loop.
+func (r *Runtime) notifyPermission(sessionID string, card *PermissionCard, resolved bool, optionID string) {
+	if r.OnPermission == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	r.OnPermission(sessionID, card, resolved, optionID)
 }
 
 func (r *Runtime) cancelPermissions(sessionID string) {
@@ -1849,30 +1881,49 @@ func (d *Driver) Kill() {
 	}
 }
 
+// marshalRecord renders one session record in the wire shape shared by
+// ListJSON and RecordJSON.
+func marshalRecord(rec *SessionRecord) json.RawMessage {
+	type wireSession SessionRecord
+	rec.activeMu.Lock()
+	turns, permissions, active := rec.Turns, rec.Permissions, rec.active
+	if turns == nil {
+		turns = []*Turn{}
+	}
+	if permissions == nil {
+		permissions = []*PermissionCard{}
+	}
+	b, _ := json.Marshal(struct {
+		*wireSession
+		Turns       []*Turn           `json:"turns"`
+		Permissions []*PermissionCard `json:"permissions"`
+		ActiveTurn  *Turn             `json:"activeTurn"`
+	}{(*wireSession)(rec), turns, permissions, active})
+	rec.activeMu.Unlock()
+	return b
+}
+
 // ListJSON returns the session records as JSON, optionally filtered by chat.
 func (r *Runtime) ListJSON(chatID string) json.RawMessage {
-	type wireSession SessionRecord
 	snapshots := make([]json.RawMessage, 0)
 	for _, rec := range r.Records(chatID) {
-		rec.activeMu.Lock()
-		turns, permissions := rec.Turns, rec.Permissions
-		if turns == nil {
-			turns = []*Turn{}
-		}
-		if permissions == nil {
-			permissions = []*PermissionCard{}
-		}
-		b, _ := json.Marshal(struct {
-			*wireSession
-			Turns       []*Turn           `json:"turns"`
-			Permissions []*PermissionCard `json:"permissions"`
-			ActiveTurn  *Turn             `json:"activeTurn"`
-		}{(*wireSession)(rec), turns, permissions, rec.active})
-		rec.activeMu.Unlock()
-		snapshots = append(snapshots, b)
+		snapshots = append(snapshots, marshalRecord(rec))
 	}
 	b, _ := json.Marshal(snapshots)
 	return b
+}
+
+// RecordJSON returns a single session record. Callers on the per-attach and
+// per-session-event paths use this so their cost does not grow with the total
+// number of sessions.
+func (r *Runtime) RecordJSON(id string) json.RawMessage {
+	r.mu.Lock()
+	rec := r.record(id)
+	r.mu.Unlock()
+	if rec == nil {
+		return json.RawMessage("{}")
+	}
+	return marshalRecord(rec)
 }
 
 // ExportTranscript renders a readable transcript of one session for handoff.

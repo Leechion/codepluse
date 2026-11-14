@@ -10,7 +10,7 @@ import (
 // Codeg reconstructs historical delegation bindings from persisted child rows,
 // so the view-session link survives a frontend refresh and backend restart.
 func (s *Store) turnsWithDelegationsLocked(conversation int) []Row {
-	turns := clone(s.Turns[fmt.Sprint(conversation)])
+	turns := s.turnsLocked(conversation)
 	if turns == nil {
 		return []Row{}
 	}
@@ -175,63 +175,24 @@ const fnvPrime uint64 = 0x100000001b3
 func prefixFingerprint(turns []Row, seed uint64) string {
 	hash := seed
 	for _, turn := range turns {
-		var tag byte
-		switch text(turn["role"]) {
-		case "user":
-			tag = 0
-		case "assistant":
-			tag = 1
-		case "system":
-			tag = 2
-		default:
-			tag = 3
-		}
-		hash ^= uint64(tag)
-		hash *= fnvPrime
-		millis := int64(0)
-		if ts, err := time.Parse(time.RFC3339Nano, text(turn["timestamp"])); err == nil {
-			millis = ts.UnixMilli()
-		}
-		v := uint64(millis)
-		for i := 0; i < 8; i++ {
-			hash ^= v & 0xff
-			hash *= fnvPrime
-			v >>= 8
-		}
+		hash = fnvTurn(hash, text(turn["role"]), text(turn["timestamp"]))
 	}
 	return fmt.Sprintf("%016x", hash)
-}
-
-// uncoveredPrefixMaxTsLocked returns the max RFC3339 timestamp in
-// turns[0..end), or nil when the prefix is empty.
-func uncoveredPrefixMaxTs(turns []Row) any {
-	var maxTs time.Time
-	found := false
-	for _, turn := range turns {
-		ts, err := time.Parse(time.RFC3339Nano, text(turn["timestamp"]))
-		if err != nil {
-			continue
-		}
-		if !found || ts.After(maxTs) {
-			maxTs = ts
-			found = true
-		}
-	}
-	if !found {
-		return nil
-	}
-	return maxTs.UTC().Format(time.RFC3339Nano)
 }
 
 // conversationTurnsPageLocked builds one page of older history for
 // get_folder_conversation_turns. The page ends just before `beforeIndex`
 // (clamped to [0, total]) and holds at most `limit` turns.
 func (s *Store) conversationTurnsPageLocked(conversation int, beforeIndex, limit int) Row {
-	all := s.Turns[fmt.Sprint(conversation)]
-	if all == nil {
-		all = []Row{}
+	// A negative limit made start = end - limit exceed end, and the slice
+	// below panicked. Clamp like the other paged endpoints do.
+	if limit < 1 {
+		limit = 50
 	}
-	total := len(all)
+	if limit > 500 {
+		limit = 500
+	}
+	total := s.turnCountLocked(conversation)
 	end := beforeIndex
 	if end < 0 {
 		end = 0
@@ -243,21 +204,10 @@ func (s *Store) conversationTurnsPageLocked(conversation int, beforeIndex, limit
 	if start < 0 {
 		start = 0
 	}
-	page := []Row{}
-	for _, turn := range all[start:end] {
-		page = append(page, clone(turn))
+	if start > end {
+		start = end
 	}
-	prefix := all[:start]
-	assistantBefore := 0
-	userBefore := 0
-	for _, turn := range prefix {
-		switch text(turn["role"]) {
-		case "assistant":
-			assistantBefore++
-		case "user":
-			userBefore++
-		}
-	}
+	page := s.turnRangeLocked(conversation, start, end)
 	boundary := beforeIndex
 	if boundary < 0 {
 		boundary = 0
@@ -265,14 +215,38 @@ func (s *Store) conversationTurnsPageLocked(conversation int, beforeIndex, limit
 	if boundary > total {
 		boundary = total
 	}
+	// Cumulative columns mean the prefix never has to be read: the row right
+	// before the window carries its fingerprint, role counts and max timestamp.
+	assistantBefore, userBefore := 0, 0
+	prefixHash := fmt.Sprintf("%016x", fnvSeed)
+	var uncoveredMaxTs any
+	if start > 0 {
+		if st, ok := s.prefixAtLocked(conversation, start-1); ok {
+			assistantBefore, userBefore = st.assistant, st.user
+			prefixHash = st.hash
+			if st.maxTs != "" {
+				if parsed, err := time.Parse(time.RFC3339Nano, st.maxTs); err == nil {
+					uncoveredMaxTs = parsed.UTC().Format(time.RFC3339Nano)
+				} else {
+					uncoveredMaxTs = st.maxTs
+				}
+			}
+		}
+	}
+	boundaryHash := fmt.Sprintf("%016x", fnvSeed)
+	if boundary > 0 {
+		if st, ok := s.prefixAtLocked(conversation, boundary-1); ok {
+			boundaryHash = st.hash
+		}
+	}
 	return Row{
-		"turns":                        page,
-		"turns_offset":                 start,
-		"turns_total":                  total,
+		"turns":                         page,
+		"turns_offset":                  start,
+		"turns_total":                   total,
 		"assistant_turns_before_offset": assistantBefore,
 		"user_turns_before_offset":      userBefore,
-		"prefix_hash":                  prefixFingerprint(prefix, fnvSeed),
-		"prefix_hash_before_index":      prefixFingerprint(all[:boundary], fnvSeed),
-		"uncovered_prefix_max_ts":       uncoveredPrefixMaxTs(prefix),
+		"prefix_hash":                   prefixHash,
+		"prefix_hash_before_index":      boundaryHash,
+		"uncovered_prefix_max_ts":       uncoveredMaxTs,
 	}
 }
