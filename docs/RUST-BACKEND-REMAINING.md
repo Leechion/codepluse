@@ -78,9 +78,10 @@ Go 现行是 SQLite —— 本批把写路径切到 `codeg.db`，并实现旧文
 worktree `641b`）——后两个是更早的快照（分别少 138 / 45 条），**没有 main
 之外尚未集成的实现**，不需要再合并。
 
-但「命令在 Rust 里」不等于「功能完整」。下列三处是删除 Go sidecar 前必须补的：
+但「命令在 Rust 里」不等于「功能完整」。下列三处是删除 Go sidecar 前必须补的
+——**三项均已补齐**（2026-11-13 收尾，见 `docs/RUST-BACKEND-CLOSE-OUT.md`）：
 
-### 1. 外部 provider 写回 —— ❌ 唯一一条会落到 Go 转发的命令分支
+### 1. 外部 provider 写回 —— ✅ 已补齐（`provider_writeback.rs`）
 
 `exec_providers.rs:314`：遇到外部 id（`native:` / `ccswitch:` / `store:`）直接
 `return None` → 落回上游转发。Go 侧实现是 `internal/providers/writeback.go`(321)
@@ -95,7 +96,7 @@ worktree `641b`）——后两个是更早的快照（分别少 138 / 45 条）�
 
 删 Go 后「保存外部 provider」必然失败。
 
-### 2. companion MCP（`mcp-codeg`）—— ❌ 未移植，但 Rust **仍在广告它**
+### 2. companion MCP（`mcp-codeg`）—— ✅ 已补齐（`mcp_companion.rs`）
 
 `internal/mcpserver/`(457) + `cmd/serve/wiring.go:504` 的 `mcp-codeg` stdio 模式
 没有移植，Rust 二进制里没有这个子命令。而
@@ -109,7 +110,7 @@ sidecar 移除后：`command` 指向不存在的子命令，`base` 又来自 sid
 （`Layer::upstream_base`）。**工具一被调用就失败**——要么移植
 `internal/mcpserver` 并给 Rust 加 `mcp-codeg` 模式，要么停止广告。
 
-### 3. 协作域 delegation —— ❌ 未移植（已知偏差，但同样属于「删 Go 前」）
+### 3. 协作域 delegation —— 🟡 部分补齐（`acp/delegation.rs`）
 
 `internal/codeg/delegation.go`(602) + `delegation_profiles.go`(98) +
 `delegation_recovery.go`(195)。Rust 侧 `acp_respond_task_split` 的 approve 直接

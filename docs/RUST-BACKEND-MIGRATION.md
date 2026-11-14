@@ -396,7 +396,7 @@ Rust 每次调用重读文件，结果与 Go 内存一致；而 Rust **写**会�
 （复用 `goformat::marshal_preserve` + 补 `\n` + Go 同款两个响应头），
 所有已接管命令统一走它。
 
-**进度：173 / 351（余 178）**
+**进度（批次 5 后）：173 / 351（余 178）**
 
 | 已完成 | 命令数 |
 |---|---|
@@ -587,3 +587,49 @@ tokio 异步锁；定时器 15s（Go 在主循环内）。
 **进度：366 / 366（100%）**。剩余工作只剩 Phase 3/4：Rust 直服静态资源、
 删 sidecar / `cmd/serve` 装配层、清掉两侧 `resolveExistingPath` 怪癖。
 
+---
+
+## Phase 3 / Phase 4（2026-11-13 收尾）
+
+命令面在批次 9 + 收尾批后达到 **366 / 366**（`scripts/historical/inventory-commands.mjs`
+的 RUST 集合按 Rust 分派面重建后核对）。剩下的不是命令，而是**命令之外**的服务面与
+打包链路——见 `docs/RUST-BACKEND-CLOSE-OUT.md` 的逐项结论。
+
+### Phase 3 — Rust 直服
+
+| 面 | 实现 | 双跑 |
+|---|---|---|
+| 静态资源 | `webapp.rs::static_asset`（Go `static()` 的查找顺序 + Content-Type/ETag/Last-Modified/Range/304） | 6/6 MATCH |
+| `/api/health` | `webapp.rs::health`（本地合成，`backend` 翻成 `rust`） | 字段一致 |
+| 附件上传 | `webapp.rs::upload_attachment`（手写 multipart，独占创建 + 半成品清理） | 2/2 MATCH |
+| `/api/codeg_mcp` | `webapp.rs` + `mcp_companion.rs`（token 校验 + 工具分派 + stdio MCP 服务） | 4/4 帧一致 |
+| 本地请求防护 | `webapp.rs::guard`（Host/Origin 白名单 + Sec-Fetch-Site + Content-Type 契约） | 3/3 MATCH |
+| 事件 WebSocket | `events_ws.rs`（ready/ping/attach/detach/snapshot/replay/event/detached） | 协议帧一致 |
+| dev 热更新代理 | `webapp.rs` + `mod.rs::dev_proxy` | — |
+
+### Phase 4 — 移除 sidecar
+
+- `server-go/` 的未提交改动先整体留档（`76712f5`）并打 tag `go-sidecar-final`；
+- 删除 `server-go/`、`src-tauri/binaries/`，`tauri.conf.json` 去掉 `externalBin`，
+  `Cargo.toml` 去掉 `tauri-plugin-shell`；
+- `main.rs` 改为单进程：直接监听 `CODEPLUSE_PORT`，`CODEPLUSE_HEADLESS=1` 为无头模式；
+- 构建脚本全部去 Go；迁移期双跑工具归档到 `scripts/historical/`（附 README）。
+
+### 期间补齐的三个功能缺口（收尾清单之外的发现）
+
+1. **外部 provider 写回**（`provider_writeback.rs`）：`codepluse_provider_save` 遇到
+   `native:` / `ccswitch:` / `store:` 的 id 原先直接落回 Go 转发，删 Go 后必坏。
+   现已写回 CC Switch 的 SQLite / `~/.codex/config.toml` / DSH 的 YAML /
+   `.data/model-providers.json`；双跑一致（TOML/YAML 仅序列化格式不同，语义一致）。
+2. **companion MCP**（`mcp_companion.rs`）：Rust 仍在向 agent 广告 `codeg-mcp`，
+   而它指向的 `mcp-codeg` 子命令在 Rust 二进制里并不存在——工具一调用就失败。
+   现已补齐 stdio JSON-RPC 服务与 10 个工具定义，与 Go 逐帧对拍一致。
+3. **协作域 delegation**（`acp/delegation.rs`）：委派注册表 + 派发/状态/取消/续跑/
+   消息与反馈工具落地；`propose_task_split` 与 `ask_user_question` 两个工具变体
+   仍未接（拆分卡片的命令面已有）。
+
+### 验收
+
+- `cargo test`：**256 个全绿**（基线 239 + 新增 17）
+- 单进程烟测（无 Go）：health 200 / `GET /workspace` 200（441,601 B，与迁移前一致）/
+  `list_folders` 真实数据 / `/ws/events` 收到 `__ready__`
