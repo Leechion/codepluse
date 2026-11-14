@@ -1,0 +1,7 @@
+# Rust build output
+/target
+# `externalBin` copies of the Go backend, rebuilt by scripts/build-tauri.ps1
+/binaries/*.exe
+# CLI-generated ACL schemas
+/gen
+/resources/workspace.json

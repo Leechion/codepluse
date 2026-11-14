@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-shell",
+  "description": "Lets the loopback UI drive the Tauri window chrome (drag / minimize / maximize / close / open) and the resize grips.",
+  "windows": ["main", "app-*"],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:8840/*",
+      "http://localhost:8840/*",
+      "http://127.0.0.1:8841/*",
+      "http://localhost:8841/*"
+    ]
+  },
+  "permissions": ["core:default", "core:window:allow-start-resize-dragging"]
+}

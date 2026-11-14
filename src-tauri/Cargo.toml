@@ -1,0 +1,74 @@
+[package]
+name = "codepluse"
+version = "0.42.0"
+description = "codepluse desktop shell (Tauri window + Go backend sidecar)"
+authors = ["codepluse"]
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+# Phase 1 proxy: Rust front door in front of the Go sidecar.
+axum = { version = "0.8", features = ["ws"] }
+# `native-tls` uses the OS TLS stack (schannel on Windows) — no extra C
+# toolchain — and `blocking` lets the ported HTTPS handlers run on the
+# blocking pool exactly like Go's handlers run on their goroutines. `json`
+# serves automations.rs 的 webhook 投递。
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "blocking", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "process", "io-util", "sync"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
+rand = "0.9"
+# git_show_file_base64
+base64 = "0.22"
+# CC Switch 数据库（~/.cc-switch/cc-switch.db）；批次 ④ turn 库共用同一套
+# bundled SQLite。外部配置读取需要 YAML（DSH）与 TOML（Codex）。
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde_yaml = "0.9"
+toml = "0.8"
+# acp: custom-agent archive extraction (zip / tar / tar.gz / tar.bz2)。
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tar = "0.4"
+flate2 = "1"
+bzip2 = "0.5"
+# acp: sha256 for AccountVersion / custom cache dirs / archive checksums。
+sha2 = "0.10"
+url = "2"
+# ConPTY 终端（terminal.rs）。版本对齐 tauri 传入的 0.62.x（Cargo.lock 已有
+# 0.62.2），启用 feature 只会重编同一 crate，不会触发新下载。
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+# computer_window_thumbnail：PrintWindow → GetDIBits → PNG。`png` 0.18 已在
+# 依赖树里（Tauri 图标处理带入），此行不触发新下载；computer.rs 的 Win32 调用
+# 是十来个 user32/gdi32 入口，手写 extern 声明即可，不必给 windows crate 加
+# Graphics/WindowsAndMessaging feature（那是 terminal.rs 之外的重编）。
+png = "0.18"
+
+[profile.dev]
+# Line tables only. This machine writes E: at roughly 24 MB/s, and full DWARF
+# for Tauri + axum + tokio makes every link a multi-minute disk-bound affair.
+# Panic locations survive debug=1, which is all the unit tests need.
+debug = 1
+
+[profile.release]
+# The Go sidecar carries the product weight; this shell is ~300 lines. Full
+# LTO with codegen-units=1 saved a few hundred KB but made a release build
+# take 20+ minutes (and on this machine it stalled outright). Thin LTO keeps
+# most of the size benefit at a fraction of the cost.
+panic = "abort"
+codegen-units = 16
+lto = "thin"
+opt-level = "s"
+strip = true
