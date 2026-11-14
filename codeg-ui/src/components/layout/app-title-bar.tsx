@@ -26,7 +26,16 @@ export function AppTitleBar({
   const { isMac, isWindows, isLinux } = usePlatform()
   const isMobile = useIsMobile()
   const isDesktopRuntime =
-    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+    typeof window !== "undefined" &&
+    "__TAURI_INTERNALS__" in window &&
+    // 只有自带窗口边框的外壳才画自己的标题栏：旧的 Go WebView2 外壳
+    // （GoWindowTitlebar）自带一套，再叠一套 Tauri 控件就重复了。那个外壳
+    // 随 Go 后台一起删除后，这里只剩 Tauri 外壳 —— 它必须显示这些控件。
+    //
+    // 不能用 __CODEG_TAURI_SHELL__ 判断：Tauri 外壳自己就置了这个标志
+    // （界面仍走 HTTP/WebSocket 连本进程的后台），用它会把控件误藏起来。
+    typeof (window as unknown as { __codegGoOpenWindow?: unknown })
+      .__codegGoOpenWindow !== "function"
   const hasDesktopWindowChrome = showWindowControls && isDesktopRuntime
   // Windows and Linux both render custom controls on the right (macOS keeps
   // native traffic lights on the left via the overlay title bar).
