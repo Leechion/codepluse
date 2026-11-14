@@ -159,11 +159,9 @@ fn replace_file(path: &Path, data: &[u8]) -> Result<(), String> {
 fn write_cc_switch(provider: &Provider, key_changed: bool) -> Result<(), String> {
     let path = cc_switch_db_path()?;
     // `rw`: never create a replacement database if the source disappeared.
-    let mut connection = rusqlite::Connection::open_with_flags(
-        &path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
-    )
-    .map_err(|e| e.to_string())?;
+    let mut connection =
+        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .map_err(|e| e.to_string())?;
     connection
         .busy_timeout(Duration::from_secs(5))
         .map_err(|e| e.to_string())?;
@@ -243,11 +241,7 @@ fn write_cc_switch(provider: &Provider, key_changed: bool) -> Result<(), String>
     transaction
         .execute(
             "UPDATE providers SET name=?, settings_config=? WHERE id=? AND app_type='claude'",
-            rusqlite::params![
-                provider.name,
-                String::from_utf8_lossy(&bytes),
-                id
-            ],
+            rusqlite::params![provider.name, String::from_utf8_lossy(&bytes), id],
         )
         .map_err(|e| e.to_string())?;
     transaction.commit().map_err(|e| e.to_string())
@@ -311,7 +305,9 @@ fn write_codex(provider: &Provider, key_changed: bool) -> Result<(), String> {
         );
     }
     if let Some(table) = config.as_table_mut() {
-        if let Some(providers) = table.get_mut("model_providers").and_then(|value| value.as_table_mut())
+        if let Some(providers) = table
+            .get_mut("model_providers")
+            .and_then(|value| value.as_table_mut())
         {
             providers.insert(name.as_str().into(), toml::Value::Table(entry));
         }
@@ -467,10 +463,9 @@ fn write_dsh(provider: &Provider, key_changed: bool) -> Result<(), String> {
 fn sort_yaml(value: serde_yaml::Value) -> serde_yaml::Value {
     match value {
         serde_yaml::Value::Mapping(mapping) => {
-            let mut sorted: Vec<(serde_yaml::Value, serde_yaml::Value)> = mapping.into_iter().collect();
-            sorted.sort_by(|left, right| {
-                key_text(&left.0).cmp(&key_text(&right.0))
-            });
+            let mut sorted: Vec<(serde_yaml::Value, serde_yaml::Value)> =
+                mapping.into_iter().collect();
+            sorted.sort_by(|left, right| key_text(&left.0).cmp(&key_text(&right.0)));
             let mut out = serde_yaml::Mapping::new();
             for (key, item) in sorted {
                 out.insert(key, sort_yaml(item));
@@ -538,10 +533,7 @@ mod tests {
 
     #[test]
     fn metadata_is_written_with_go_shape() {
-        let root = std::env::temp_dir().join(format!(
-            "codepluse-writeback-{}",
-            goformat::hex_id()
-        ));
+        let root = std::env::temp_dir().join(format!("codepluse-writeback-{}", goformat::hex_id()));
         std::fs::create_dir_all(root.join(".data")).unwrap();
         let provider = Provider {
             id: "ccswitch:abc".into(),
@@ -555,7 +547,8 @@ mod tests {
             ..Provider::default()
         };
         write_metadata(&root, &provider).unwrap();
-        let raw = std::fs::read_to_string(root.join(".data").join("provider-metadata.json")).unwrap();
+        let raw =
+            std::fs::read_to_string(root.join(".data").join("provider-metadata.json")).unwrap();
         assert_eq!(
             raw,
             "{\n  \"ccswitch:abc\": {\n    \"models\": [\n      {\n        \"id\": \"m1\",\n        \"name\": \"M1\"\n      }\n    ],\n    \"enabled\": true\n  }\n}"

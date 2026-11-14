@@ -11,5 +11,12 @@
       "http://localhost:8841/*"
     ]
   },
-  "permissions": ["core:default", "core:window:allow-start-resize-dragging"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging"
+  ]
 }

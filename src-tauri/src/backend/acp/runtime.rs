@@ -89,7 +89,11 @@ pub struct Options {
     pub mode: String,
     #[serde(rename = "chatId", default, skip_serializing_if = "String::is_empty")]
     pub chat_id: String,
-    #[serde(rename = "missionId", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "missionId",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub mission_id: String,
     #[serde(rename = "taskId", default, skip_serializing_if = "String::is_empty")]
     pub task_id: String,
@@ -103,14 +107,22 @@ pub struct Options {
     pub sensitivity: i64,
     #[serde(rename = "timeoutMs", default, skip_serializing_if = "is_zero_i64")]
     pub timeout_ms: i64,
-    #[serde(rename = "outputSchema", default, skip_serializing_if = "Value::is_null")]
+    #[serde(
+        rename = "outputSchema",
+        default,
+        skip_serializing_if = "Value::is_null"
+    )]
     pub output_schema: Value,
 }
 
 impl Options {
     /// Go `optionsKey` (runtime.go:1024): `<sessionKey|direct>|<workdir>`.
     pub fn options_key(&self) -> String {
-        let key = if self.session_key.is_empty() { "direct" } else { &self.session_key };
+        let key = if self.session_key.is_empty() {
+            "direct"
+        } else {
+            &self.session_key
+        };
         format!("{}|{}", key, self.workdir)
     }
 }
@@ -145,7 +157,9 @@ const RESULT_KEYS: [&str; 11] = [
 /// carries one of the submit_result keys.
 fn extract_submitted(tools: &[Value]) -> Option<Value> {
     for tool in tools.iter().rev() {
-        let Some(raw_input) = tool.get("rawInput") else { continue };
+        let Some(raw_input) = tool.get("rawInput") else {
+            continue;
+        };
         match raw_input {
             Value::Object(map) => {
                 if map.keys().any(|k| RESULT_KEYS.contains(&k.as_str())) {
@@ -183,7 +197,12 @@ fn normalize_usage(u: Option<&Value>) -> Option<Value> {
         "cache_creation_input_tokens": num(&["cachedWriteTokens", "cacheWriteInputTokens", "cache_creation_input_tokens"]),
         "cache_read_input_tokens": num(&["cachedReadTokens", "cachedInputTokens", "cache_read_input_tokens"]),
     });
-    let total: f64 = out.as_object().unwrap().values().filter_map(Value::as_f64).sum();
+    let total: f64 = out
+        .as_object()
+        .unwrap()
+        .values()
+        .filter_map(Value::as_f64)
+        .sum();
     if total <= 0.0 {
         None
     } else {
@@ -263,7 +282,11 @@ pub struct Turn {
     pub finished_at: i64,
     #[serde(default)]
     pub status: String,
-    #[serde(rename = "stopReason", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "stopReason",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub stop_reason: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub error: String,
@@ -279,7 +302,11 @@ pub struct Turn {
 pub struct Catalog {
     #[serde(rename = "currentModelId", default)]
     pub current_model_id: String,
-    #[serde(rename = "availableModels", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "availableModels",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub available_models: Option<Vec<Value>>,
 }
 
@@ -287,7 +314,11 @@ pub struct Catalog {
 pub struct ModesInfo {
     #[serde(rename = "currentModeId", default)]
     pub current_mode_id: String,
-    #[serde(rename = "availableModes", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "availableModes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub available_modes: Option<Vec<Value>>,
 }
 
@@ -517,15 +548,16 @@ fn record_to_wire(rec: &SessionRecord) -> Value {
     if !data.native_session_id.is_empty() {
         map.insert("nativeSessionId".into(), json!(data.native_session_id));
     }
-    map.insert("turns".into(), Value::Array(data.turns.iter().map(turn_to_wire).collect()));
+    map.insert(
+        "turns".into(),
+        Value::Array(data.turns.iter().map(turn_to_wire).collect()),
+    );
     map.insert(
         "permissions".into(),
         Value::Array(
             data.permissions
                 .iter()
-                .map(|card| {
-                    serde_json::to_value(&*card.lock().unwrap()).unwrap_or(Value::Null)
-                })
+                .map(|card| serde_json::to_value(&*card.lock().unwrap()).unwrap_or(Value::Null))
                 .collect(),
         ),
     );
@@ -559,7 +591,10 @@ fn record_to_wire(rec: &SessionRecord) -> Value {
 
 fn wire_to_record(raw: &Value) -> Arc<SessionRecord> {
     let get_str = |key: &str| {
-        raw.get(key).and_then(Value::as_str).unwrap_or("").to_string()
+        raw.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
     };
     let permissions = raw
         .get("permissions")
@@ -568,8 +603,7 @@ fn wire_to_record(raw: &Value) -> Arc<SessionRecord> {
             list.iter()
                 .map(|card| {
                     Arc::new(Mutex::new(
-                        serde_json::from_value::<PermissionCard>(card.clone())
-                            .unwrap_or_default(),
+                        serde_json::from_value::<PermissionCard>(card.clone()).unwrap_or_default(),
                     ))
                 })
                 .collect()
@@ -621,7 +655,10 @@ fn wire_to_record(raw: &Value) -> Arc<SessionRecord> {
             default_model: get_str("defaultModel"),
             error: get_str("error"),
             created_at: raw.get("createdAt").and_then(Value::as_i64).unwrap_or(0),
-            handed_off: raw.get("handedOff").and_then(Value::as_bool).unwrap_or(false),
+            handed_off: raw
+                .get("handedOff")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             handed_off_to: get_str("handedOffTo"),
             active: None,
         }),
@@ -671,6 +708,8 @@ pub struct Driver {
     /// (Go calls `cmd.Process.Kill()` directly; taking the child for `wait()`
     /// would leave `kill()` a permanent no-op).
     kill_tx: watch::Sender<bool>,
+    #[cfg(windows)]
+    process_job: Mutex<Option<std::os::windows::io::OwnedHandle>>,
     stderr_tail: Mutex<String>,
     pub perm: String,
     pub cwd: String,
@@ -757,6 +796,8 @@ impl Driver {
     }
 
     fn kill(&self) {
+        #[cfg(windows)]
+        drop(self.process_job.lock().unwrap().take());
         let _ = self.kill_tx.send(true);
     }
 
@@ -828,7 +869,7 @@ struct Inner {
 pub struct Runtime {
     options: RuntimeOptions,
     inner: Mutex<Inner>,
-    driver_start_lock: AsyncMutex<()>,
+    driver_start_locks: Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
     self_weak: OnceLock<Weak<Runtime>>,
 }
 
@@ -838,7 +879,7 @@ impl Runtime {
         let rt = Arc::new(Runtime {
             options,
             inner: Mutex::new(Inner::default()),
-            driver_start_lock: AsyncMutex::new(()),
+            driver_start_locks: Mutex::new(HashMap::new()),
             self_weak: OnceLock::new(),
         });
         let _ = rt.self_weak.set(Arc::downgrade(&rt));
@@ -860,9 +901,15 @@ impl Runtime {
     }
 
     fn load(&self) {
-        let Some(path) = self.options.state_file.as_ref() else { return };
-        let Ok(data) = std::fs::read(path) else { return };
-        let Ok(saved) = serde_json::from_slice::<Vec<Value>>(&data) else { return };
+        let Some(path) = self.options.state_file.as_ref() else {
+            return;
+        };
+        let Ok(data) = std::fs::read(path) else {
+            return;
+        };
+        let Ok(saved) = serde_json::from_slice::<Vec<Value>>(&data) else {
+            return;
+        };
         let mut inner = self.inner.lock().unwrap();
         for raw in saved {
             let rec = wire_to_record(&raw);
@@ -877,7 +924,9 @@ impl Runtime {
 
     /// Go `save` (runtime.go:337): keep the latest 100 records, tmp+rename.
     fn save(&self) {
-        let Some(path) = self.options.state_file.as_ref() else { return };
+        let Some(path) = self.options.state_file.as_ref() else {
+            return;
+        };
         let records = self.records("");
         let start = records.len().saturating_sub(100);
         let snapshots: Vec<Value> = records[start..]
@@ -944,12 +993,33 @@ impl Runtime {
     /// Go `driverKey` (runtime.go:406) — the version suffix is always present
     /// because wiring installs LaunchVersion unconditionally.
     fn driver_key(&self, agent: &Agent, permission: &str, cwd: &str) -> String {
-        format!("{}|{}|{}|{}", agent.id, permission, cwd, self.options.resolver.version(agent))
+        format!(
+            "{}|{}|{}|{}",
+            agent.id,
+            permission,
+            cwd,
+            self.options.resolver.version(agent)
+        )
     }
 
-    async fn driver(&self, agent: &Agent, permission: &str, cwd: &str) -> Result<Arc<Driver>, String> {
-        let _guard = self.driver_start_lock.lock().await;
+    async fn driver(
+        &self,
+        agent: &Agent,
+        permission: &str,
+        cwd: &str,
+    ) -> Result<Arc<Driver>, String> {
         let key = self.driver_key(agent, permission, cwd);
+        let start_lock = {
+            let mut locks = self.driver_start_locks.lock().unwrap();
+            locks.retain(|_, lock| lock.strong_count() > 0);
+            let lock = locks
+                .get(&key)
+                .and_then(Weak::upgrade)
+                .unwrap_or_else(|| Arc::new(AsyncMutex::new(())));
+            locks.insert(key.clone(), Arc::downgrade(&lock));
+            lock
+        };
+        let _guard = start_lock.lock().await;
         {
             let inner = self.inner.lock().unwrap();
             if let Some(d) = inner.drivers.get(&key) {
@@ -963,7 +1033,12 @@ impl Runtime {
         Ok(d)
     }
 
-    async fn start_driver(&self, agent: &Agent, permission: &str, cwd: &str) -> Result<Arc<Driver>, String> {
+    async fn start_driver(
+        &self,
+        agent: &Agent,
+        permission: &str,
+        cwd: &str,
+    ) -> Result<Arc<Driver>, String> {
         // The resolver does blocking work (file probes, and for the account
         // harnesses a round trip to the local protocol process), so it must
         // not run on an async worker: a few parallel warm-ups would starve
@@ -997,8 +1072,13 @@ impl Runtime {
         }
         cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        let mut child = cmd.spawn().map_err(|e| format!("适配器进程启动失败：{e}"))?;
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("适配器进程启动失败：{e}"))?;
+        #[cfg(windows)]
+        let process_job = adapter_process_job(&child)?;
         let stdin = child.stdin.take().expect("stdin piped");
         let stdout = child.stdout.take().expect("stdout piped");
         let stderr = child.stderr.take().expect("stderr piped");
@@ -1017,6 +1097,8 @@ impl Runtime {
             stopped_tx,
             stopped_rx: stopped_rx.clone(),
             kill_tx,
+            #[cfg(windows)]
+            process_job: Mutex::new(Some(process_job)),
             stderr_tail: Mutex::new(String::new()),
             perm: permission.to_string(),
             cwd: cwd.to_string(),
@@ -1061,6 +1143,8 @@ impl Runtime {
                     }
                 }
                 let _ = driver.closed_tx.send(true);
+                #[cfg(windows)]
+                drop(driver.process_job.lock().unwrap().take());
                 *driver.alive.lock().unwrap() = false;
                 let Some(rt) = rt_weak.upgrade() else {
                     let _ = driver.stopped_tx.send(true);
@@ -1108,8 +1192,14 @@ impl Runtime {
                                     let rt = rt_weak.clone();
                                     tokio::spawn(async move {
                                         if let Some(rt) = rt.upgrade() {
-                                            handle_request(&rt, &driver, id, &msg.method, &msg.params)
-                                                .await;
+                                            handle_request(
+                                                &rt,
+                                                &driver,
+                                                id,
+                                                &msg.method,
+                                                &msg.params,
+                                            )
+                                            .await;
                                         }
                                     });
                                 }
@@ -1133,6 +1223,7 @@ impl Runtime {
                             }
                         }
                         Ok(None) | Err(_) => {
+                            driver.kill();
                             break;
                         }
                     }
@@ -1156,9 +1247,7 @@ impl Runtime {
             }, "terminal": false, "session": {"notices": {}}},
         });
         let result = match driver.call("initialize", &params, 90_000).await {
-            Ok(result) => {
-                result
-            }
+            Ok(result) => result,
             Err(err) => {
                 driver.kill();
                 // give the stderr tail a moment to drain (Go waits ≤1s)
@@ -1172,7 +1261,10 @@ impl Runtime {
             }
         };
         *driver.info.lock().unwrap() = result.clone();
-        let version = result.get("protocolVersion").and_then(Value::as_f64).unwrap_or(0.0);
+        let version = result
+            .get("protocolVersion")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
         if version != 1.0 {
             driver.kill();
             return Err("ACP 协议版本不兼容".into());
@@ -1233,7 +1325,10 @@ impl Runtime {
         let check = if target.exists() {
             target.clone()
         } else {
-            target.parent().map(Path::to_path_buf).unwrap_or_else(|| target.clone())
+            target
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| target.clone())
         };
         within_dir(Path::new(&driver.cwd), &check)?;
         std::fs::write(&target, content.as_bytes()).map_err(|e| e.to_string())?;
@@ -1265,7 +1360,11 @@ impl Runtime {
             session_id: rec.id.clone(),
             native_id: native_id.to_string(),
             title,
-            tool_call: if tool_call.is_null() { Value::Null } else { tool_call.clone() },
+            tool_call: if tool_call.is_null() {
+                Value::Null
+            } else {
+                tool_call.clone()
+            },
             options: options.clone(),
             state: "pending".into(),
             at: unix_millis(),
@@ -1305,7 +1404,8 @@ impl Runtime {
                 let mut card_state = card.lock().unwrap();
                 card_state.state = "denied".into();
                 card_state.reason =
-                    "当前为只读会话，权限提升已拒绝。需要写入时请选择目录内读写权限启动新任务。".into();
+                    "当前为只读会话，权限提升已拒绝。需要写入时请选择目录内读写权限启动新任务。"
+                        .into();
                 true
             } else {
                 data.state = "requires_action".into();
@@ -1320,7 +1420,11 @@ impl Runtime {
         let card_id = card.lock().unwrap().id.clone();
         self.inner.lock().unwrap().approvals.insert(
             card_id.clone(),
-            Approval { card: card.clone(), record: rec.clone(), reply: reply_tx },
+            Approval {
+                card: card.clone(),
+                record: rec.clone(),
+                reply: reply_tx,
+            },
         );
         let mut closed = driver.closed_rx.clone();
         let outcome = tokio::select! {
@@ -1421,12 +1525,17 @@ impl Runtime {
     // ----------------------------- updates -----------------------------
 
     async fn handle_notification(&self, driver: &Driver, params: &Value) {
-        let session_id = params.get("sessionId").and_then(Value::as_str).unwrap_or("");
+        let session_id = params
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         let update = params.get("update").cloned().unwrap_or(Value::Null);
         if update.is_null() {
             return;
         }
-        let Some(rec) = driver.record_for_native(session_id) else { return };
+        let Some(rec) = driver.record_for_native(session_id) else {
+            return;
+        };
         self.apply_update(&rec, &update).await;
     }
 
@@ -1577,7 +1686,11 @@ impl Runtime {
     }
 
     /// Go `ensure` (runtime.go:1032).
-    async fn ensure(&self, agent: &Agent, o: &Options) -> Result<(Arc<SessionRecord>, Arc<Driver>), String> {
+    async fn ensure(
+        &self,
+        agent: &Agent,
+        o: &Options,
+    ) -> Result<(Arc<SessionRecord>, Arc<Driver>), String> {
         let mut permission = o.permission.clone();
         if permission.is_empty() {
             permission = "readonly".into();
@@ -1588,11 +1701,7 @@ impl Runtime {
         let key = format!("{}|{}|{}", o.options_key(), agent.id, permission);
         let rec = {
             let mut inner = self.inner.lock().unwrap();
-            let existing = inner
-                .records
-                .iter()
-                .find(|cand| cand.key == key)
-                .cloned();
+            let existing = inner.records.iter().find(|cand| cand.key == key).cloned();
             existing.unwrap_or_else(|| {
                 let rec = Arc::new(SessionRecord {
                     id: format!("session_{}", short_id()),
@@ -1623,18 +1732,23 @@ impl Runtime {
             }
         }
         let driver = match self.driver(agent, &permission, &o.workdir).await {
-            Ok(d) => {
-                d
-            }
+            Ok(d) => d,
             Err(err) => {
                 self.set_state(&rec, "error", &err);
+                if rec.data.lock().unwrap().native_session_id.is_empty() {
+                    self.forget_session(&rec.id);
+                }
                 return Err(err);
             }
         };
         let _turn_guard = rec.turn_lock.lock().await;
         {
             let data = rec.data.lock().unwrap();
-            let state = if data.native_session_id.is_empty() { "connecting" } else { "restoring" };
+            let state = if data.native_session_id.is_empty() {
+                "connecting"
+            } else {
+                "restoring"
+            };
             drop(data);
             self.set_state(&rec, state, "");
         }
@@ -1646,14 +1760,27 @@ impl Runtime {
             let native = rec.data.lock().unwrap().native_session_id.clone();
             if !native.is_empty() {
                 let info = driver.info.lock().unwrap().clone();
-                let caps = info.get("agentCapabilities").cloned().unwrap_or(Value::Null);
-                let load = caps.get("loadSession").and_then(Value::as_bool).unwrap_or(false);
-                let session_caps = caps.get("sessionCapabilities").cloned().unwrap_or(Value::Null);
+                let caps = info
+                    .get("agentCapabilities")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let load = caps
+                    .get("loadSession")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let session_caps = caps
+                    .get("sessionCapabilities")
+                    .cloned()
+                    .unwrap_or(Value::Null);
                 let resume = session_caps.get("resume").is_some();
                 if !load && !resume {
                     return Err("该 Harness 不支持恢复旧会话，请新建对话".into());
                 }
-                let method = if load { "session/load" } else { "session/resume" };
+                let method = if load {
+                    "session/load"
+                } else {
+                    "session/resume"
+                };
                 driver
                     .call(
                         method,
@@ -1663,7 +1790,11 @@ impl Runtime {
                     .await
             } else {
                 driver
-                    .call("session/new", &json!({"cwd": o.workdir, "mcpServers": mcp_servers}), 90_000)
+                    .call(
+                        "session/new",
+                        &json!({"cwd": o.workdir, "mcpServers": mcp_servers}),
+                        90_000,
+                    )
                     .await
             }
         };
@@ -1671,6 +1802,9 @@ impl Runtime {
             Ok(res) => res,
             Err(err) => {
                 self.set_state(&rec, "error", &err);
+                if rec.data.lock().unwrap().native_session_id.is_empty() {
+                    self.forget_session(&rec.id);
+                }
                 return Err(err);
             }
         };
@@ -1705,13 +1839,27 @@ impl Runtime {
                 let data = rec.data.lock().unwrap();
                 data.modes
                     .as_ref()
-                    .map(|m| m.available_modes.as_ref().map(|a| !a.is_empty()).unwrap_or(false))
+                    .map(|m| {
+                        m.available_modes
+                            .as_ref()
+                            .map(|a| !a.is_empty())
+                            .unwrap_or(false)
+                    })
                     .unwrap_or(false)
             };
             if modes_known {
-                let found = rec.data.lock().unwrap().modes.as_ref().unwrap().available_modes.as_ref().unwrap().iter().any(|m| {
-                    m.get("id").and_then(Value::as_str) == Some(wanted.as_str())
-                });
+                let found = rec
+                    .data
+                    .lock()
+                    .unwrap()
+                    .modes
+                    .as_ref()
+                    .unwrap()
+                    .available_modes
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .any(|m| m.get("id").and_then(Value::as_str) == Some(wanted.as_str()));
                 if !found {
                     let err = format!("该 Harness 未提供所需权限模式：{permission}");
                     self.set_state(&rec, "error", &err);
@@ -1750,7 +1898,11 @@ impl Runtime {
             }
         }
         driver.add_session(&rec);
-        self.inner.lock().unwrap().bindings.insert(rec.id.clone(), driver.clone());
+        self.inner
+            .lock()
+            .unwrap()
+            .bindings
+            .insert(rec.id.clone(), driver.clone());
         self.set_state(&rec, "idle", "");
         self.save();
         drop(_turn_guard);
@@ -1777,13 +1929,21 @@ impl Runtime {
 
     /// Go `SupportsFork` (runtime.go:1305).
     pub fn supports_fork(&self, session_id: &str) -> bool {
-        let Some(d) = self.binding(session_id) else { return false };
+        let Some(d) = self.binding(session_id) else {
+            return false;
+        };
         if !d.is_alive() {
             return false;
         }
         let info = d.info.lock().unwrap().clone();
-        let caps = info.get("agentCapabilities").cloned().unwrap_or(Value::Null);
-        let sessions_caps = caps.get("sessionCapabilities").cloned().unwrap_or(Value::Null);
+        let caps = info
+            .get("agentCapabilities")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let sessions_caps = caps
+            .get("sessionCapabilities")
+            .cloned()
+            .unwrap_or(Value::Null);
         sessions_caps
             .get("fork")
             .map(|f| f.is_object())
@@ -1793,12 +1953,17 @@ impl Runtime {
     /// Go `PromptCapabilities` (runtime.go:1323).
     pub fn prompt_capabilities(&self, session_id: &str) -> Value {
         let mut out = json!({"image": false, "audio": false, "embedded_context": false});
-        let Some(d) = self.binding(session_id) else { return out };
+        let Some(d) = self.binding(session_id) else {
+            return out;
+        };
         if !d.is_alive() {
             return out;
         }
         let info = d.info.lock().unwrap().clone();
-        let caps = info.get("agentCapabilities").cloned().unwrap_or(Value::Null);
+        let caps = info
+            .get("agentCapabilities")
+            .cloned()
+            .unwrap_or(Value::Null);
         if let Some(prompt) = caps.get("promptCapabilities") {
             if let Some(image) = prompt.get("image").and_then(Value::as_bool) {
                 out["image"] = json!(image);
@@ -1813,7 +1978,9 @@ impl Runtime {
     /// Go `SupportsNativeSteering` (runtime.go:1345): the extension declaration
     /// plus locally verified adapter implementations only.
     pub fn supports_native_steering(&self, session_id: &str) -> bool {
-        let Some(d) = self.binding(session_id) else { return false };
+        let Some(d) = self.binding(session_id) else {
+            return false;
+        };
         if !d.is_alive() {
             return false;
         }
@@ -1867,7 +2034,10 @@ impl Runtime {
                         20_000,
                     )
                     .await?;
-                let outcome = response.get("outcome").and_then(Value::as_str).unwrap_or("");
+                let outcome = response
+                    .get("outcome")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
                 match outcome {
                     "promptRequired" => Err("no active turn".into()),
                     "injected" => Ok(()),
@@ -1884,7 +2054,9 @@ impl Runtime {
         if !self.supports_fork(session_id) {
             return false;
         }
-        let Some(d) = self.binding(session_id) else { return false };
+        let Some(d) = self.binding(session_id) else {
+            return false;
+        };
         if !d.is_alive() {
             return false;
         }
@@ -2057,7 +2229,12 @@ impl Runtime {
     }
 
     /// Go `Configure` (runtime.go:1538).
-    pub async fn configure(&self, session_id: &str, config_id: &str, value: &Value) -> Result<(), String> {
+    pub async fn configure(
+        &self,
+        session_id: &str,
+        config_id: &str,
+        value: &Value,
+    ) -> Result<(), String> {
         let rec = self.record(session_id);
         let d = self.binding(session_id);
         let (Some(rec), Some(d)) = (rec, d) else {
@@ -2176,7 +2353,13 @@ impl Runtime {
     }
 
     /// Go `turn` (runtime.go:1654) — the pausable clock.
-    async fn turn(&self, rec: &Arc<SessionRecord>, agent: &Agent, blocks: &[Value], o: &Options) -> TurnResult {
+    async fn turn(
+        &self,
+        rec: &Arc<SessionRecord>,
+        agent: &Agent,
+        blocks: &[Value],
+        o: &Options,
+    ) -> TurnResult {
         let d = match self.binding(&rec.id) {
             Some(d) if d.is_alive() => d,
             _ => {
@@ -2238,7 +2421,11 @@ impl Runtime {
             data.error.clear();
         }
         self.emit_changed(rec);
-        let timeout_ms = if o.timeout_ms != 0 { o.timeout_ms } else { self.options.timeout_ms };
+        let timeout_ms = if o.timeout_ms != 0 {
+            o.timeout_ms
+        } else {
+            self.options.timeout_ms
+        };
         // Only inactivity consumes the timeout; streaming and tool updates
         // renew it.
         let native = rec.data.lock().unwrap().native_session_id.clone();
@@ -2250,7 +2437,11 @@ impl Runtime {
             let blocks = blocks.to_vec();
             tokio::spawn(async move {
                 let result = d
-                    .call("session/prompt", &json!({"sessionId": native, "prompt": blocks}), 0)
+                    .call(
+                        "session/prompt",
+                        &json!({"sessionId": native, "prompt": blocks}),
+                        0,
+                    )
                     .await;
                 match result {
                     Ok(res) if res.is_null() => {
@@ -2376,11 +2567,20 @@ impl Runtime {
                     if let Some(last) = data.turns.last_mut() {
                         *last = failed.clone();
                     }
-                    data.state = if d.is_alive() { "idle".into() } else { "disconnected".into() };
+                    data.state = if d.is_alive() {
+                        "idle".into()
+                    } else {
+                        "disconnected".into()
+                    };
                 }
                 None => {
                     let mut done = turn_snapshot.clone();
-                    done.status = if stop_reason == "cancelled" { "cancelled" } else { "completed" }.into();
+                    done.status = if stop_reason == "cancelled" {
+                        "cancelled"
+                    } else {
+                        "completed"
+                    }
+                    .into();
                     done.stop_reason = stop_reason.clone();
                     if let Some(last) = data.turns.last_mut() {
                         *last = done;
@@ -2432,7 +2632,11 @@ impl Runtime {
             ok,
             output: turn_snapshot.output.clone(),
             structured,
-            error: if ok { String::new() } else { "会话已停止或未返回有效结果".into() },
+            error: if ok {
+                String::new()
+            } else {
+                "会话已停止或未返回有效结果".into()
+            },
             meta,
         }
     }
@@ -2454,7 +2658,8 @@ impl Runtime {
         self.cancel_permissions(id);
         self.emit_changed(&rec);
         let native = rec.data.lock().unwrap().native_session_id.clone();
-        d.notify("session/cancel", &json!({"sessionId": native})).await
+        d.notify("session/cancel", &json!({"sessionId": native}))
+            .await
     }
 
     // ----------------------------- listings -----------------------------
@@ -2483,10 +2688,16 @@ impl Runtime {
 
     /// Go `ExportTranscript` (runtime.go:1879).
     pub fn export_transcript(&self, id: &str) -> String {
-        let Some(rec) = self.record(id) else { return String::new() };
+        let Some(rec) = self.record(id) else {
+            return String::new();
+        };
         let mut out = String::new();
         for t in &rec.data.lock().unwrap().turns {
-            let stage = if t.stage.is_empty() { "执行" } else { &t.stage };
+            let stage = if t.stage.is_empty() {
+                "执行"
+            } else {
+                &t.stage
+            };
             out.push_str(&format!("### 回合 {}（{stage}）\n", t.id));
             if !t.output.is_empty() {
                 out.push_str(&t.output);
@@ -2528,7 +2739,8 @@ impl Runtime {
             }
             d.kill();
             let mut stopped = d.stopped_rx.clone();
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(3), stopped.changed()).await;
+            let _ =
+                tokio::time::timeout(std::time::Duration::from_secs(3), stopped.changed()).await;
         }
     }
 
@@ -2557,7 +2769,8 @@ impl Runtime {
             }
             d.kill();
             let mut stopped = d.stopped_rx.clone();
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), stopped.changed()).await;
+            let _ =
+                tokio::time::timeout(std::time::Duration::from_secs(5), stopped.changed()).await;
         }
     }
 }
@@ -2580,7 +2793,11 @@ async fn handle_request(rt: &Runtime, driver: &Driver, id: i64, method: &str, pa
         },
         _ => {
             driver
-                .reply(id, Value::Null, Some(format!("method not supported: {method}")))
+                .reply(
+                    id,
+                    Value::Null,
+                    Some(format!("method not supported: {method}")),
+                )
                 .await;
         }
     }
@@ -2590,7 +2807,9 @@ async fn handle_request(rt: &Runtime, driver: &Driver, id: i64, method: &str, pa
 
 /// Go `splitLines` (runtime.go:896): split on \n, trim a trailing \r.
 fn split_lines(s: &str) -> Vec<String> {
-    s.split('\n').map(|l| l.trim_end_matches('\r').to_string()).collect()
+    s.split('\n')
+        .map(|l| l.trim_end_matches('\r').to_string())
+        .collect()
 }
 
 /// Normalise a Windows canonicalised path (`\\?\C:\...`) back to a plain one so
@@ -2618,7 +2837,10 @@ fn within_dir(root: &Path, candidate: &Path) -> Result<PathBuf, String> {
         Err(_) => {
             // target may not exist yet (write); resolve the deepest existing
             // ancestor
-            let dir = abs.parent().map(Path::to_path_buf).unwrap_or_else(|| abs.clone());
+            let dir = abs
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| abs.clone());
             match std::fs::canonicalize(&dir) {
                 Ok(resolved) => {
                     let base = abs.file_name().map(PathBuf::from).unwrap_or_default();
@@ -2652,9 +2874,7 @@ fn relative(base: &Path, target: &Path) -> Result<String, String> {
     }
     if common == 0 {
         // Different roots (e.g. C:\ vs D:\) — Go returns an error.
-        return Err(format!(
-            "路径不在同一根目录：{base:?} 与 {target:?}"
-        ));
+        return Err(format!("路径不在同一根目录：{base:?} 与 {target:?}"));
     }
     let ups = base_components.len() - common;
     let mut parts: Vec<String> = Vec::new();
@@ -2679,19 +2899,51 @@ fn turn_snapshot_native(rec: &SessionRecord) -> String {
 
 /// BufReader over a `ChildStdout` yielding \n-split lines (16 MiB cap like
 /// Go's scanner buffer).
-struct BufReaderLines {
-    reader: tokio::io::BufReader<tokio::process::ChildStdout>,
+#[cfg(windows)]
+fn adapter_process_job(child: &Child) -> Result<std::os::windows::io::OwnedHandle, String> {
+    use std::os::windows::io::{FromRawHandle, OwnedHandle};
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::JobObjects::*;
+    unsafe {
+        let job = CreateJobObjectW(None, windows::core::PCWSTR::null())
+            .map_err(|e| format!("创建适配器进程组失败：{e}"))?;
+        let owned = OwnedHandle::from_raw_handle(job.0);
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &limits as *const _ as *const std::ffi::c_void,
+            std::mem::size_of_val(&limits) as u32,
+        )
+        .map_err(|e| format!("设置适配器进程组失败：{e}"))?;
+        let process = child.raw_handle().ok_or("适配器进程已经退出")?;
+        AssignProcessToJobObject(job, HANDLE(process))
+            .map_err(|e| format!("托管适配器进程失败：{e}"))?;
+        Ok(owned)
+    }
 }
 
-impl BufReaderLines {
-    fn new(stdout: tokio::process::ChildStdout) -> Self {
-        BufReaderLines { reader: tokio::io::BufReader::with_capacity(1024 * 1024, stdout) }
+struct BufReaderLines<R> {
+    reader: tokio::io::BufReader<R>,
+}
+
+impl<R: tokio::io::AsyncRead + Unpin> BufReaderLines<R> {
+    fn new(stdout: R) -> Self {
+        BufReaderLines {
+            reader: tokio::io::BufReader::with_capacity(1024 * 1024, stdout),
+        }
     }
 
     async fn next_line(&mut self) -> std::io::Result<Option<String>> {
-        use tokio::io::AsyncBufReadExt;
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt};
         let mut line = Vec::new();
-        let n = self.reader.read_until(b'\n', &mut line).await?;
+        // Limit the read itself: checking after read_until returns allows an
+        // adapter without newlines to grow memory forever while this awaits.
+        let n = (&mut self.reader)
+            .take(16 * 1024 * 1024 + 2)
+            .read_until(b'\n', &mut line)
+            .await?;
         if n == 0 {
             return Ok(None);
         }
@@ -2699,7 +2951,10 @@ impl BufReaderLines {
             line.pop();
         }
         if line.len() > 16 * 1024 * 1024 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "ACP 行超长"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "ACP 行超长",
+            ));
         }
         Ok(Some(String::from_utf8_lossy(&line).to_string()))
     }
@@ -2709,6 +2964,142 @@ impl BufReaderLines {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn failed_connects_do_not_accumulate_unstarted_sessions() {
+        let Some((_, agent, mut options)) = fixture_runtime("failed", &[]) else {
+            return;
+        };
+        let rt = Runtime::new(RuntimeOptions {
+            resolver: Arc::new(crate::backend::acp::launch::StaticLaunchResolver {
+                launch: Launch {
+                    command: "codepluse-nonexistent-adapter".into(),
+                    args: vec![],
+                    env: None,
+                },
+            }),
+            ..RuntimeOptions::default()
+        });
+        for attempt in 0..20 {
+            options.session_key = format!("failed-{attempt}");
+            assert!(rt.connect(&agent, options.clone()).await.is_err());
+        }
+        assert!(
+            rt.records("").is_empty(),
+            "failed retries must not retain unpublished sessions"
+        );
+        rt.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn unterminated_adapter_output_is_bounded() {
+        use tokio::io::AsyncWriteExt;
+        let (mut writer, reader) = tokio::io::duplex(8192);
+        let producer = tokio::spawn(async move {
+            let chunk = vec![b'x'; 8192];
+            loop {
+                if writer.write_all(&chunk).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let mut lines = BufReaderLines::new(reader);
+        let error = tokio::time::timeout(Duration::from_secs(5), lines.next_line())
+            .await
+            .expect("unterminated output must not wait forever")
+            .expect_err("oversized frame must fail");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        producer.abort();
+    }
+
+    #[tokio::test]
+    async fn slow_agent_start_does_not_block_other_agents() {
+        struct Resolver {
+            launch: Launch,
+            started: Arc<std::sync::atomic::AtomicBool>,
+        }
+        impl LaunchResolver for Resolver {
+            fn launch(&self, agent: &Agent, _: &str, _: &str) -> Result<Launch, String> {
+                if agent.id == "slow" {
+                    self.started.store(true, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_secs(4));
+                }
+                Ok(self.launch.clone())
+            }
+            fn version(&self, _: &Agent) -> String {
+                "test".into()
+            }
+        }
+        let Some((unused, mut fast, options)) = fixture_runtime("independent", &[]) else {
+            return;
+        };
+        let launch = unused
+            .options
+            .resolver
+            .launch(&fast, "readonly", &options.workdir)
+            .unwrap();
+        let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let rt = Runtime::new(RuntimeOptions {
+            resolver: Arc::new(Resolver {
+                launch,
+                started: started.clone(),
+            }),
+            ..RuntimeOptions::default()
+        });
+        fast.id = "fast".into();
+        let mut slow = fast.clone();
+        slow.id = "slow".into();
+        let pending = tokio::spawn({
+            let rt = rt.clone();
+            let options = options.clone();
+            async move { rt.connect(&slow, options).await }
+        });
+        assert!(wait_for(2000, || async { started.load(Ordering::SeqCst) }).await);
+        let fast_result =
+            tokio::time::timeout(Duration::from_secs(2), rt.connect(&fast, options)).await;
+        let slow_result = pending.await.unwrap();
+        rt.shutdown().await;
+        fast_result
+            .expect("one slow adapter must not block another")
+            .unwrap();
+        slow_result.unwrap();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn closing_adapter_job_terminates_descendants() {
+        use std::os::windows::io::{FromRawHandle, OwnedHandle};
+        use tokio::io::AsyncBufReadExt;
+        use windows::Win32::Foundation::WAIT_OBJECT_0;
+        use windows::Win32::System::Threading::{
+            OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+        };
+        let node = crate::backend::acp::launch::which("node").unwrap();
+        let script = "const {spawn}=require('child_process');const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});console.log(c.pid);setInterval(()=>{},1000)";
+        let mut child = Command::new(node)
+            .args(["-e", script])
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let job = adapter_process_job(&child).unwrap();
+        let mut reader = tokio::io::BufReader::new(child.stdout.take().unwrap());
+        let mut pid = String::new();
+        tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut pid))
+            .await
+            .unwrap()
+            .unwrap();
+        let handle = unsafe {
+            OpenProcess(PROCESS_SYNCHRONIZE, false, pid.trim().parse().unwrap()).unwrap()
+        };
+        let _owned = unsafe { OwnedHandle::from_raw_handle(handle.0) };
+        drop(job);
+        assert_eq!(unsafe { WaitForSingleObject(handle, 2000) }, WAIT_OBJECT_0);
+        tokio::time::timeout(Duration::from_secs(2), child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
     use super::*;
     use crate::backend::acp::launch::which;
     use serde_json::json;
@@ -2725,10 +3116,18 @@ mod tests {
             }
         };
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        let mut args = vec![root.join("fixtures").join("acp-agent.cjs").to_string_lossy().to_string()];
+        let mut args = vec![root
+            .join("fixtures")
+            .join("acp-agent.cjs")
+            .to_string_lossy()
+            .to_string()];
         args.extend(extra_args.iter().map(|a| a.to_string()));
         let resolver = crate::backend::acp::launch::StaticLaunchResolver {
-            launch: Launch { command: node, args, env: None },
+            launch: Launch {
+                command: node,
+                args,
+                env: None,
+            },
         };
         let rt = Runtime::new(RuntimeOptions {
             state_file: None,
@@ -2737,7 +3136,11 @@ mod tests {
             emitter: Arc::new(NoopEmitter),
             hooks: Arc::new(NoopHooks),
         });
-        let agent = Agent { id: "agent".into(), real_tool: "codex".into(), ..Agent::default() };
+        let agent = Agent {
+            id: "agent".into(),
+            real_tool: "codex".into(),
+            ..Agent::default()
+        };
         let options = Options {
             workdir: root.to_string_lossy().to_string(),
             permission: "readonly".into(),
@@ -2762,9 +3165,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_native_steering_injects_only_into_running_turn() {
-        let Some((rt, agent, options)) = fixture_runtime("steer", &["--fork", "--steer"]) else { return };
+        let Some((rt, agent, options)) = fixture_runtime("steer", &["--fork", "--steer"]) else {
+            return;
+        };
         let sid = rt.connect(&agent, options.clone()).await.expect("connect");
-        assert!(rt.supports_native_steering(&sid), "steering capability not detected");
+        assert!(
+            rt.supports_native_steering(&sid),
+            "steering capability not detected"
+        );
         let blocks = vec![json!({"type": "text", "text": "follow up"})];
         match rt.steer(&sid, &blocks).await {
             Err(err) => assert!(err.contains("no active turn"), "idle steer: {err}"),
@@ -2776,10 +3184,7 @@ mod tests {
             let options = options.clone();
             async move { rt.prompt(&agent, "wait", options).await }
         });
-        let steered = wait_for(3000, || async {
-            rt.steer(&sid, &blocks).await.is_ok()
-        })
-        .await;
+        let steered = wait_for(3000, || async { rt.steer(&sid, &blocks).await.is_ok() }).await;
         if !steered {
             panic!("steering failed");
         }
@@ -2787,9 +3192,15 @@ mod tests {
             .await
             .expect("steered turn did not complete")
             .expect("join");
-        assert!(result.ok && result.output == "steered:follow up", "wrong result: {result:?}");
+        assert!(
+            result.ok && result.output == "steered:follow up",
+            "wrong result: {result:?}"
+        );
         match rt.steer(&sid, &blocks).await {
-            Err(err) => assert!(err.contains("no active turn"), "idle steer started a detached turn: {err}"),
+            Err(err) => assert!(
+                err.contains("no active turn"),
+                "idle steer started a detached turn: {err}"
+            ),
             Ok(()) => panic!("idle steer started a detached turn"),
         }
         rt.shutdown().await;
@@ -2797,7 +3208,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_prompt_preserves_wire_order_across_turns() {
-        let Some((rt, agent, options)) = fixture_runtime("order", &[]) else { return };
+        let Some((rt, agent, options)) = fixture_runtime("order", &[]) else {
+            return;
+        };
         for i in 0..40 {
             let text = format!("turn-{i:02}:abcdefghijklmnopqrstuv");
             let res = rt.prompt(&agent, &text, options.clone()).await;
@@ -2806,7 +3219,10 @@ mod tests {
         let res = rt.prompt(&agent, "submit", options.clone()).await;
         assert!(res.ok, "lost final tool submission: {res:?}");
         assert_eq!(
-            res.structured.as_ref().and_then(|s| s.get("output")).and_then(Value::as_str),
+            res.structured
+                .as_ref()
+                .and_then(|s| s.get("output"))
+                .and_then(Value::as_str),
             Some("tool says done")
         );
         let records = rt.records("");
@@ -2825,55 +3241,103 @@ mod tests {
 
     #[tokio::test]
     async fn test_fork_capability_requires_an_explicit_live_agent_declaration() {
-        let Some((rt, agent, options)) = fixture_runtime("forkcap", &[]) else { return };
+        let Some((rt, agent, options)) = fixture_runtime("forkcap", &[]) else {
+            return;
+        };
         let id = rt.connect(&agent, options.clone()).await.expect("connect");
-        assert!(!rt.supports_fork(&id), "unadvertised fork was reported as supported");
-        assert!(!rt.supports_fork("missing"), "missing session reported supported");
+        assert!(
+            !rt.supports_fork(&id),
+            "unadvertised fork was reported as supported"
+        );
+        assert!(
+            !rt.supports_fork("missing"),
+            "missing session reported supported"
+        );
         {
             let d = rt.binding(&id).unwrap();
             let mut info = d.info.lock().unwrap().clone();
             info["agentCapabilities"]["sessionCapabilities"] = json!({"fork": {}});
             *d.info.lock().unwrap() = info;
         }
-        assert!(rt.supports_fork(&id), "advertised fork capability was not detected");
-        assert!(!rt.supports_point_fork(&id, Some(&agent)), "unverified adapter must not expose point forks");
+        assert!(
+            rt.supports_fork(&id),
+            "advertised fork capability was not detected"
+        );
+        assert!(
+            !rt.supports_point_fork(&id, Some(&agent)),
+            "unverified adapter must not expose point forks"
+        );
         {
             let d = rt.binding(&id).unwrap();
             let mut info = d.info.lock().unwrap().clone();
-            info["agentInfo"] = json!({"name": "@agentclientprotocol/codex-acp", "version": "2.5.0"});
+            info["agentInfo"] =
+                json!({"name": "@agentclientprotocol/codex-acp", "version": "2.5.0"});
             *d.info.lock().unwrap() = info;
         }
-        assert!(rt.supports_point_fork(&id, Some(&agent)), "verified adapter did not expose point forks");
+        assert!(
+            rt.supports_point_fork(&id, Some(&agent)),
+            "verified adapter did not expose point forks"
+        );
         {
             let d = rt.binding(&id).unwrap();
             let mut info = d.info.lock().unwrap().clone();
             info["agentCapabilities"]["sessionCapabilities"] = json!({"fork": null});
             *d.info.lock().unwrap() = info;
         }
-        assert!(!rt.supports_fork(&id), "null fork capability was reported as supported");
+        assert!(
+            !rt.supports_fork(&id),
+            "null fork capability was reported as supported"
+        );
         rt.shutdown().await;
     }
 
     #[tokio::test]
     async fn test_fork_uses_native_message_point_and_keeps_sessions_independent() {
-        let Some((rt, agent, source)) = fixture_runtime("fork", &["--fork"]) else { return };
+        let Some((rt, agent, source)) = fixture_runtime("fork", &["--fork"]) else {
+            return;
+        };
         let got = rt.prompt(&agent, "remember original", source.clone()).await;
         assert!(got.ok, "{}", got.error);
         let got = rt.prompt(&agent, "remember later", source.clone()).await;
         assert!(got.ok, "{}", got.error);
         let source_id = rt.records("")[0].id.clone();
         let fork_id = rt
-            .fork(&agent, &source_id, source.clone(), "new-branch", "fixture-message-1", None)
+            .fork(
+                &agent,
+                &source_id,
+                source.clone(),
+                "new-branch",
+                "fixture-message-1",
+                None,
+            )
             .await
             .expect("fork");
         assert_ne!(fork_id, source_id);
-        let fork_options = Options { session_key: "new-branch".into(), ..source.clone() };
+        let fork_options = Options {
+            session_key: "new-branch".into(),
+            ..source.clone()
+        };
         let got = rt.prompt(&agent, "recall", fork_options).await;
-        assert!(got.ok && got.output == "original", "fork has wrong history: {:?}", got);
+        assert!(
+            got.ok && got.output == "original",
+            "fork has wrong history: {:?}",
+            got
+        );
         let got = rt.prompt(&agent, "recall", source.clone()).await;
-        assert!(got.ok && got.output == "later", "source history changed: {:?}", got);
+        assert!(
+            got.ok && got.output == "later",
+            "source history changed: {:?}",
+            got
+        );
         let err = rt
-            .fork(&agent, &source_id, source, "bad-branch", "missing-native-id", None)
+            .fork(
+                &agent,
+                &source_id,
+                source,
+                "bad-branch",
+                "missing-native-id",
+                None,
+            )
             .await
             .expect_err("unknown fork point should fail");
         assert!(!err.is_empty());
@@ -2882,25 +3346,37 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_renews_inactivity_timeout() {
-        let Some((rt, agent, mut options)) = fixture_runtime("stream", &[]) else { return };
+        let Some((rt, agent, mut options)) = fixture_runtime("stream", &[]) else {
+            return;
+        };
         options.timeout_ms = 1000;
         let res = rt.prompt(&agent, "stream-slow", options).await;
-        assert!(res.ok && res.output == ".....", "active stream was cancelled: {res:?}");
+        assert!(
+            res.ok && res.output == ".....",
+            "active stream was cancelled: {res:?}"
+        );
         rt.shutdown().await;
     }
 
     #[tokio::test]
     async fn test_idle_prompt_still_times_out() {
-        let Some((rt, agent, mut options)) = fixture_runtime("idle", &[]) else { return };
+        let Some((rt, agent, mut options)) = fixture_runtime("idle", &[]) else {
+            return;
+        };
         options.timeout_ms = 700;
         let res = rt.prompt(&agent, "wait", options).await;
-        assert!(!res.ok && res.error == "ACP 会话超时", "idle prompt did not time out: {res:?}");
+        assert!(
+            !res.ok && res.error == "ACP 会话超时",
+            "idle prompt did not time out: {res:?}"
+        );
         rt.shutdown().await;
     }
 
     #[tokio::test]
     async fn test_full_access_mode_survives_driver_restart() {
-        let Some((rt, agent, mut options)) = fixture_runtime("restart", &[]) else { return };
+        let Some((rt, agent, mut options)) = fixture_runtime("restart", &[]) else {
+            return;
+        };
         options.permission = "workspace".into();
         options.mode = "agent-full-access".into();
         let id = rt.connect(&agent, options.clone()).await.expect("connect");
@@ -2913,12 +3389,19 @@ mod tests {
                 "full access was downgraded"
             );
         }
-        rt.configure(&id, "mode", &json!("read-only")).await.expect("configure");
+        rt.configure(&id, "mode", &json!("read-only"))
+            .await
+            .expect("configure");
         rt.shutdown().await;
-        rt.connect(&agent, options.clone()).await.expect("reconnect");
+        rt.connect(&agent, options.clone())
+            .await
+            .expect("reconnect");
         let rec = &rt.records("")[0];
         let data = rec.data.lock().unwrap();
-        assert_eq!(data.native_mode, "read-only", "latest user mode was not restored");
+        assert_eq!(
+            data.native_mode, "read-only",
+            "latest user mode was not restored"
+        );
         assert_eq!(
             data.modes.as_ref().map(|m| m.current_mode_id.as_str()),
             Some("read-only")
@@ -2929,7 +3412,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_resume_only_harness_without_modes() {
-        let Some((rt, mut agent, mut options)) = fixture_runtime("resume", &["--resume-only"]) else { return };
+        let Some((rt, mut agent, mut options)) = fixture_runtime("resume", &["--resume-only"])
+        else {
+            return;
+        };
         agent.real_tool = "dsh".into();
         options.permission = "workspace".into();
         let result = rt.prompt(&agent, "first", options.clone()).await;
@@ -2942,7 +3428,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_refusal_reports_native_authentication_error() {
-        let Some((rt, agent, options)) = fixture_runtime("refusal", &[]) else { return };
+        let Some((rt, agent, options)) = fixture_runtime("refusal", &[]) else {
+            return;
+        };
         let result = rt.prompt(&agent, "refusal", options).await;
         assert!(!result.ok, "{result:?}");
         assert_eq!(result.error, "Please sign in to WorkBuddy", "{result:?}");
@@ -2977,27 +3465,46 @@ mod tests {
         rt.test_inject_record(first.clone());
         let view = rt.list_json("").await[0].clone();
         for key in ["turns", "permissions"] {
-            let values = view.get(key).and_then(Value::as_array).cloned().unwrap_or_default();
+            let values = view
+                .get(key)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
             assert!(values.is_empty(), "{key} must be []: {view}");
         }
         let active = view.get("activeTurn").cloned().unwrap_or(Value::Null);
         assert_eq!(active.get("output").and_then(Value::as_str), Some("stream"));
         assert_eq!(active.get("receivedChars").and_then(Value::as_i64), Some(6));
-        assert!(active.get("tools").and_then(Value::as_array).is_some(), "tools must be []");
+        assert!(
+            active.get("tools").and_then(Value::as_array).is_some(),
+            "tools must be []"
+        );
         first.data.lock().unwrap().active = None;
         first.data.lock().unwrap().turns.push(Turn {
             status: "completed".into(),
             ..Turn::default()
         });
         let view = rt.list_json("").await[0].clone();
-        assert!(view.get("activeTurn").map(Value::is_null).unwrap_or(false), "finished turn still active");
-        let turns = view.get("turns").and_then(Value::as_array).cloned().unwrap_or_default();
-        assert!(turns[0].get("tools").and_then(Value::as_array).is_some(), "finished tools must be []");
+        assert!(
+            view.get("activeTurn").map(Value::is_null).unwrap_or(false),
+            "finished turn still active"
+        );
+        let turns = view
+            .get("turns")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            turns[0].get("tools").and_then(Value::as_array).is_some(),
+            "finished tools must be []"
+        );
     }
 
     #[tokio::test]
     async fn test_active_turn_can_be_observed_and_cancelled() {
-        let Some((rt, agent, options)) = fixture_runtime("cancel", &[]) else { return };
+        let Some((rt, agent, options)) = fixture_runtime("cancel", &[]) else {
+            return;
+        };
         let done = tokio::spawn({
             let rt = rt.clone();
             let agent = agent.clone();
@@ -3019,7 +3526,10 @@ mod tests {
             .expect("cancel stalled")
             .expect("join");
         let view = rt.list_json("").await[0].clone();
-        assert!(view.get("activeTurn").map(Value::is_null).unwrap_or(false), "cancelled turn still active");
+        assert!(
+            view.get("activeTurn").map(Value::is_null).unwrap_or(false),
+            "cancelled turn still active"
+        );
         rt.shutdown().await;
     }
 
@@ -3028,7 +3538,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("acp-persist-{}", short_id()));
         std::fs::create_dir_all(dir.join("nested")).unwrap();
         let file = dir.join("nested").join("sessions.json");
-        let rt = Runtime::new(RuntimeOptions { state_file: Some(file.clone()), ..RuntimeOptions::default() });
+        let rt = Runtime::new(RuntimeOptions {
+            state_file: Some(file.clone()),
+            ..RuntimeOptions::default()
+        });
         for i in 0..105 {
             let rec = Arc::new(SessionRecord {
                 id: format!("session-{i:03}"),
@@ -3044,17 +3557,25 @@ mod tests {
             rt.test_inject_record(rec);
         }
         rt.save_records();
-        let restored = Runtime::new(RuntimeOptions { state_file: Some(file), ..RuntimeOptions::default() });
+        let restored = Runtime::new(RuntimeOptions {
+            state_file: Some(file),
+            ..RuntimeOptions::default()
+        });
         let records = restored.records("");
         assert_eq!(records.len(), 100, "latest sessions were not retained");
         assert_eq!(records[0].id, "session-005");
-        assert_eq!(records[99].data.lock().unwrap().native_session_id, "native-104");
+        assert_eq!(
+            records[99].data.lock().unwrap().native_session_id,
+            "native-104"
+        );
         std::fs::remove_dir_all(dir).ok();
     }
 
     #[tokio::test]
     async fn test_permission_request_does_not_block_stream_reader() {
-        let Some((rt, agent, mut options)) = fixture_runtime("perm", &[]) else { return };
+        let Some((rt, agent, mut options)) = fixture_runtime("perm", &[]) else {
+            return;
+        };
         options.permission = "workspace".into();
         let done = tokio::spawn({
             let rt = rt.clone();
@@ -3065,7 +3586,11 @@ mod tests {
         let appeared = wait_for(3000, || async {
             match rt.list_json("").await.first().cloned() {
                 Some(view) => {
-                    let cards = view.get("permissions").and_then(Value::as_array).cloned().unwrap_or_default();
+                    let cards = view
+                        .get("permissions")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
                     !cards.is_empty()
                 }
                 None => false,
@@ -3082,7 +3607,10 @@ mod tests {
             .await
             .expect("permission response stalled")
             .expect("join");
-        assert!(res.ok && res.output == choice, "permission reply lost: {res:?}");
+        assert!(
+            res.ok && res.output == choice,
+            "permission reply lost: {res:?}"
+        );
         rt.shutdown().await;
     }
 
@@ -3095,14 +3623,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_only_owned_internal_tools_may_be_allowed_in_read_only_sessions() {
-        let Some((_, agent, options)) = fixture_runtime("readonly", &[]) else { return };
+        let Some((_, agent, options)) = fixture_runtime("readonly", &[]) else {
+            return;
+        };
         // Rebuild with the internal-tool hook: fixture_runtime uses NoopHooks.
         let node = which("node").expect("node present (fixture_runtime checked)");
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let resolver = crate::backend::acp::launch::StaticLaunchResolver {
             launch: Launch {
                 command: node,
-                args: vec![root.join("fixtures").join("acp-agent.cjs").to_string_lossy().to_string()],
+                args: vec![root
+                    .join("fixtures")
+                    .join("acp-agent.cjs")
+                    .to_string_lossy()
+                    .to_string()],
                 env: None,
             },
         };
@@ -3113,11 +3647,18 @@ mod tests {
             emitter: Arc::new(NoopEmitter),
             hooks: Arc::new(AllowListHook),
         });
-        let allowed = rt.prompt(&agent, "permission-internal", options.clone()).await;
-        assert!(allowed.ok && allowed.output == "yes", "internal tool blocked: {allowed:?}");
+        let allowed = rt
+            .prompt(&agent, "permission-internal", options.clone())
+            .await;
+        assert!(
+            allowed.ok && allowed.output == "yes",
+            "internal tool blocked: {allowed:?}"
+        );
         let denied = rt.prompt(&agent, "permission", options).await;
-        assert!(denied.ok && denied.output == "cancelled", "native edit bypassed read-only: {denied:?}");
+        assert!(
+            denied.ok && denied.output == "cancelled",
+            "native edit bypassed read-only: {denied:?}"
+        );
         rt.shutdown().await;
     }
 }
-

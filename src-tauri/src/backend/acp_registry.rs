@@ -223,16 +223,21 @@ fn registry_catalog(root: &Path) -> Result<Value, String> {
 
 fn registry_catalog_with_url(registry: &str, root: &Path) -> Result<Value, String> {
     let entries = fetch_registry_entries(registry)?;
-    let installed: Vec<String> = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))?
-        .and_then(|doc| {
-            doc.get("customAgents")
-                .and_then(|v| v.as_object())
-                .map(|map| map.keys().cloned().collect())
-        })
-        .unwrap_or_default();
+    let installed: Vec<String> =
+        store_file::read_json(&root.join(".data").join("codeg-workspace.json"))?
+            .and_then(|doc| {
+                doc.get("customAgents")
+                    .and_then(|v| v.as_object())
+                    .map(|map| map.keys().cloned().collect())
+            })
+            .unwrap_or_default();
     let mut rows: Vec<Value> = Vec::new();
     for entry in &entries {
-        let id = entry.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let id = entry
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let spec = canon_spec(&entry.get("distribution").cloned().unwrap_or(Value::Null));
         rows.push(json!({
             "registryId": id,
@@ -312,7 +317,8 @@ mod tests {
         let root = temp_root("catalog");
         std::fs::write(
             root.join(".data").join("codeg-workspace.json"),
-            json!({"next": 1, "customAgents": {"claude-acp": {"registryId": "claude-acp"}}}).to_string(),
+            json!({"next": 1, "customAgents": {"claude-acp": {"registryId": "claude-acp"}}})
+                .to_string(),
         )
         .unwrap();
         let rows = registry_catalog_with_url(&url, &root).unwrap();
@@ -326,8 +332,14 @@ mod tests {
         assert_eq!(rows[0]["installed"], false);
         assert_eq!(rows[1]["builtin"], true);
         assert_eq!(rows[0]["builtin"], false);
-        assert_eq!(rows[0]["supportedOnPlatform"], true, "本机是 windows-x86_64");
-        assert_eq!(rows[2]["supportedOnPlatform"], false, "linux-aarch64 不适配");
+        assert_eq!(
+            rows[0]["supportedOnPlatform"], true,
+            "本机是 windows-x86_64"
+        );
+        assert_eq!(
+            rows[2]["supportedOnPlatform"], false,
+            "linux-aarch64 不适配"
+        );
         assert_eq!(rows[0]["distributionKinds"], json!(["binary"]));
         assert_eq!(rows[1]["distributionKinds"], json!(["npx"]));
         assert_eq!(rows[0]["version"], "1.2.3");
@@ -346,7 +358,11 @@ mod tests {
     fn platform_strings_match_go() {
         // 本机断言形状；GOOS 映射由 current_acp_platform 处理。
         let platform = current_acp_platform();
-        assert!(platform.starts_with("windows-") || platform.starts_with("linux-") || platform.starts_with("darwin-"));
+        assert!(
+            platform.starts_with("windows-")
+                || platform.starts_with("linux-")
+                || platform.starts_with("darwin-")
+        );
         assert!(platform.contains("x86_64") || platform.contains("aarch64"));
     }
 }

@@ -66,22 +66,50 @@ impl LaunchResolver for StaticLaunchResolver {
 // ----------------------------- CLI locating -----------------------------
 
 fn npm_global() -> PathBuf {
-    home_dir().join("AppData").join("Roaming").join("npm").join("node_modules")
+    home_dir()
+        .join("AppData")
+        .join("Roaming")
+        .join("npm")
+        .join("node_modules")
 }
 
 fn acp_package_candidates(tool: &str) -> Vec<PathBuf> {
     match tool {
         "codex" => vec![
-            npm_global().join("@agentclientprotocol").join("codex-acp").join("dist").join("index.js"),
-            PathBuf::from("node_modules").join("@agentclientprotocol").join("codex-acp").join("dist").join("index.js"),
+            npm_global()
+                .join("@agentclientprotocol")
+                .join("codex-acp")
+                .join("dist")
+                .join("index.js"),
+            PathBuf::from("node_modules")
+                .join("@agentclientprotocol")
+                .join("codex-acp")
+                .join("dist")
+                .join("index.js"),
         ],
         "claude" => vec![
-            npm_global().join("@agentclientprotocol").join("claude-agent-acp").join("dist").join("index.js"),
-            PathBuf::from("node_modules").join("@agentclientprotocol").join("claude-agent-acp").join("dist").join("index.js"),
+            npm_global()
+                .join("@agentclientprotocol")
+                .join("claude-agent-acp")
+                .join("dist")
+                .join("index.js"),
+            PathBuf::from("node_modules")
+                .join("@agentclientprotocol")
+                .join("claude-agent-acp")
+                .join("dist")
+                .join("index.js"),
         ],
         "dsh" => vec![
-            npm_global().join("@deepseek-ai").join("dsh").join("lib").join("bin.js"),
-            PathBuf::from("node_modules").join("@deepseek-ai").join("dsh").join("lib").join("bin.js"),
+            npm_global()
+                .join("@deepseek-ai")
+                .join("dsh")
+                .join("lib")
+                .join("bin.js"),
+            PathBuf::from("node_modules")
+                .join("@deepseek-ai")
+                .join("dsh")
+                .join("lib")
+                .join("bin.js"),
         ],
         _ => Vec::new(),
     }
@@ -126,19 +154,8 @@ pub fn work_buddy_entry(root: &Path) -> String {
         }
     }
     // Windows App Paths supports installations on a custom drive.
-    if let Ok(output) = std::process::Command::new("reg")
-        .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\WorkBuddy.exe", "/ve"])
-        .output()
-    {
-        let text = String::from_utf8_lossy(&output.stdout).to_string();
-        for line in text.split('\n') {
-            if let Some((_, value)) = line.split_once("REG_SZ") {
-                let value = value.trim().trim_matches('"');
-                if let Some(dir) = Path::new(value).parent() {
-                    roots.push(dir.to_path_buf());
-                }
-            }
-        }
+    if let Some(dir) = registered_workbuddy_directory() {
+        roots.push(dir);
     }
     for root_dir in roots {
         let p = root_dir
@@ -152,6 +169,56 @@ pub fn work_buddy_entry(root: &Path) -> String {
         }
     }
     String::new()
+}
+
+#[cfg(windows)]
+fn registered_workbuddy_directory() -> Option<PathBuf> {
+    use windows::core::PCWSTR;
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
+    let key: Vec<u16> = r"Software\Microsoft\Windows\CurrentVersion\App Paths\WorkBuddy.exe"
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let mut bytes = 0u32;
+    unsafe {
+        if RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(key.as_ptr()),
+            PCWSTR::null(),
+            RRF_RT_REG_SZ,
+            None,
+            None,
+            Some(&mut bytes),
+        )
+        .0 != 0
+        {
+            return None;
+        }
+        let mut value = vec![0u16; bytes as usize / 2 + 1];
+        if RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(key.as_ptr()),
+            PCWSTR::null(),
+            RRF_RT_REG_SZ,
+            None,
+            Some(value.as_mut_ptr().cast()),
+            Some(&mut bytes),
+        )
+        .0 != 0
+        {
+            return None;
+        }
+        let end = value.iter().position(|c| *c == 0).unwrap_or(value.len());
+        let path = String::from_utf16_lossy(&value[..end]);
+        Path::new(path.trim().trim_matches('"'))
+            .parent()
+            .map(Path::to_path_buf)
+    }
+}
+
+#[cfg(not(windows))]
+fn registered_workbuddy_directory() -> Option<PathBuf> {
+    None
 }
 
 /// `exec.LookPath` equivalent for one name (PATH lookup).
@@ -182,14 +249,40 @@ pub fn which(name: &str) -> Result<String, ()> {
 fn bin_candidates(tool: &str) -> Vec<PathBuf> {
     match tool {
         "codex" => vec![
-            npm_global().join("@openai").join("codex").join("bin").join("codex.js"),
-            home_dir().join(".npm-global").join("lib").join("node_modules").join("@openai").join("codex").join("bin").join("codex.js"),
+            npm_global()
+                .join("@openai")
+                .join("codex")
+                .join("bin")
+                .join("codex.js"),
+            home_dir()
+                .join(".npm-global")
+                .join("lib")
+                .join("node_modules")
+                .join("@openai")
+                .join("codex")
+                .join("bin")
+                .join("codex.js"),
             PathBuf::from("/usr/local/lib/node_modules/@openai/codex/bin/codex.js"),
         ],
         "claude" => vec![
-            npm_global().join("@anthropic-ai").join("claude-code").join("bin").join("claude.exe"),
-            npm_global().join("@anthropic-ai").join("claude-code").join("bin").join("claude"),
-            home_dir().join(".npm-global").join("lib").join("node_modules").join("@anthropic-ai").join("claude-code").join("bin").join("claude"),
+            npm_global()
+                .join("@anthropic-ai")
+                .join("claude-code")
+                .join("bin")
+                .join("claude.exe"),
+            npm_global()
+                .join("@anthropic-ai")
+                .join("claude-code")
+                .join("bin")
+                .join("claude"),
+            home_dir()
+                .join(".npm-global")
+                .join("lib")
+                .join("node_modules")
+                .join("@anthropic-ai")
+                .join("claude-code")
+                .join("bin")
+                .join("claude"),
             PathBuf::from("/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude"),
         ],
         _ => Vec::new(),
@@ -215,13 +308,22 @@ fn runtime_bin(tool: &str) -> String {
         return String::new();
     };
     let pkg = match tool {
-        "codex" => PathBuf::from("@openai").join("codex").join("bin").join("codex.js"),
+        "codex" => PathBuf::from("@openai")
+            .join("codex")
+            .join("bin")
+            .join("codex.js"),
         "claude" => {
-            let exe = PathBuf::from("@anthropic-ai").join("claude-code").join("bin").join("claude.exe");
+            let exe = PathBuf::from("@anthropic-ai")
+                .join("claude-code")
+                .join("bin")
+                .join("claude.exe");
             if prefix.join("node_modules").join(&exe).exists() {
                 exe
             } else {
-                PathBuf::from("@anthropic-ai").join("claude-code").join("bin").join("claude")
+                PathBuf::from("@anthropic-ai")
+                    .join("claude-code")
+                    .join("bin")
+                    .join("claude")
             }
         }
         _ => return String::new(),
@@ -365,7 +467,10 @@ pub fn clear_api_environment(env: &[String]) -> Vec<String> {
 
 pub fn drop_env_key(env: &[String], key: &str) -> Vec<String> {
     let prefix = format!("{key}=");
-    env.iter().filter(|e| !e.starts_with(&prefix)).cloned().collect()
+    env.iter()
+        .filter(|e| !e.starts_with(&prefix))
+        .cloned()
+        .collect()
 }
 
 /// Go `anthropicBaseURL` (anthropic_base.go): trim full-endpoint spellings
@@ -403,7 +508,8 @@ pub fn codex_home(root: &Path, name: &str) -> Result<PathBuf, String> {
         };
         let dst = dir.join(file);
         if file == "auth.json" {
-            if let (Ok(dst_meta), Ok(src_meta)) = (std::fs::metadata(&dst), std::fs::metadata(&src)) {
+            if let (Ok(dst_meta), Ok(src_meta)) = (std::fs::metadata(&dst), std::fs::metadata(&src))
+            {
                 // A source newer than the copy means the user logged in again
                 // with the real CLI; otherwise keep the copy (Codex refreshes
                 // tokens inside the isolated CODEX_HOME).
@@ -427,16 +533,27 @@ pub fn build_env(root: &Path, agent: &Agent) -> Result<Vec<String>, String> {
     env.push("NO_COLOR=1".into());
     env.push("CI=1".into());
     if tool == "dsh" {
-        if std::env::var("DSH_HOME").map(|v| v.is_empty()).unwrap_or(true) {
+        if std::env::var("DSH_HOME")
+            .map(|v| v.is_empty())
+            .unwrap_or(true)
+        {
             let local_home = root.join(".data").join("dsh-home");
-            if local_home.is_dir() {
-                env.push(format!("DSH_HOME={}", local_home.to_string_lossy()));
-            }
+            // Keep ACP startup isolated from the user's global ~/.dsh. The CLI
+            // creates profile files (including profiles/acp/cordis.yml) during
+            // initialize, so merely pointing at this directory when it already
+            // exists makes first-run startup fall back to ~/.dsh and fail with
+            // EPERM on locked-down Windows profiles.
+            std::fs::create_dir_all(&local_home)
+                .map_err(|e| format!("创建 DeepSeek Harness 工作目录失败: {e}"))?;
+            env.push(format!("DSH_HOME={}", local_home.to_string_lossy()));
         }
     }
     if tool == "workbuddy" {
         env.push("CODEBUDDY_FORCE_LITE_WB_BUNDLE=1".into());
-        if std::env::var("CODEBUDDY_CONFIG_DIR").map(|v| v.is_empty()).unwrap_or(true) {
+        if std::env::var("CODEBUDDY_CONFIG_DIR")
+            .map(|v| v.is_empty())
+            .unwrap_or(true)
+        {
             env.push(format!(
                 "CODEBUDDY_CONFIG_DIR={}",
                 home_dir().join(".workbuddy").to_string_lossy()
@@ -468,7 +585,9 @@ pub fn build_env(root: &Path, agent: &Agent) -> Result<Vec<String>, String> {
         env.push(format!("CLAUDE_CODE_EXECUTABLE={}", resolve_bin("claude")));
     }
     if tool == "codex" {
-        let isolate_off = std::env::var("HARNESS_HUB_CODEX_ISOLATE").map(|v| v == "0").unwrap_or(false);
+        let isolate_off = std::env::var("HARNESS_HUB_CODEX_ISOLATE")
+            .map(|v| v == "0")
+            .unwrap_or(false);
         if !isolate_off {
             let dir = codex_home(root, &agent.wire)?;
             env = drop_env_key(&env, "CODEX_HOME");
@@ -500,7 +619,11 @@ pub fn resolve_provider(root: &Path, agent: &Agent) -> Result<(ProviderDef, bool
 pub fn provider_version(root: &Path, agent: &Agent) -> String {
     let tool = agent.real_tool.as_str();
     if agent.auth_mode == "subscription" {
-        return format!("subscription:{}:{}", providers_core::account_version(tool), agent.default_model);
+        return format!(
+            "subscription:{}:{}",
+            providers_core::account_version(tool),
+            agent.default_model
+        );
     }
     if tool == "dsh" && agent.provider_id.is_empty() {
         return dsh_model_version();
@@ -517,7 +640,16 @@ pub fn provider_version(root: &Path, agent: &Agent) -> String {
     // differ from Go's (different JSON encoder), which only renames pooled
     // drivers — one side owns the pool at a time.
     let mut hasher_input = Vec::new();
-    for field in [&p.id, &p.name, &p.agent, &p.url, &p.model, &p.key, &p.source, &p.protocol] {
+    for field in [
+        &p.id,
+        &p.name,
+        &p.agent,
+        &p.url,
+        &p.model,
+        &p.key,
+        &p.source,
+        &p.protocol,
+    ] {
         hasher_input.extend_from_slice(field.as_bytes());
         hasher_input.push(0);
     }
@@ -541,7 +673,11 @@ pub fn provider_version(root: &Path, agent: &Agent) -> String {
 
 /// Go `applyCodexProvider` (provider_profiles.go:15): bind one provider into
 /// the isolated CODEX_HOME config.
-pub fn apply_codex_provider(root: &Path, agent: &Agent, env: Vec<String>) -> Result<Vec<String>, String> {
+pub fn apply_codex_provider(
+    root: &Path,
+    agent: &Agent,
+    env: Vec<String>,
+) -> Result<Vec<String>, String> {
     let (p, _) = resolve_provider(root, agent)?;
     let mut dir = if agent.wire.is_empty() {
         root.join(".data").join("codex-native-home")
@@ -559,7 +695,8 @@ pub fn apply_codex_provider(root: &Path, agent: &Agent, env: Vec<String>) -> Res
     let mut cfg: Value = match std::fs::read(&file) {
         Ok(data) => {
             let text = std::str::from_utf8(&data).map_err(|_| "Codex 配置格式无效".to_string())?;
-            let parsed: toml::Value = toml::from_str(text).map_err(|_| "Codex 配置格式无效".to_string())?;
+            let parsed: toml::Value =
+                toml::from_str(text).map_err(|_| "Codex 配置格式无效".to_string())?;
             providers_core::convert_toml(parsed)
         }
         Err(_) => json!({}),
@@ -578,7 +715,11 @@ pub fn apply_codex_provider(root: &Path, agent: &Agent, env: Vec<String>) -> Res
         settings.insert("wire_api".into(), json!("responses"));
     }
     cfg["model_provider"] = json!("codepluse");
-    let model = if agent.default_model.is_empty() { p.model.clone() } else { agent.default_model.clone() };
+    let model = if agent.default_model.is_empty() {
+        p.model.clone()
+    } else {
+        agent.default_model.clone()
+    };
     cfg["model"] = json!(model);
     let mut configured: BTreeMap<String, Value> = BTreeMap::new();
     if let Some(existing) = cfg.get("model_providers").and_then(Value::as_object) {
@@ -586,7 +727,10 @@ pub fn apply_codex_provider(root: &Path, agent: &Agent, env: Vec<String>) -> Res
             configured.insert(k.clone(), v.clone());
         }
     }
-    configured.insert("codepluse".into(), Value::Object(settings.into_iter().collect()));
+    configured.insert(
+        "codepluse".into(),
+        Value::Object(settings.into_iter().collect()),
+    );
     cfg["model_providers"] = Value::Object(configured.into_iter().collect());
     let toml_body = toml::to_string_pretty(&toml_from_json(&cfg)?).map_err(|e| e.to_string())?;
     std::fs::write(&file, toml_body).map_err(|e| e.to_string())?;
@@ -633,7 +777,11 @@ fn toml_from_json(value: &Value) -> Result<toml::Value, String> {
                 for (k, v) in map {
                     if v.is_object() {
                         tables.insert(k.clone(), convert(v)?);
-                    } else if v.is_array() && v.as_array().map(|a| a.iter().any(Value::is_object)).unwrap_or(false) {
+                    } else if v.is_array()
+                        && v.as_array()
+                            .map(|a| a.iter().any(Value::is_object))
+                            .unwrap_or(false)
+                    {
                         tables.insert(k.clone(), convert(v)?);
                     } else {
                         scalars.insert(k.clone(), convert(v)?);
@@ -663,7 +811,9 @@ fn yaml_from_json(value: &Value) -> serde_yaml::Value {
             }
         }
         Value::String(s) => serde_yaml::Value::String(s.clone()),
-        Value::Array(items) => serde_yaml::Value::Sequence(items.iter().map(yaml_from_json).collect()),
+        Value::Array(items) => {
+            serde_yaml::Value::Sequence(items.iter().map(yaml_from_json).collect())
+        }
         Value::Object(map) => {
             let mut out = serde_yaml::Mapping::new();
             for (k, v) in map {
@@ -676,7 +826,11 @@ fn yaml_from_json(value: &Value) -> serde_yaml::Value {
 
 /// Go `dshProviderPatch` (provider_profiles.go:84): one pinned provider as a
 /// DSH patch file + its API key env entry.
-pub fn dsh_provider_patch(root: &Path, agent: &Agent, env: Vec<String>) -> Result<(String, Vec<String>), String> {
+pub fn dsh_provider_patch(
+    root: &Path,
+    agent: &Agent,
+    env: Vec<String>,
+) -> Result<(String, Vec<String>), String> {
     let (p, _) = resolve_provider(root, agent)?;
     let mut cfg: BTreeMap<String, Value> = BTreeMap::new();
     if let Some(native) = p.native.as_object() {
@@ -688,13 +842,20 @@ pub fn dsh_provider_patch(root: &Path, agent: &Agent, env: Vec<String>) -> Resul
     cfg.insert("apiKeyEnv".into(), json!("CODEPLUSE_DSH_API_KEY"));
     cfg.remove("apiKey");
     if !cfg.contains_key("api") {
-        cfg.insert("api".into(), json!(match p.protocol.as_str() {
-            "openai-responses" => "openai-responses",
-            "anthropic" => "anthropic-messages",
-            _ => "openai-completions",
-        }));
+        cfg.insert(
+            "api".into(),
+            json!(match p.protocol.as_str() {
+                "openai-responses" => "openai-responses",
+                "anthropic" => "anthropic-messages",
+                _ => "openai-completions",
+            }),
+        );
     }
-    let model = if agent.default_model.is_empty() { p.model.clone() } else { agent.default_model.clone() };
+    let model = if agent.default_model.is_empty() {
+        p.model.clone()
+    } else {
+        agent.default_model.clone()
+    };
     if !cfg.contains_key("models") {
         cfg.insert("models".into(), json!([{"id": model, "name": model}]));
     }
@@ -706,7 +867,10 @@ pub fn dsh_provider_patch(root: &Path, agent: &Agent, env: Vec<String>) -> Resul
     }
     let provider_entry = {
         let mut providers = BTreeMap::new();
-        providers.insert(name.clone(), Value::Object(cfg.clone().into_iter().collect()));
+        providers.insert(
+            name.clone(),
+            Value::Object(cfg.clone().into_iter().collect()),
+        );
         json!({"id": "llm-pi-ai", "config": {"providers": providers}})
     };
     let config = vec![
@@ -749,7 +913,10 @@ pub fn dsh_model_version() -> String {
     let original = dsh_original_home();
     let mut hasher = Sha256::new();
     for p in [
-        original.join("profiles").join("desktop").join("cordis.patch.yml"),
+        original
+            .join("profiles")
+            .join("desktop")
+            .join("cordis.patch.yml"),
         original.join(".credentials.yaml"),
     ] {
         match std::fs::read(&p) {
@@ -764,14 +931,17 @@ pub fn dsh_model_version() -> String {
 /// plus an `acp` entry pinned to the same selection.
 pub fn dsh_desktop_patch(root: &Path) -> Result<String, String> {
     let original = dsh_original_home();
-    let file = original.join("profiles").join("desktop").join("cordis.patch.yml");
+    let file = original
+        .join("profiles")
+        .join("desktop")
+        .join("cordis.patch.yml");
     let body = match std::fs::read(&file) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
         Err(_) => return Err("读取 DeepSeek Harness 模型配置失败".into()),
         Ok(body) => body,
     };
-    let doc: serde_yaml::Value =
-        serde_yaml::from_slice(&body).map_err(|_| "解析 DeepSeek Harness 模型配置失败".to_string())?;
+    let doc: serde_yaml::Value = serde_yaml::from_slice(&body)
+        .map_err(|_| "解析 DeepSeek Harness 模型配置失败".to_string())?;
     let Some(items) = doc.as_sequence() else {
         return Err("DeepSeek Harness 配置格式无效".into());
     };
@@ -789,17 +959,29 @@ pub fn dsh_desktop_patch(root: &Path) -> Result<String, String> {
         }
         if id == "agent-default-model" {
             let config = json_item.get("config").cloned().unwrap_or(Value::Null);
-            selection_provider = config.get("provider").and_then(Value::as_str).unwrap_or("").to_string();
-            selection_model = config.get("model").and_then(Value::as_str).unwrap_or("").to_string();
+            selection_provider = config
+                .get("provider")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            selection_model = config
+                .get("model")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
         }
     }
     if selection_provider.is_empty() || selection_model.is_empty() {
         return Ok(String::new());
     }
-    selected.push(serde_yaml::from_str(
-        &format!("id: acp\nconfig:\n  provider: {selection_provider}\n  model: {selection_model}\n"),
-    ).map_err(|e| e.to_string())?);
-    let out = serde_yaml::to_string(&serde_yaml::Value::Sequence(selected)).map_err(|e| e.to_string())?;
+    selected.push(
+        serde_yaml::from_str(&format!(
+            "id: acp\nconfig:\n  provider: {selection_provider}\n  model: {selection_model}\n"
+        ))
+        .map_err(|e| e.to_string())?,
+    );
+    let out =
+        serde_yaml::to_string(&serde_yaml::Value::Sequence(selected)).map_err(|e| e.to_string())?;
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(out.as_bytes());
@@ -809,7 +991,10 @@ pub fn dsh_desktop_patch(root: &Path) -> Result<String, String> {
     let dest = dir.join(format!("desktop-{}.yml", hex_of(&hash[..4])));
     std::fs::write(&dest, &out).map_err(|e| e.to_string())?;
     // The isolated ACP profile needs the same managed credentials as the desktop.
-    if std::env::var("DSH_HOME").map(|v| v.is_empty()).unwrap_or(true) {
+    if std::env::var("DSH_HOME")
+        .map(|v| v.is_empty())
+        .unwrap_or(true)
+    {
         let local = root.join(".data").join("dsh-home");
         if local.is_dir() {
             let source = original.join(".credentials.yaml");
@@ -830,17 +1015,25 @@ pub fn dsh_desktop_patch(root: &Path) -> Result<String, String> {
 
 /// Go `applyOfficialAccount` (official_accounts.go:16): subscription profiles
 /// bypass both the gateway and stored API credentials.
-pub fn apply_official_account(root: &Path, agent: &Agent, env: Vec<String>) -> Result<Vec<String>, String> {
+pub fn apply_official_account(
+    root: &Path,
+    agent: &Agent,
+    env: Vec<String>,
+) -> Result<Vec<String>, String> {
     let env = providers_core::clear_api_environment(&env);
     match agent.real_tool.as_str() {
         "codex" => {
             let source = providers_core::native_home("codex");
-            let data = std::fs::read(Path::new(&source).join("auth.json"))
-                .map_err(|_| "未读取到 Codex 官网登录，请先在 Codex 中执行 codex login".to_string())?;
+            let data = std::fs::read(Path::new(&source).join("auth.json")).map_err(|_| {
+                "未读取到 Codex 官网登录，请先在 Codex 中执行 codex login".to_string()
+            })?;
             let mut auth: Value =
                 serde_json::from_slice(&data).map_err(|_| "Codex 登录文件格式无效".to_string())?;
             let tokens = auth.get("tokens").cloned().unwrap_or(Value::Null);
-            let access = tokens.get("access_token").and_then(Value::as_str).unwrap_or("");
+            let access = tokens
+                .get("access_token")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             if access.is_empty() {
                 return Err("Codex 当前没有官网账号登录凭据；API Key 不会作为官网订阅使用".into());
             }
@@ -853,7 +1046,10 @@ pub fn apply_official_account(root: &Path, agent: &Agent, env: Vec<String>) -> R
             if let Ok(body) = std::fs::read(dir.join("auth.json")) {
                 if let Ok(copied) = serde_json::from_slice::<Value>(&body) {
                     let copy_tokens = copied.get("tokens").cloned().unwrap_or(Value::Null);
-                    let copy_access = copy_tokens.get("access_token").and_then(Value::as_str).unwrap_or("");
+                    let copy_access = copy_tokens
+                        .get("access_token")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
                     if !copy_access.is_empty() {
                         let mut copied = copied;
                         if let Some(obj) = copied.as_object_mut() {
@@ -875,10 +1071,18 @@ pub fn apply_official_account(root: &Path, agent: &Agent, env: Vec<String>) -> R
             };
             cfg["model_provider"] = json!("openai");
             if let Some(obj) = cfg.as_object_mut() {
-                for key in ["profile", "forced_login_method", "openai_base_url", "model_catalog_json"] {
+                for key in [
+                    "profile",
+                    "forced_login_method",
+                    "openai_base_url",
+                    "model_catalog_json",
+                ] {
                     obj.remove(key);
                 }
-                if let Some(ps) = obj.get_mut("model_providers").and_then(Value::as_object_mut) {
+                if let Some(ps) = obj
+                    .get_mut("model_providers")
+                    .and_then(Value::as_object_mut)
+                {
                     ps.remove("openai");
                 }
             }
@@ -897,8 +1101,14 @@ pub fn apply_official_account(root: &Path, agent: &Agent, env: Vec<String>) -> R
         "claude" => {
             let source = providers_core::native_home("claude");
             let account = providers_core::account("claude");
-            if !account.get("configured").and_then(Value::as_bool).unwrap_or(false) {
-                return Err("未读取到 Claude 官网登录，请先在 Claude Code 中执行 claude auth login".into());
+            if !account
+                .get("configured")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                return Err(
+                    "未读取到 Claude 官网登录，请先在 Claude Code 中执行 claude auth login".into(),
+                );
             }
             let dir = root.join(".data").join("claude-homes").join(&agent.wire);
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -920,7 +1130,8 @@ pub fn apply_official_account(root: &Path, agent: &Agent, env: Vec<String>) -> R
                     }
                 }
                 if name == "settings.json" {
-                    let mut cfg: Value = serde_json::from_slice(&data).map_err(|_| "Claude 设置格式无效".to_string())?;
+                    let mut cfg: Value = serde_json::from_slice(&data)
+                        .map_err(|_| "Claude 设置格式无效".to_string())?;
                     if let Some(env_map) = cfg.get_mut("env").and_then(Value::as_object_mut) {
                         let keys: Vec<String> = env_map.keys().cloned().collect();
                         for key in keys {
@@ -951,7 +1162,12 @@ pub fn apply_official_account(root: &Path, agent: &Agent, env: Vec<String>) -> R
 // ----------------------------- launch_fn -----------------------------
 
 /// Go `launchFn` (wiring.go:218): the full launch decision for one agent.
-pub fn launch_fn(root: &Path, agent: &Agent, permission: &str, cwd: &str) -> Result<Launch, String> {
+pub fn launch_fn(
+    root: &Path,
+    agent: &Agent,
+    permission: &str,
+    cwd: &str,
+) -> Result<Launch, String> {
     if let Some(launch) = custom_install::custom_agent_launch(root, agent)? {
         return Ok(launch);
     }
@@ -1030,15 +1246,19 @@ pub fn launch_fn(root: &Path, agent: &Agent, permission: &str, cwd: &str) -> Res
     }
     let mut args: Vec<String> = vec![pkg];
     if tool == "codex" {
-        let mode = if permission == "workspace" { "workspace-write" } else { "read-only" };
+        let mode = if permission == "workspace" {
+            "workspace-write"
+        } else {
+            "read-only"
+        };
         env.push(format!("INITIAL_AGENT_MODE={mode}"));
     }
     if tool == "claude" {
         env.push(format!("CLAUDE_CODE_EXECUTABLE={}", resolve_bin("claude")));
     }
     if tool == "claude" {
-        let (provider, configured) = resolve_provider(root, agent)
-            .map_err(|e| format!("读取 API 供应商失败: {e}"))?;
+        let (provider, configured) =
+            resolve_provider(root, agent).map_err(|e| format!("读取 API 供应商失败: {e}"))?;
         if configured {
             env = drop_env_key(&env, "CLAUDE_CODE_OAUTH_TOKEN");
             if !provider.env.is_empty() {
@@ -1062,10 +1282,18 @@ pub fn launch_fn(root: &Path, agent: &Agent, permission: &str, cwd: &str) -> Res
                     env.push(format!("ANTHROPIC_MODEL={}", provider.model));
                 }
             } else {
-                for key in ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"] {
+                for key in [
+                    "ANTHROPIC_BASE_URL",
+                    "ANTHROPIC_AUTH_TOKEN",
+                    "ANTHROPIC_API_KEY",
+                    "ANTHROPIC_MODEL",
+                ] {
                     env = drop_env_key(&env, key);
                 }
-                env.push(format!("ANTHROPIC_BASE_URL={}", anthropic_base_url(&provider.url)));
+                env.push(format!(
+                    "ANTHROPIC_BASE_URL={}",
+                    anthropic_base_url(&provider.url)
+                ));
                 env.push(format!("ANTHROPIC_AUTH_TOKEN={}", provider.key));
                 env.push(format!("ANTHROPIC_API_KEY={}", provider.key));
                 env.push(format!("ANTHROPIC_MODEL={}", provider.model));
@@ -1105,19 +1333,32 @@ pub fn launch_fn(root: &Path, agent: &Agent, permission: &str, cwd: &str) -> Res
     }
     if tool == "workbuddy" {
         // The desktop lite bundle registers ACP through its server strategy.
-        args.extend(["--serve".into(), "--acp".into(), "--host".into(), "127.0.0.1".into()]);
+        args.extend([
+            "--serve".into(),
+            "--acp".into(),
+            "--host".into(),
+            "127.0.0.1".into(),
+        ]);
     }
-    Ok(Launch { command: node, args, env: Some(env) })
+    Ok(Launch {
+        command: node,
+        args,
+        env: Some(env),
+    })
 }
 
 /// Go `LaunchOverlay` (agentconfig.go:126): the settings-page env overlay plus
 /// the codex config/auth text for one agent, read from `Store.Agents`.
 fn overlay_for(root: &Path, agent: &Agent) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
-    let Ok(Some(doc)) = store_file::read_json(&root.join("codeg-workspace.json")) else {
+    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    else {
         return out;
     };
-    let Some(ov) = doc.get("agents").and_then(|a| a.get(&crate::backend::acp::agents::wire_agent(agent))) else {
+    let Some(ov) = doc
+        .get("agents")
+        .and_then(|a| a.get(&crate::backend::acp::agents::wire_agent(agent)))
+    else {
         return out;
     };
     if let Some(env) = ov.get("env").and_then(Value::as_object) {
@@ -1133,7 +1374,8 @@ fn overlay_for(root: &Path, agent: &Agent) -> BTreeMap<String, String> {
 }
 
 fn overlay_codex_toml(root: &Path, agent: &Agent) -> String {
-    let Ok(Some(doc)) = store_file::read_json(&root.join("codeg-workspace.json")) else {
+    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    else {
         return String::new();
     };
     doc.get("agents")
@@ -1145,7 +1387,8 @@ fn overlay_codex_toml(root: &Path, agent: &Agent) -> String {
 }
 
 fn overlay_codex_auth(root: &Path, agent: &Agent) -> String {
-    let Ok(Some(doc)) = store_file::read_json(&root.join("codeg-workspace.json")) else {
+    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    else {
         return String::new();
     };
     doc.get("agents")
@@ -1176,8 +1419,14 @@ mod tests {
 
     #[test]
     fn anthropic_base_url_trims_endpoint_suffixes() {
-        assert_eq!(anthropic_base_url("https://a.com/v1/messages"), "https://a.com");
-        assert_eq!(anthropic_base_url("https://a.com/messages"), "https://a.com");
+        assert_eq!(
+            anthropic_base_url("https://a.com/v1/messages"),
+            "https://a.com"
+        );
+        assert_eq!(
+            anthropic_base_url("https://a.com/messages"),
+            "https://a.com"
+        );
         assert_eq!(anthropic_base_url("https://a.com/"), "https://a.com");
         assert_eq!(anthropic_base_url("https://a.com/v1"), "https://a.com/v1");
         assert_eq!(anthropic_base_url("  "), "");

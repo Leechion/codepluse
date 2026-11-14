@@ -31,19 +31,24 @@ describe("window-chrome zoom scaling", () => {
   })
 
   it("scales only the button cluster at 150%, leaving native insets fixed", () => {
-    // 116 → 174, 80 → 120.
-    expect(rightChromeClusterWidth(150)).toBe(174)
-    expect(rightChromeReserve(false, 150)).toBe(174)
+    // The right cluster has two buttons plus padding; only that rem-sized
+    // region grows, while native caption buttons remain fixed.
+    const scaledRightCluster = Math.round((RIGHT_CHROME_CLUSTER * 150) / 100)
+    expect(rightChromeClusterWidth(150)).toBe(scaledRightCluster)
+    expect(rightChromeReserve(false, 150)).toBe(scaledRightCluster)
     // Native caption strip stays 138.
-    expect(rightChromeReserve(true, 150)).toBe(174 + WINDOW_CAPTION_WIDTH)
+    expect(rightChromeReserve(true, 150)).toBe(
+      scaledRightCluster + WINDOW_CAPTION_WIDTH
+    )
     // Native traffic-light inset stays 76; only the 80 cluster scales to 120.
     expect(leftChromeReserve(false, 150)).toBe(120)
     expect(leftChromeReserve(true, 150)).toBe(MAC_TRAFFIC_LIGHT_INSET + 120)
   })
 
   it("scales the cluster down below 100% too and rounds to whole pixels", () => {
-    // 116 * 0.9 = 104.4 → 104 (rounded).
-    expect(rightChromeClusterWidth(90)).toBe(104)
+    expect(rightChromeClusterWidth(90)).toBe(
+      Math.round((RIGHT_CHROME_CLUSTER * 90) / 100)
+    )
     // 80 * 0.5 = 40, plus the fixed 76 inset.
     expect(leftChromeReserve(true, 50)).toBe(MAC_TRAFFIC_LIGHT_INSET + 40)
   })

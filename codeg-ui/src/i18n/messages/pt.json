@@ -848,7 +848,7 @@
       "loadFailed": "Falha ao carregar configurações de delegação: {detail}",
       "tabGeneral": "Geral",
       "tabMainAgent": "Config. do agente principal",
-      "tabAgentDefaults": "Padrões do subagente",
+      "tabAgentDefaults": "Configuração do subagente",
       "agentDefaultsDescription": "Substituições por agente aplicadas quando a Colaboração multiagente inicia um subagente para uma chamada de delegação. As opções mostradas vêm de uma sondagem ao vivo: o que você escolhe é exatamente o que o agente aceitará.",
       "agentDefaultsAgentHint": "As opções deixadas em Padrão mantêm o valor do próprio agente.",
       "agentDefaultsDelegationOff": "A colaboração multiagente está desativada. Ative-a para editar estes padrões.",

@@ -19,9 +19,8 @@ use crate::backend::acp::wire::text;
 /// the companion MCP server (still Go-served) and by the internal-tool allow
 /// list here.
 pub fn tool_definitions() -> Vec<Value> {
-    let property = |kind: &str, description: &str| {
-        json!({"type": kind, "description": description})
-    };
+    let property =
+        |kind: &str, description: &str| json!({"type": kind, "description": description});
     let tool = |name: &str, description: &str, required: Value, props: Value| {
         json!({"name": name, "description": description,
                "inputSchema": {"type": "object", "required": required, "properties": props}})
@@ -190,12 +189,23 @@ mod tests {
 
     #[test]
     fn internal_tool_name_matches_boundaries() {
-        assert_eq!(internal_tool_name("mcp__codeg-mcp__list_agents"), "list_agents");
+        assert_eq!(
+            internal_tool_name("mcp__codeg-mcp__list_agents"),
+            "list_agents"
+        );
         assert_eq!(internal_tool_name("mcp__codeg_mcp__fetch_url"), "fetch_url");
         assert_eq!(internal_tool_name("codeg-mcp/fetch_url"), "fetch_url");
         assert_eq!(internal_tool_name("codeg-mcp:fetch_url"), "fetch_url");
-        assert_eq!(internal_tool_name("mcp__other__list_agents"), "", "foreign server");
-        assert_eq!(internal_tool_name("mcp__codeg-mcp__not_a_tool"), "", "unknown tool");
+        assert_eq!(
+            internal_tool_name("mcp__other__list_agents"),
+            "",
+            "foreign server"
+        );
+        assert_eq!(
+            internal_tool_name("mcp__codeg-mcp__not_a_tool"),
+            "",
+            "unknown tool"
+        );
         assert_eq!(internal_tool_name("list_agents"), "", "no namespace");
         // near matches keep their permission card
         assert_eq!(internal_tool_name("mcp__codeg-mcp__list_agents_extra"), "");
@@ -206,7 +216,12 @@ mod tests {
         let mut callers = HashMap::new();
         callers.insert(
             "c1".to_string(),
-            Caller { token: "t".into(), connection_id: "c1".into(), root_id: String::new(), depth: 0 },
+            Caller {
+                token: "t".into(),
+                connection_id: "c1".into(),
+                root_id: String::new(),
+                depth: 0,
+            },
         );
         let conns = vec![("c1".to_string(), "session_x".to_string())];
         let tool = json!({"title": "mcp__codeg-mcp__list_agents"});

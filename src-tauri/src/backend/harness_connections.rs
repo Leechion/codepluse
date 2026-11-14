@@ -123,7 +123,8 @@ fn connection_catalog(root: &Path) -> Result<Value, String> {
         // 列表来自协议进程（上游 harness_connections.go 的同一段）。
         if let Some(channel_id) = tool.strip_prefix("account:") {
             account["managed"] = json!(true);
-            account["source"] = json!(crate::backend::account_channels::data_dir(root).to_string_lossy());
+            account["source"] =
+                json!(crate::backend::account_channels::data_dir(root).to_string_lossy());
             if let Ok((channels, _)) = crate::backend::account_channels::list(root) {
                 if let Some(channel) = channels.iter().find(|item| item.id == channel_id) {
                     account["configured"] = json!(channel.configured);
@@ -272,7 +273,11 @@ mod tests {
         dir
     }
 
-    fn call(root: &Path, command: &str, args: Value) -> (Result<Value, String>, Vec<(String, Value)>) {
+    fn call(
+        root: &Path,
+        command: &str,
+        args: Value,
+    ) -> (Result<Value, String>, Vec<(String, Value)>) {
         let outcome = handle(root, command, &args).unwrap();
         (outcome.result, outcome.events)
     }

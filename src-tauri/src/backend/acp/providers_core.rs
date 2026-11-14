@@ -51,7 +51,9 @@ pub fn home() -> PathBuf {
             return PathBuf::from(fake);
         }
     }
-    std::env::var("USERPROFILE").map(PathBuf::from).unwrap_or_default()
+    std::env::var("USERPROFILE")
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 /// Go `NativeHome` (auth.go): the vendor CLI's own config directory.
@@ -87,11 +89,18 @@ pub fn supports_subscription(tool: &str) -> bool {
     if let Some(rest) = tool.strip_prefix("account:") {
         return crate::backend::account_channels::supported(rest);
     }
-    matches!(tool, "claude" | "codex" | "workbuddy" | "qoder" | "custom:qoder")
+    matches!(
+        tool,
+        "claude" | "codex" | "workbuddy" | "qoder" | "custom:qoder"
+    )
 }
 
 fn string_at(value: &Value, key: &str) -> String {
-    value.get(key).and_then(Value::as_str).unwrap_or("").to_string()
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
 }
 
 fn object_at(value: &Value, key: &str) -> Value {
@@ -124,7 +133,12 @@ pub fn account(tool: &str) -> Value {
             if let Ok(body) = std::fs::read(&cache_path) {
                 if let Ok(cache) = serde_json::from_slice::<Value>(&body) {
                     let mut models = Vec::new();
-                    for m in cache.get("models").and_then(Value::as_array).into_iter().flatten() {
+                    for m in cache
+                        .get("models")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                    {
                         let slug = string_at(m, "slug");
                         if !slug.is_empty() {
                             models.push(serde_json::json!({
@@ -147,7 +161,10 @@ pub fn account(tool: &str) -> Value {
                     }
                 }
             }
-            if std::env::var("CLAUDE_CODE_OAUTH_TOKEN").map(|v| !v.is_empty()).unwrap_or(false) {
+            if std::env::var("CLAUDE_CODE_OAUTH_TOKEN")
+                .map(|v| !v.is_empty())
+                .unwrap_or(false)
+            {
                 info["configured"] = serde_json::json!(true);
             }
         }
@@ -162,7 +179,11 @@ pub fn account(tool: &str) -> Value {
 /// Go `AccountVersion` (auth.go): hash of the native credential file.
 pub fn account_version(tool: &str) -> String {
     use sha2::Digest;
-    let name = if tool == "claude" { ".credentials.json" } else { "auth.json" };
+    let name = if tool == "claude" {
+        ".credentials.json"
+    } else {
+        "auth.json"
+    };
     let mut body = std::fs::read(Path::new(&native_home(tool)).join(name)).unwrap_or_default();
     if tool == "claude" {
         if let Ok(token) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN") {
@@ -196,7 +217,9 @@ pub fn clear_api_environment(env: &[String]) -> Vec<String> {
 
 /// Go `IsAPI` (providers.go:38): a usable HTTP(S) endpoint with a real key.
 pub fn is_api(p: &ProviderDef) -> bool {
-    let Ok(u) = url::Url::parse(&p.url) else { return false };
+    let Ok(u) = url::Url::parse(&p.url) else {
+        return false;
+    };
     !p.url.is_empty()
         && (u.scheme() == "http" || u.scheme() == "https")
         && u.host_str().is_some()
@@ -212,9 +235,15 @@ fn claude_models(env: &BTreeMap<String, String>, model: &str) -> Vec<(String, St
     let mut seen = std::collections::BTreeSet::new();
     for id in [
         model,
-        env.get("ANTHROPIC_DEFAULT_OPUS_MODEL").map(String::as_str).unwrap_or(""),
-        env.get("ANTHROPIC_DEFAULT_SONNET_MODEL").map(String::as_str).unwrap_or(""),
-        env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str).unwrap_or(""),
+        env.get("ANTHROPIC_DEFAULT_OPUS_MODEL")
+            .map(String::as_str)
+            .unwrap_or(""),
+        env.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+            .map(String::as_str)
+            .unwrap_or(""),
+        env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+            .map(String::as_str)
+            .unwrap_or(""),
     ] {
         if !id.is_empty() && seen.insert(id.to_string()) {
             out.push((id.to_string(), String::new()));
@@ -228,7 +257,12 @@ pub fn model_providers(root: &Path) -> Result<Vec<ProviderDef>, String> {
     let data = store_file::read_json(&root.join(".data").join("model-providers.json"))?
         .unwrap_or(Value::Null);
     let mut out = Vec::new();
-    for row in data.get("entries").and_then(Value::as_array).into_iter().flatten() {
+    for row in data
+        .get("entries")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let agent_type = string_at(row, "agent_type");
         let tool = match agent_type.as_str() {
             "claude_code" => "claude",
@@ -239,8 +273,16 @@ pub fn model_providers(root: &Path) -> Result<Vec<ProviderDef>, String> {
             continue;
         }
         let key = string_at(row, "key");
-        let model = row.get("model").and_then(Value::as_str).unwrap_or("").to_string();
-        let protocol = if tool == "claude" { "anthropic" } else { "openai" };
+        let model = row
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let protocol = if tool == "claude" {
+            "anthropic"
+        } else {
+            "openai"
+        };
         out.push(ProviderDef {
             id: format!("store:{}", crate::backend::acp::wire::number(row.get("id"))),
             name: string_at(row, "name"),
@@ -267,30 +309,31 @@ fn read_ccswitch(path: &Path) -> Result<Vec<ProviderDef>, String> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let conn = rusqlite::Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|e| format!("无法读取 CC Switch 数据库: {e}"))?;
+    let conn =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| format!("无法读取 CC Switch 数据库: {e}"))?;
     let mut stmt = conn
         .prepare(
             "SELECT id,name,settings_config,is_current FROM providers \
              WHERE app_type = 'claude' ORDER BY COALESCE(sort_index, 2147483647), name",
         )
         .map_err(|e| e.to_string())?;
-    let mut rows = stmt
-        .query([])
-        .map_err(|e| e.to_string())?;
+    let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
     let mut out: Vec<ProviderDef> = Vec::new();
     while let Some(row) = rows.next().map_err(|e| e.to_string())? {
         let id: String = row.get(0).map_err(|e| e.to_string())?;
         let name: String = row.get(1).map_err(|e| e.to_string())?;
         let raw: String = row.get(2).map_err(|e| e.to_string())?;
         let current: bool = row.get(3).map_err(|e| e.to_string())?;
-        let cfg: Value = serde_json::from_str(&raw)
-            .map_err(|e| format!("CC Switch 供应商配置无效: {e}"))?;
+        let cfg: Value =
+            serde_json::from_str(&raw).map_err(|e| format!("CC Switch 供应商配置无效: {e}"))?;
         let mut env = BTreeMap::new();
-        for (k, v) in cfg.get("env").and_then(Value::as_object).into_iter().flatten() {
+        for (k, v) in cfg
+            .get("env")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+        {
             if k.starts_with("ANTHROPIC_") || k == "CLAUDE_CODE_SUBAGENT_MODEL" {
                 if let Some(s) = v.as_str() {
                     env.insert(k.clone(), s.to_string());
@@ -344,7 +387,12 @@ fn read_dsh(home: &Path) -> Result<Vec<ProviderDef>, String> {
     let mut refs = BTreeMap::new();
     if let Ok(data) = std::fs::read(home.join(".credentials.yaml")) {
         if let Ok(credentials) = serde_yaml::from_slice::<Value>(&data) {
-            for (k, v) in credentials.get("refs").and_then(Value::as_object).into_iter().flatten() {
+            for (k, v) in credentials
+                .get("refs")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+            {
                 if let Some(s) = v.as_str() {
                     refs.insert(k.clone(), s.to_string());
                 }
@@ -353,7 +401,8 @@ fn read_dsh(home: &Path) -> Result<Vec<ProviderDef>, String> {
     }
     let mut out = Vec::new();
     for profile in ["desktop", "acp"] {
-        let data = match std::fs::read(home.join("profiles").join(profile).join("cordis.patch.yml")) {
+        let data = match std::fs::read(home.join("profiles").join(profile).join("cordis.patch.yml"))
+        {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(_) => return Err("读取 DSH 配置失败".into()),
             Ok(data) => data,
@@ -380,7 +429,9 @@ fn read_dsh(home: &Path) -> Result<Vec<ProviderDef>, String> {
                 .get("providers")
                 .cloned()
                 .unwrap_or(Value::Null);
-            let Some(configs) = configs.as_object() else { continue };
+            let Some(configs) = configs.as_object() else {
+                continue;
+            };
             let mut ids: Vec<&String> = configs.keys().collect();
             ids.sort();
             for id in ids {
@@ -406,7 +457,11 @@ fn read_dsh(home: &Path) -> Result<Vec<ProviderDef>, String> {
                         }
                     }
                 }
-                let mut model = if *id == selected_provider { selected_model.clone() } else { String::new() };
+                let mut model = if *id == selected_provider {
+                    selected_model.clone()
+                } else {
+                    String::new()
+                };
                 if model.is_empty() {
                     model = models.first().map(|(id, _)| id.clone()).unwrap_or_default();
                 }
@@ -449,8 +504,18 @@ fn read_claude(home: &Path) -> Result<Vec<ProviderDef>, String> {
         Ok(data) => data,
     };
     let cfg: Value = serde_json::from_slice(&data).map_err(|_| "Claude 配置格式无效")?;
-    let env_map = cfg.get("env").and_then(Value::as_object).cloned().unwrap_or_default();
-    let env_of = |k: &str| env_map.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let env_map = cfg
+        .get("env")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let env_of = |k: &str| {
+        env_map
+            .get(k)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
     let mut base = env_of("ANTHROPIC_BASE_URL");
     if base.is_empty() && !env_of("ANTHROPIC_API_KEY").is_empty() {
         base = "https://api.anthropic.com".into();
@@ -504,7 +569,9 @@ fn read_codex(home: &Path) -> Result<Vec<ProviderDef>, String> {
     let cfg = convert_toml(cfg);
     let selected = string_at(&cfg, "model_provider");
     let providers = object_at(&cfg, "model_providers");
-    let Some(providers) = providers.as_object() else { return Ok(Vec::new()) };
+    let Some(providers) = providers.as_object() else {
+        return Ok(Vec::new());
+    };
     let mut names: Vec<&String> = providers.keys().collect();
     names.sort();
     let mut out = Vec::new();
@@ -569,7 +636,12 @@ fn read_api_providers(root: &Path) -> Result<(Vec<Value>, BTreeMap<String, Strin
         .cloned()
         .unwrap_or_default();
     let mut active = BTreeMap::new();
-    for (k, v) in data.get("active").and_then(Value::as_object).into_iter().flatten() {
+    for (k, v) in data
+        .get("active")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
         if let Some(s) = v.as_str() {
             active.insert(k.clone(), s.to_string());
         }
@@ -588,10 +660,18 @@ fn provider_from_json(raw: &Value) -> ProviderDef {
         key: get("key"),
         has_key: raw.get("hasKey").and_then(Value::as_bool).unwrap_or(false),
         source: get("source"),
-        cc_current: raw.get("ccCurrent").and_then(Value::as_bool).unwrap_or(false),
+        cc_current: raw
+            .get("ccCurrent")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         env: {
             let mut m = BTreeMap::new();
-            for (k, v) in raw.get("env").and_then(Value::as_object).into_iter().flatten() {
+            for (k, v) in raw
+                .get("env")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+            {
                 if let Some(s) = v.as_str() {
                     m.insert(k.clone(), s.to_string());
                 }
@@ -679,7 +759,9 @@ fn find_inner(root: &Path, id: &str) -> Result<ProviderDef, String> {
         for p in cc {
             if p.id == id {
                 if !p.has_key {
-                    return Err("该 CC Switch 供应商没有 API 密钥，请先在 CC Switch 中切换到它".into());
+                    return Err(
+                        "该 CC Switch 供应商没有 API 密钥，请先在 CC Switch 中切换到它".into(),
+                    );
                 }
                 return Ok(p);
             }
@@ -707,7 +789,9 @@ pub fn active(root: &Path, agent: &str) -> Result<(ProviderDef, bool), String> {
         for p in cc {
             if p.id == chosen || (chosen.is_empty() && p.cc_current) {
                 if !chosen.is_empty() && !p.has_key && !p.cc_current {
-                    return Err("该 CC Switch 供应商没有 API 密钥，请先在 CC Switch 中切换到它".into());
+                    return Err(
+                        "该 CC Switch 供应商没有 API 密钥，请先在 CC Switch 中切换到它".into(),
+                    );
                 }
                 return Ok((p, true));
             }
@@ -730,7 +814,9 @@ pub fn convert_toml(value: toml::Value) -> Value {
     match value {
         toml::Value::String(s) => Value::String(s),
         toml::Value::Integer(i) => Value::Number(i.into()),
-        toml::Value::Float(f) => serde_json::Number::from_f64(f).map(Value::Number).unwrap_or(Value::Null),
+        toml::Value::Float(f) => serde_json::Number::from_f64(f)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
         toml::Value::Boolean(b) => Value::Bool(b),
         toml::Value::Array(items) => Value::Array(items.into_iter().map(convert_toml).collect()),
         toml::Value::Table(map) => {
@@ -759,13 +845,18 @@ pub fn convert_yaml(value: serde_yaml::Value) -> Value {
             }
         }
         serde_yaml::Value::String(s) => Value::String(s),
-        serde_yaml::Value::Sequence(items) => Value::Array(items.into_iter().map(convert_yaml).collect()),
+        serde_yaml::Value::Sequence(items) => {
+            Value::Array(items.into_iter().map(convert_yaml).collect())
+        }
         serde_yaml::Value::Mapping(map) => {
             let mut out = serde_json::Map::new();
             for (k, v) in map {
                 let key = match k {
                     serde_yaml::Value::String(s) => s,
-                    other => serde_yaml::to_string(&other).unwrap_or_default().trim().to_string(),
+                    other => serde_yaml::to_string(&other)
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string(),
                 };
                 out.insert(key, convert_yaml(v));
             }

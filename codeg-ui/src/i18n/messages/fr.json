@@ -848,7 +848,7 @@
       "loadFailed": "Échec du chargement des paramètres de délégation : {detail}",
       "tabGeneral": "Général",
       "tabMainAgent": "Config. de l'agent principal",
-      "tabAgentDefaults": "Valeurs par défaut du sous-agent",
+      "tabAgentDefaults": "Configuration des sous-agents",
       "agentDefaultsDescription": "Remplacements par agent appliqués lorsque la Collaboration multi-agent démarre un sous-agent pour un appel de délégation. Les options affichées proviennent d’une sonde en direct : votre sélection correspond exactement à ce que l’agent acceptera.",
       "agentDefaultsAgentHint": "Les options laissées sur Par défaut gardent la valeur propre de l’agent.",
       "agentDefaultsDelegationOff": "La collaboration multi-agent est désactivée. Activez-la pour modifier ces valeurs.",

@@ -299,7 +299,10 @@ async fn handle_command(
     subscriptions: &mut HashMap<String, String>,
     last_sent: &mut HashMap<String, u64>,
 ) {
-    let action = command.get("action").and_then(|value| value.as_str()).unwrap_or("");
+    let action = command
+        .get("action")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
     match action {
         "ping" => {
             let _ = out.send(frame(&json!({"type": "pong"})));
@@ -312,7 +315,9 @@ async fn handle_command(
         "attach" => {
             let subscription_id = text(command.get("subscription_id"));
             let connection_id = text(command.get("connection_id"));
-            if !subscriptions.contains_key(&subscription_id) && subscriptions.len() >= MAX_SUBSCRIPTIONS {
+            if !subscriptions.contains_key(&subscription_id)
+                && subscriptions.len() >= MAX_SUBSCRIPTIONS
+            {
                 let _ = out.send(frame(&json!({
                     "type": "detached",
                     "subscription_id": subscription_id,

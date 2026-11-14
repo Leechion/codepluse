@@ -201,7 +201,11 @@ impl ApiProviderStored {
             models: self
                 .models
                 .into_iter()
-                .map(|m| PModel { id: m.id, name: m.name, enabled: m.enabled })
+                .map(|m| PModel {
+                    id: m.id,
+                    name: m.name,
+                    enabled: m.enabled,
+                })
                 .collect(),
             protocol: self.protocol,
             enabled: self.enabled,
@@ -216,8 +220,9 @@ pub(crate) fn api_providers_path(root: &Path) -> PathBuf {
 
 fn read_api(root: &Path) -> Result<ApiData, String> {
     match crate::backend::store_file::read_json(&api_providers_path(root))? {
-        Some(value) => serde_json::from_value(value)
-            .map_err(|e| format!("解析 api-providers.json 失败：{e}")),
+        Some(value) => {
+            serde_json::from_value(value).map_err(|e| format!("解析 api-providers.json 失败：{e}"))
+        }
         None => Ok(ApiData::default()),
     }
 }
@@ -242,7 +247,11 @@ fn write_api(root: &Path, data: &ApiData) -> Result<(), String> {
             models: p
                 .models
                 .iter()
-                .map(|m| ApiModelOwned { id: m.id.clone(), name: m.name.clone(), enabled: m.enabled })
+                .map(|m| ApiModelOwned {
+                    id: m.id.clone(),
+                    name: m.name.clone(),
+                    enabled: m.enabled,
+                })
                 .collect(),
             protocol: p.protocol.clone(),
             api: p.api,
@@ -322,28 +331,24 @@ fn cc_switch() -> Result<Vec<Provider>, String> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let connection = rusqlite::Connection::open_with_flags(
-        &path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|e| e.to_string())?;
+    let connection =
+        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| e.to_string())?;
     let mut statement = connection
         .prepare(
             "SELECT id,name,settings_config,is_current FROM providers \
              WHERE app_type = 'claude' ORDER BY COALESCE(sort_index, 2147483647), name",
         )
         .map_err(|e| e.to_string())?;
-    let mut rows = statement
-        .query([])
-        .map_err(|e| e.to_string())?;
+    let mut rows = statement.query([]).map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     while let Ok(Some(row)) = rows.next() {
         let id: String = row.get(0).map_err(|e| e.to_string())?;
         let name: String = row.get(1).map_err(|e| e.to_string())?;
         let raw: String = row.get(2).map_err(|e| e.to_string())?;
         let current: bool = row.get(3).map_err(|e| e.to_string())?;
-        let cfg: Value = serde_json::from_str(&raw)
-            .map_err(|e| format!("CC Switch 供应商配置无效: {e}"))?;
+        let cfg: Value =
+            serde_json::from_str(&raw).map_err(|e| format!("CC Switch 供应商配置无效: {e}"))?;
         let mut env: BTreeMap<String, String> = BTreeMap::new();
         if let Some(entries) = cfg.get("env").and_then(|v| v.as_object()) {
             for (key, value) in entries {
@@ -373,7 +378,11 @@ fn cc_switch() -> Result<Vec<Provider>, String> {
             for m in &catalog_models {
                 let model_id = value_text(m.get("model"));
                 if !model_id.is_empty() {
-                    models.push(PModel { id: model_id, name: value_text(m.get("displayName")), enabled: None });
+                    models.push(PModel {
+                        id: model_id,
+                        name: value_text(m.get("displayName")),
+                        enabled: None,
+                    });
                 }
             }
         }
@@ -402,12 +411,22 @@ fn claude_models(env: &BTreeMap<String, String>, model: &str) -> Vec<PModel> {
     let mut seen = std::collections::BTreeSet::new();
     for id in [
         model.to_string(),
-        env.get("ANTHROPIC_DEFAULT_OPUS_MODEL").cloned().unwrap_or_default(),
-        env.get("ANTHROPIC_DEFAULT_SONNET_MODEL").cloned().unwrap_or_default(),
-        env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").cloned().unwrap_or_default(),
+        env.get("ANTHROPIC_DEFAULT_OPUS_MODEL")
+            .cloned()
+            .unwrap_or_default(),
+        env.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+            .cloned()
+            .unwrap_or_default(),
+        env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+            .cloned()
+            .unwrap_or_default(),
     ] {
         if !id.is_empty() && seen.insert(id.clone()) {
-            out.push(PModel { id, name: String::new(), enabled: None });
+            out.push(PModel {
+                id,
+                name: String::new(),
+                enabled: None,
+            });
         }
     }
     out
@@ -480,8 +499,10 @@ fn read_dsh(home: &Path) -> Result<Vec<Provider>, String> {
         let Ok(data) = std::fs::read_to_string(&file) else {
             continue; // 缺文件 = 没有该 profile，与 Go 的 IsNotExist 一致
         };
-        let yaml: serde_yaml::Value = serde_yaml::from_str(&data).map_err(|_| "DSH 配置格式无效".to_string())?;
-        let plugins: Value = serde_json::to_value(yaml).map_err(|_| "DSH 配置格式无效".to_string())?;
+        let yaml: serde_yaml::Value =
+            serde_yaml::from_str(&data).map_err(|_| "DSH 配置格式无效".to_string())?;
+        let plugins: Value =
+            serde_json::to_value(yaml).map_err(|_| "DSH 配置格式无效".to_string())?;
         let Some(plugins) = plugins.as_array() else {
             return Err("DSH 配置格式无效".into());
         };
@@ -519,19 +540,34 @@ fn read_dsh(home: &Path) -> Result<Vec<Provider>, String> {
                 if !reference.is_empty() {
                     key = std::env::var(&reference).unwrap_or_default();
                     if key.is_empty() {
-                        key = credentials_refs.get(&reference).cloned().unwrap_or_default();
+                        key = credentials_refs
+                            .get(&reference)
+                            .cloned()
+                            .unwrap_or_default();
                     }
                 }
                 let mut models = Vec::new();
-                if let Some(raw) = cfg.as_ref().and_then(|c| c.get("models")).and_then(|v| v.as_array()) {
+                if let Some(raw) = cfg
+                    .as_ref()
+                    .and_then(|c| c.get("models"))
+                    .and_then(|v| v.as_array())
+                {
                     for value in raw {
                         let model_id = value_text(value.get("id"));
                         if !model_id.is_empty() {
-                            models.push(PModel { id: model_id, name: value_text(value.get("name")), enabled: None });
+                            models.push(PModel {
+                                id: model_id,
+                                name: value_text(value.get("name")),
+                                enabled: None,
+                            });
                         }
                     }
                 }
-                let mut model = if id == selected_provider { selected_model.clone() } else { String::new() };
+                let mut model = if id == selected_provider {
+                    selected_model.clone()
+                } else {
+                    String::new()
+                };
                 if model.is_empty() {
                     if let Some(first) = models.first() {
                         model = first.id.clone();
@@ -573,8 +609,7 @@ fn read_claude(home: &Path) -> Result<Vec<Provider>, String> {
         // Go: IsNotExist → nil, nil；其它读错误 → 读取 Claude 配置失败。
         return Ok(Vec::new());
     };
-    let cfg: Value =
-        serde_json::from_str(&data).map_err(|_| "Claude 配置格式无效".to_string())?;
+    let cfg: Value = serde_json::from_str(&data).map_err(|_| "Claude 配置格式无效".to_string())?;
     let env = |key: &str| {
         cfg.get("env")
             .and_then(|e| e.get(key))
@@ -635,8 +670,10 @@ fn read_codex(home: &Path) -> Result<Vec<Provider>, String> {
     if !auth.is_object() {
         auth = json!({});
     }
-    let toml_cfg: toml::Value = toml::from_str(&data).map_err(|_| "Codex 配置格式无效".to_string())?;
-    let cfg: Value = serde_json::to_value(toml_cfg).map_err(|_| "Codex 配置格式无效".to_string())?;
+    let toml_cfg: toml::Value =
+        toml::from_str(&data).map_err(|_| "Codex 配置格式无效".to_string())?;
+    let cfg: Value =
+        serde_json::to_value(toml_cfg).map_err(|_| "Codex 配置格式无效".to_string())?;
     let text_of = |value: Option<&Value>| value_text(value);
     let selected = text_of(cfg.get("model_provider"));
     let providers_map = cfg
@@ -666,11 +703,19 @@ fn read_codex(home: &Path) -> Result<Vec<Provider>, String> {
         }
         let label = {
             let from_settings = text_of(settings.get("name"));
-            if from_settings.is_empty() { name.clone() } else { from_settings }
+            if from_settings.is_empty() {
+                name.clone()
+            } else {
+                from_settings
+            }
         };
         let mut models = Vec::new();
         if !model.is_empty() {
-            models.push(PModel { id: model.clone(), name: String::new(), enabled: None });
+            models.push(PModel {
+                id: model.clone(),
+                name: String::new(),
+                enabled: None,
+            });
         }
         out.push(Provider {
             id: format!("native:codex:provider:{name}"),
@@ -707,7 +752,11 @@ fn model_providers(root: &Path) -> Result<Vec<Provider>, String> {
         }
         let key = modelproviders::key_by_id(root, row.id)?;
         let model = row.model.clone().unwrap_or_default();
-        let protocol = if tool == "claude" { "anthropic" } else { "openai" };
+        let protocol = if tool == "claude" {
+            "anthropic"
+        } else {
+            "openai"
+        };
         out.push(Provider {
             id: format!("store:{}", row.id),
             name: row.name.clone(),
@@ -801,7 +850,9 @@ fn find_raw(root: &Path, id: &str) -> Result<Provider, String> {
         for provider in list {
             if provider.id == id {
                 if !provider.has_key {
-                    return Err("该 CC Switch 供应商没有 API 密钥，请先在 CC Switch 中切换到它".into());
+                    return Err(
+                        "该 CC Switch 供应商没有 API 密钥，请先在 CC Switch 中切换到它".into(),
+                    );
                 }
                 return Ok(provider);
             }
@@ -866,7 +917,10 @@ pub(crate) fn public(root: &Path) -> Result<Value, String> {
     // Data 的字段序：providers、active、ccError（omitempty）。
     let mut document = Map::new();
     document.insert("providers".into(), Value::Array(rows));
-    document.insert("active".into(), serde_json::to_value(api_data.active).unwrap_or(json!({})));
+    document.insert(
+        "active".into(),
+        serde_json::to_value(api_data.active).unwrap_or(json!({})),
+    );
     if !cc_error.is_empty() {
         document.insert("ccError".into(), json!(cc_error));
     }
@@ -913,7 +967,11 @@ fn ccswitch_provider_config(root: &Path, id: &str) -> Result<Value, String> {
         .cloned()
         .unwrap_or_default();
     if key.is_empty() {
-        key = provider.env.get("ANTHROPIC_API_KEY").cloned().unwrap_or_default();
+        key = provider
+            .env
+            .get("ANTHROPIC_API_KEY")
+            .cloned()
+            .unwrap_or_default();
     }
     Ok(json!({
         "url": provider.env.get("ANTHROPIC_BASE_URL").cloned().unwrap_or_default(),
@@ -1028,13 +1086,17 @@ fn outbound_proxy() -> String {
         for part in server.split(';') {
             let lowered = part.to_lowercase();
             if let Some(rest) = lowered.strip_prefix("https=") {
-                return part[part.len() - rest.len()..].trim_start_matches("//").to_string();
+                return part[part.len() - rest.len()..]
+                    .trim_start_matches("//")
+                    .to_string();
             }
         }
         for part in server.split(';') {
             let lowered = part.to_lowercase();
             if let Some(rest) = lowered.strip_prefix("http=") {
-                return part[part.len() - rest.len()..].trim_start_matches("//").to_string();
+                return part[part.len() - rest.len()..]
+                    .trim_start_matches("//")
+                    .to_string();
             }
         }
         return String::new();
@@ -1068,7 +1130,11 @@ fn model_list_provider_url(root: &Path, key_source: &Value) -> Result<String, St
             if !provider.url.trim().is_empty() {
                 return Ok(provider.url);
             }
-            Ok(provider.env.get("ANTHROPIC_BASE_URL").cloned().unwrap_or_default())
+            Ok(provider
+                .env
+                .get("ANTHROPIC_BASE_URL")
+                .cloned()
+                .unwrap_or_default())
         }
         "provider" => {
             let id = number_of(key_source.get("providerId"));
@@ -1100,9 +1166,17 @@ fn resolve_model_list_key(root: &Path, key_source: &Value) -> Result<String, Str
         }
         "ccswitch" => {
             let provider = find(root, &value_text(key_source.get("providerId")))?;
-            let mut key = provider.env.get("ANTHROPIC_AUTH_TOKEN").cloned().unwrap_or_default();
+            let mut key = provider
+                .env
+                .get("ANTHROPIC_AUTH_TOKEN")
+                .cloned()
+                .unwrap_or_default();
             if key.is_empty() {
-                key = provider.env.get("ANTHROPIC_API_KEY").cloned().unwrap_or_default();
+                key = provider
+                    .env
+                    .get("ANTHROPIC_API_KEY")
+                    .cloned()
+                    .unwrap_or_default();
             }
             Ok(key)
         }
@@ -1156,7 +1230,11 @@ fn harness_provider_models(root: &Path, id: &str) -> Result<Value, String> {
         protocol = "openai".into();
     }
     if protocol.is_empty() {
-        protocol = if provider.agent == "claude" { "anthropic".into() } else { "openai".into() };
+        protocol = if provider.agent == "claude" {
+            "anthropic".into()
+        } else {
+            "openai".into()
+        };
     }
     let mut base = provider.url.trim_end_matches('/').to_string();
     if protocol == "anthropic" {
@@ -1167,7 +1245,13 @@ fn harness_provider_models(root: &Path, id: &str) -> Result<Value, String> {
         "baseUrl": base,
         "keySource": {"kind": "executor", "providerId": id},
     });
-    if !provider.env.get("ANTHROPIC_AUTH_TOKEN").cloned().unwrap_or_default().is_empty() {
+    if !provider
+        .env
+        .get("ANTHROPIC_AUTH_TOKEN")
+        .cloned()
+        .unwrap_or_default()
+        .is_empty()
+    {
         params["keyHeader"] = json!("bearer");
     }
     let mut warning = String::new();
@@ -1249,8 +1333,13 @@ fn list_provider_models(root: &Path, args: &Value) -> Result<Value, String> {
         return Err("缺少 params".into());
     };
     let protocol = value_text(params.get("protocol"));
-    let base_url = value_text(params.get("baseUrl")).trim().trim_end_matches('/').to_string();
-    if base_url.is_empty() || (!base_url.starts_with("http://") && !base_url.starts_with("https://")) {
+    let base_url = value_text(params.get("baseUrl"))
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    if base_url.is_empty()
+        || (!base_url.starts_with("http://") && !base_url.starts_with("https://"))
+    {
         return Err("API 地址必须是 http(s) 地址".into());
     }
     let key_source = params.get("keySource").cloned().unwrap_or(Value::Null);
@@ -1303,12 +1392,14 @@ fn list_provider_models(root: &Path, args: &Value) -> Result<Value, String> {
     // 其余目标优先注册表代理，缺省回落环境代理（Go 的 DefaultTransport 语义）。
     let client = match key_kind.as_str() {
         "inline" => {
-            let parts = parse_url(&list_url).ok_or_else(|| "无法访问模型列表: 无效地址".to_string())?;
+            let parts =
+                parse_url(&list_url).ok_or_else(|| "无法访问模型列表: 无效地址".to_string())?;
             host_is_safe(&parts.host).map_err(|e| format!("无法访问模型列表: {e}"))?;
             net::no_proxy_client().clone()
         }
         _ => {
-            let parts = parse_url(&base_url).ok_or_else(|| "无法访问模型列表: 无效地址".to_string())?;
+            let parts =
+                parse_url(&base_url).ok_or_else(|| "无法访问模型列表: 无效地址".to_string())?;
             if parts.host.eq_ignore_ascii_case("localhost")
                 || parts
                     .host
@@ -1327,13 +1418,17 @@ fn list_provider_models(root: &Path, args: &Value) -> Result<Value, String> {
             }
         }
     };
-    let mut request = client.get(&list_url).timeout(std::time::Duration::from_secs(12));
+    let mut request = client
+        .get(&list_url)
+        .timeout(std::time::Duration::from_secs(12));
     for (name, value) in &headers {
         if !value.is_empty() {
             request = request.header(name, value);
         }
     }
-    let response = request.send().map_err(|e| format!("无法访问模型列表: {e}"))?;
+    let response = request
+        .send()
+        .map_err(|e| format!("无法访问模型列表: {e}"))?;
     let status = response.status().as_u16();
     let body = response.bytes().map_err(|e| e.to_string())?;
     if status >= 400 {
@@ -1353,7 +1448,9 @@ fn list_provider_models(root: &Path, args: &Value) -> Result<Value, String> {
             .map(|v| v.as_slice())
             .unwrap_or(&[])
         {
-            let id = value_text(model.get("name")).trim_start_matches("models/").to_string();
+            let id = value_text(model.get("name"))
+                .trim_start_matches("models/")
+                .to_string();
             if id.is_empty() {
                 continue;
             }
@@ -1428,7 +1525,6 @@ fn txt(args: &Value, key: &str) -> String {
         .unwrap_or("")
         .to_string()
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1538,14 +1634,29 @@ mod tests {
         let root = temp_root("activate");
         seed_api_provider(root.as_path(), "https://gw.example/v1");
         assert_eq!(
-            call(&root, "codepluse_provider_activate", json!({"agent": "codex", "id": "abc123"})).unwrap_err(),
+            call(
+                &root,
+                "codepluse_provider_activate",
+                json!({"agent": "codex", "id": "abc123"})
+            )
+            .unwrap_err(),
             "执行端无效"
         );
         assert_eq!(
-            call(&root, "codepluse_provider_activate", json!({"agent": "dsh", "id": "nope"})).unwrap_err(),
+            call(
+                &root,
+                "codepluse_provider_activate",
+                json!({"agent": "dsh", "id": "nope"})
+            )
+            .unwrap_err(),
             "供应商不存在"
         );
-        call(&root, "codepluse_provider_activate", json!({"agent": "claude", "id": "abc123"})).unwrap();
+        call(
+            &root,
+            "codepluse_provider_activate",
+            json!({"agent": "claude", "id": "abc123"}),
+        )
+        .unwrap();
         let raw = std::fs::read_to_string(api_providers_path(&root)).unwrap();
         assert!(raw.contains("\"claude\": \"abc123\""), "{raw}");
         // 落盘仍是两空格缩进（Go MarshalIndent）。
@@ -1575,7 +1686,10 @@ mod tests {
             .collect();
         // 本地两条（glm-4.6 被禁用）+ 远程新增 glm-air。
         assert_eq!(ids, vec!["glm-4.7", "glm-air"]);
-        assert!(!ids.contains(&"glm-4.6"), "禁用的模型即使远程出现也不会回来");
+        assert!(
+            !ids.contains(&"glm-4.6"),
+            "禁用的模型即使远程出现也不会回来"
+        );
     }
 
     #[test]
@@ -1584,10 +1698,15 @@ mod tests {
         seed_api_provider(root.as_path(), "https://gw.example/v1");
         // host 不一致：凭据不外带。
         assert_eq!(
-            call(&root, "list_provider_models", json!({"params": {
-                "protocol": "openai", "baseUrl": "https://evil.example",
-                "keySource": {"kind": "executor", "providerId": "abc123"}
-            }})).unwrap_err(),
+            call(
+                &root,
+                "list_provider_models",
+                json!({"params": {
+                    "protocol": "openai", "baseUrl": "https://evil.example",
+                    "keySource": {"kind": "executor", "providerId": "abc123"}
+                }})
+            )
+            .unwrap_err(),
             "API 地址与密钥来源的供应商不一致"
         );
         // 协议不支持。
@@ -1603,12 +1722,18 @@ mod tests {
         }})).unwrap_err()
         .contains("目标地址不允许访问"));
         // 缺 params。
-        assert_eq!(call(&root, "list_provider_models", json!({})).unwrap_err(), "缺少 params");
+        assert_eq!(
+            call(&root, "list_provider_models", json!({})).unwrap_err(),
+            "缺少 params"
+        );
     }
 
     #[test]
     fn same_host_ignores_scheme_and_requires_both_ports() {
-        assert!(same_host("https://GW.example:7897/v1", "http://gw.example:7897"));
+        assert!(same_host(
+            "https://GW.example:7897/v1",
+            "http://gw.example:7897"
+        ));
         assert!(same_host("https://gw.example/x", "http://gw.example:80/y"));
         assert!(!same_host("https://gw.example:1", "https://gw.example:2"));
         assert!(!same_host("https://gw.example", "https://other.example"));

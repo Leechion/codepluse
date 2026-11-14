@@ -209,7 +209,11 @@ struct WorkTask {
     #[serde(rename = "preflight", default)]
     preflight: Value,
     // Go: `Row json:"merge_queued,omitempty"`.
-    #[serde(rename = "merge_queued", default, skip_serializing_if = "Value::is_null")]
+    #[serde(
+        rename = "merge_queued",
+        default,
+        skip_serializing_if = "Value::is_null"
+    )]
     merge_queued: Value,
     #[serde(rename = "archived_at", default)]
     archived_at: Option<String>,
@@ -374,8 +378,8 @@ fn load(root: &Path) -> TaskDoc {
 /// 引擎（worktask_engine.rs）以 Value 形态改 board；这里转成 TaskDoc 再落盘，
 /// 保证 Go struct 字段序/omitempty 与其它写路径一致。
 pub(crate) fn persist_board(root: &Path, board: &Value) -> Result<(), String> {
-    let doc: TaskDoc = serde_json::from_value(board.clone())
-        .map_err(|e| format!("任务板格式无效：{e}"))?;
+    let doc: TaskDoc =
+        serde_json::from_value(board.clone()).map_err(|e| format!("任务板格式无效：{e}"))?;
     let value = serde_json::to_value(&doc).map_err(|e| e.to_string())?;
     let body = goformat::marshal_preserve(&value);
     store_file::write_bytes(&file_path(root), &body)
@@ -535,7 +539,9 @@ fn engine_trigger(command: &str, body: Value) -> Option<Result<Value, String>> {
     // 引擎已归 Rust（worktask_engine.rs）：本地直接调用，不再回打 sidecar。
     // 任务板的根目录由 `set_board_root` 在启动时登记。
     if let Some(root) = BOARD_ROOT.get() {
-        return Some(crate::backend::worktask_engine::handle(root, command, &body));
+        return Some(crate::backend::worktask_engine::handle(
+            root, command, &body,
+        ));
     }
     let base = UPSTREAM.get()?;
     let client = UPSTREAM_CLIENT.get_or_init(|| {
@@ -602,10 +608,7 @@ fn git_run(cwd: &Path, allow_fail: bool, args: &[&str]) -> Result<String, String
             if !output.status.success() && !allow_fail {
                 let mut msg = String::from_utf8_lossy(&output.stderr).to_string();
                 if msg.trim().is_empty() {
-                    msg = format!(
-                        "exit status {}",
-                        output.status.code().unwrap_or_else(|| -1)
-                    );
+                    msg = format!("exit status {}", output.status.code().unwrap_or_else(|| -1));
                 }
                 let bytes = msg.as_bytes();
                 if bytes.len() > 400 {
@@ -663,8 +666,12 @@ fn worktree_diff(base: &Path, id: &str) -> Result<WorktreeDiff, String> {
         String::new()
     };
     let dirty = git_run(&target, true, &["diff", "HEAD"]).unwrap_or_default();
-    let untracked_out = git_run(&target, true, &["ls-files", "--others", "--exclude-standard"])
-        .unwrap_or_default();
+    let untracked_out = git_run(
+        &target,
+        true,
+        &["ls-files", "--others", "--exclude-standard"],
+    )
+    .unwrap_or_default();
     let mut untracked: Vec<String> = untracked_out
         .split('\n')
         .map(|line| line.trim().to_string())
@@ -674,7 +681,10 @@ fn worktree_diff(base: &Path, id: &str) -> Result<WorktreeDiff, String> {
     // them; the accumulator stops after 20 rendered sections like Go's.
     let mut new_files = String::new();
     for rel in untracked.iter() {
-        if !untracked.is_empty() && !new_files.is_empty() && new_files.matches("diff --git").count() >= 20 {
+        if !untracked.is_empty()
+            && !new_files.is_empty()
+            && new_files.matches("diff --git").count() >= 20
+        {
             break;
         }
         let Ok(body_bytes) = std::fs::read(target.join(rel)) else {
@@ -806,7 +816,9 @@ fn append_task_note(config: Option<WorkTaskConfig>, note: &str) -> WorkTaskConfi
         config.display_text = format!("{}\n\n{}", config.display_text, note);
     } else {
         // Go 的 Row 是 map：marshal 排序键，落盘前 canon。
-        config.prompt_blocks.push(canon_row(json!({ "type": "text", "text": note })));
+        config
+            .prompt_blocks
+            .push(canon_row(json!({ "type": "text", "text": note })));
     }
     config
 }
@@ -961,7 +973,13 @@ fn run(root: &Path, doc: &mut TaskDoc, command: &str, a: &Value) -> Result<Outco
             let task_id = task.id;
             doc.next += 1;
             doc.tasks_mut().push(task);
-            add_event(doc, task_id, "created", "user", canon_row(json!({ "title": title })));
+            add_event(
+                doc,
+                task_id,
+                "created",
+                "user",
+                canon_row(json!({ "title": title })),
+            );
             persist(root, doc);
             let task = doc.find(task_id).cloned().unwrap_or_default();
             Ok(Outcome {
@@ -981,7 +999,11 @@ fn run(root: &Path, doc: &mut TaskDoc, command: &str, a: &Value) -> Result<Outco
                 if !title.is_empty() {
                     task.title = title;
                 }
-                if draft.as_object().map(|m| m.contains_key("config")).unwrap_or(false) {
+                if draft
+                    .as_object()
+                    .map(|m| m.contains_key("config"))
+                    .unwrap_or(false)
+                {
                     task.config = Some(parse_task_config(&draft["config"]));
                 }
                 task.updated_at = goformat::timestamp();
@@ -1018,10 +1040,7 @@ fn run(root: &Path, doc: &mut TaskDoc, command: &str, a: &Value) -> Result<Outco
             let folder_id = task.folder_id;
             let delete_worktree = a["deleteWorktree"] == json!(true);
             if delete_worktree && worktree_dir(root, folder_id, id).is_some() {
-                engine_trigger_ignored(
-                    "work_task_engine_discard_worktree",
-                    json!({ "id": id }),
-                );
+                engine_trigger_ignored("work_task_engine_discard_worktree", json!({ "id": id }));
                 // 镜像 Go discardTaskWorktree 的持久化效果。
                 if let Some(task) = doc.find_mut(id) {
                     task.work_branch = None;
@@ -1133,7 +1152,13 @@ fn run(root: &Path, doc: &mut TaskDoc, command: &str, a: &Value) -> Result<Outco
                 task.last_error = None;
                 task.failure_reason = None;
             }
-            let events = set_status(doc, id, "queued", "user", canon_row(json!({ "feedback": feedback })));
+            let events = set_status(
+                doc,
+                id,
+                "queued",
+                "user",
+                canon_row(json!({ "feedback": feedback })),
+            );
             persist(root, doc);
             engine_trigger_ignored("work_task_engine_claim", json!({ "id": id }));
             Ok(Outcome {
@@ -1154,13 +1179,16 @@ fn run(root: &Path, doc: &mut TaskDoc, command: &str, a: &Value) -> Result<Outco
             engine_trigger_ignored("work_task_engine_cancel_conn", json!({ "id": id }));
             let delete_worktree = a["deleteWorktree"] == json!(true);
             if delete_worktree && worktree_dir(root, folder_id, id).is_some() {
-                engine_trigger_ignored(
-                    "work_task_engine_discard_worktree",
-                    json!({ "id": id }),
-                );
+                engine_trigger_ignored("work_task_engine_discard_worktree", json!({ "id": id }));
             }
             let reason = go_text(&a["reason"]);
-            let events = set_status(doc, id, "canceled", "user", canon_row(json!({ "reason": reason })));
+            let events = set_status(
+                doc,
+                id,
+                "canceled",
+                "user",
+                canon_row(json!({ "reason": reason })),
+            );
             persist(root, doc);
             Ok(Outcome {
                 result: Value::Null,
@@ -1229,10 +1257,7 @@ fn run(root: &Path, doc: &mut TaskDoc, command: &str, a: &Value) -> Result<Outco
             }
             let events = set_status(doc, id, "done", "user", Value::Null);
             if delete_worktree && worktree_dir(root, folder_id, id).is_some() {
-                engine_trigger_ignored(
-                    "work_task_engine_discard_worktree",
-                    json!({ "id": id }),
-                );
+                engine_trigger_ignored("work_task_engine_discard_worktree", json!({ "id": id }));
                 // 镜像 Go discardTaskWorktree 的持久化效果。
                 if let Some(task) = doc.find_mut(id) {
                     task.work_branch = None;
@@ -1282,10 +1307,7 @@ fn run(root: &Path, doc: &mut TaskDoc, command: &str, a: &Value) -> Result<Outco
             if worktree_dir(root, folder_id, id).is_none() {
                 return Err("该任务没有隔离工作树".into());
             }
-            let response = engine_trigger(
-                "work_task_engine_discard_worktree",
-                json!({ "id": id }),
-            );
+            let response = engine_trigger("work_task_engine_discard_worktree", json!({ "id": id }));
             if let Some(task) = doc.find_mut(id) {
                 // Go 的 discardTaskWorktree 无条件清这两个持久化字段（引擎
                 // 侧的触发处理也会写同一份文件，两边收敛到相同内容）。
@@ -1335,7 +1357,12 @@ fn run(root: &Path, doc: &mut TaskDoc, command: &str, a: &Value) -> Result<Outco
             let base = folder_path(root, folder_id).unwrap_or_default();
             let Ok(out) = exec_git(
                 Path::new(&base),
-                &["diff", "--numstat", "HEAD", &format!("hh/{}", task_worktree_name(id))],
+                &[
+                    "diff",
+                    "--numstat",
+                    "HEAD",
+                    &format!("hh/{}", task_worktree_name(id)),
+                ],
             ) else {
                 return Ok(outcome(json!([])));
             };
@@ -1356,14 +1383,14 @@ fn run(root: &Path, doc: &mut TaskDoc, command: &str, a: &Value) -> Result<Outco
         }
         "work_task_settings_get" | "work_task_settings_effective" => {
             let settings = settings_for(doc, go_number(&a["folderId"]));
-            Ok(outcome(serde_json::to_value(&settings).unwrap_or(Value::Null)))
+            Ok(outcome(
+                serde_json::to_value(&settings).unwrap_or(Value::Null),
+            ))
         }
         "work_task_settings_get_own" => {
             let key = go_number(&a["folderId"]).to_string();
             let value = match doc.settings.get(&key) {
-                Some(Some(settings)) => {
-                    serde_json::to_value(settings).unwrap_or(Value::Null)
-                }
+                Some(Some(settings)) => serde_json::to_value(settings).unwrap_or(Value::Null),
                 _ => Value::Null,
             };
             Ok(outcome(value))
@@ -1422,7 +1449,9 @@ fn run(root: &Path, doc: &mut TaskDoc, command: &str, a: &Value) -> Result<Outco
                 }
             };
             persist(root, doc);
-            Ok(outcome(serde_json::to_value(&template).unwrap_or(Value::Null)))
+            Ok(outcome(
+                serde_json::to_value(&template).unwrap_or(Value::Null),
+            ))
         }
         "work_task_template_delete" => {
             let id = go_number(&a["id"]);
@@ -1508,7 +1537,13 @@ fn run(root: &Path, doc: &mut TaskDoc, command: &str, a: &Value) -> Result<Outco
             let task_id = task.id;
             doc.next += 1;
             doc.tasks_mut().push(task);
-            add_event(doc, task_id, "created", "forge", canon_row(json!({ "title": title })));
+            add_event(
+                doc,
+                task_id,
+                "created",
+                "forge",
+                canon_row(json!({ "title": title })),
+            );
             persist(root, doc);
             let task = doc.find(task_id).cloned().unwrap_or_default();
             Ok(Outcome {
@@ -1681,16 +1716,15 @@ mod tests {
 
         // 落盘字节序：顶层 Go struct 字段序 + tasks 数组里 struct 字段序。
         let raw = fs::read_to_string(root.join(".data").join(FILE)).unwrap();
-        let head = raw
-            .chars()
-            .take(60)
-            .collect::<String>();
+        let head = raw.chars().take(60).collect::<String>();
         assert!(
             raw.starts_with("{\"next\":2,\"nextEvent\":2,\"nextTemplate\":1,\"tasks\":["),
             "顶层字段序应匹配 json.Marshal(taskStore)：{head}"
         );
-        assert!(raw.contains("\"prompt_blocks\":[{\"text\":\"做点事\",\"type\":\"text\"}]"),
-            "Row 内键应按 Go map marshal 排序");
+        assert!(
+            raw.contains("\"prompt_blocks\":[{\"text\":\"做点事\",\"type\":\"text\"}]"),
+            "Row 内键应按 Go map marshal 排序"
+        );
         assert!(raw.contains("\"events\":{\"1\":[{\"id\":1,\"task_id\":1,\"kind\":\"created\",\"actor\":\"user\",\"payload\":{\"title\":\"修复登录\"},"),
             "events 应为排序 map + struct 字段序");
     }
@@ -1725,7 +1759,12 @@ mod tests {
             )
             .unwrap();
         }
-        call(&root, "work_task_reorder", json!({ "folderId": 1, "orderedIds": [3, 1] })).unwrap();
+        call(
+            &root,
+            "work_task_reorder",
+            json!({ "folderId": 1, "orderedIds": [3, 1] }),
+        )
+        .unwrap();
         let out = call(&root, "work_task_list", json!({ "folderId": 1 })).unwrap();
         let ids: Vec<i64> = out
             .result
@@ -1770,7 +1809,12 @@ mod tests {
         doc.find_mut(1).unwrap().status = "running".into();
         persist(&root, &doc);
         assert_eq!(
-            call(&root, "work_task_update", json!({ "id": 1, "draft": { "title": "x" } })).unwrap_err(),
+            call(
+                &root,
+                "work_task_update",
+                json!({ "id": 1, "draft": { "title": "x" } })
+            )
+            .unwrap_err(),
             "仅待办状态的任务可以编辑"
         );
     }
@@ -1790,13 +1834,15 @@ mod tests {
             add_event(&mut doc, 1, "noise", "engine", Value::Null);
         }
         persist(&root, &doc);
-        let out = call(&root, "work_task_events", json!({ "taskId": 1, "limit": 3 })).unwrap();
+        let out = call(
+            &root,
+            "work_task_events",
+            json!({ "taskId": 1, "limit": 3 }),
+        )
+        .unwrap();
         let events = out.result.as_array().unwrap();
         assert_eq!(events.len(), 3);
-        let ids: Vec<i64> = events
-            .iter()
-            .map(|e| e["id"].as_i64().unwrap())
-            .collect();
+        let ids: Vec<i64> = events.iter().map(|e| e["id"].as_i64().unwrap()).collect();
         assert_eq!(ids, vec![519, 520, 521], "应取最近 limit 条");
         let out = call(&root, "work_task_events", json!({ "taskId": 1 })).unwrap();
         assert_eq!(out.result.as_array().unwrap().len(), 500);
@@ -1833,23 +1879,38 @@ mod tests {
             "仅失败任务可以重试（当前 queued）"
         );
         // cancel 在非终态可用；note 追加进 config。
-        let out = call(&root, "work_task_cancel", json!({ "id": 1, "reason": "改需求" })).unwrap();
+        let out = call(
+            &root,
+            "work_task_cancel",
+            json!({ "id": 1, "reason": "改需求" }),
+        )
+        .unwrap();
         assert_eq!(out.result, Value::Null);
         assert_eq!(
             call(&root, "work_task_cancel", json!({ "id": 1 })).unwrap_err(),
             "任务已结束（当前 canceled）"
         );
         let raw = fs::read_to_string(root.join(".data").join(FILE)).unwrap();
-        assert!(raw.contains("\"kind\":\"status\",\"actor\":\"user\",\"payload\":{\"reason\":\"改需求\"}"));
+        assert!(raw.contains(
+            "\"kind\":\"status\",\"actor\":\"user\",\"payload\":{\"reason\":\"改需求\"}"
+        ));
         // requeue 只接受 canceled → 回 todo。
-        let out = call(&root, "work_task_requeue", json!({ "id": 1, "note": "再来一次" })).unwrap();
+        let out = call(
+            &root,
+            "work_task_requeue",
+            json!({ "id": 1, "note": "再来一次" }),
+        )
+        .unwrap();
         assert_eq!(out.result, Value::Null);
         let doc = load(&root);
         assert_eq!(doc.find(1).unwrap().status, "todo");
         // note 进了事件，配置里追加了文本块。
         let raw = fs::read_to_string(root.join(".data").join(FILE)).unwrap();
         assert!(raw.contains("\"kind\":\"note\""));
-        assert!(raw.contains(r#"{\"text\":\"再来一次\",\"type\":\"text\"}"#) || raw.contains("\"text\":\"再来一次\""));
+        assert!(
+            raw.contains(r#"{\"text\":\"再来一次\",\"type\":\"text\"}"#)
+                || raw.contains("\"text\":\"再来一次\"")
+        );
     }
 
     #[test]
@@ -1901,25 +1962,39 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            call(&root, "work_task_return", json!({ "id": 1, "feedback": "x" })).unwrap_err(),
+            call(
+                &root,
+                "work_task_return",
+                json!({ "id": 1, "feedback": "x" })
+            )
+            .unwrap_err(),
             "仅评审或失败状态可以追加反馈（当前 todo）"
         );
         let mut doc = load(&root);
         doc.find_mut(1).unwrap().status = "review".into();
         persist(&root, &doc);
         assert_eq!(
-            call(&root, "work_task_return", json!({ "id": 1, "feedback": "  " })).unwrap_err(),
+            call(
+                &root,
+                "work_task_return",
+                json!({ "id": 1, "feedback": "  " })
+            )
+            .unwrap_err(),
             "请填写反馈内容"
         );
-        let out = call(&root, "work_task_return", json!({ "id": 1, "feedback": "补个测试" })).unwrap();
+        let out = call(
+            &root,
+            "work_task_return",
+            json!({ "id": 1, "feedback": "补个测试" }),
+        )
+        .unwrap();
         assert_eq!(out.result, Value::Null);
         let doc = load(&root);
         let task = doc.find(1).unwrap();
         assert_eq!(task.status, "queued");
         let config = task.config.as_ref().unwrap();
         assert_eq!(
-            config.display_text,
-            "",
+            config.display_text, "",
             "空 display_text 时反馈不进 display_text"
         );
         assert_eq!(
@@ -1947,33 +2022,65 @@ mod tests {
         .unwrap();
         assert_eq!(out.result, Value::Null);
         let doc = load(&root);
-        assert_eq!(doc.find(1).unwrap().scheduled_at.as_deref(), Some("2026-11-14T09:00:00Z"));
+        assert_eq!(
+            doc.find(1).unwrap().scheduled_at.as_deref(),
+            Some("2026-11-14T09:00:00Z")
+        );
         // 清空调度。
-        call(&root, "work_task_schedule", json!({ "id": 1, "scheduledAt": "" })).unwrap();
+        call(
+            &root,
+            "work_task_schedule",
+            json!({ "id": 1, "scheduledAt": "" }),
+        )
+        .unwrap();
         let doc = load(&root);
         assert_eq!(doc.find(1).unwrap().scheduled_at, None);
 
-        let out = call(&root, "work_task_archive", json!({ "id": 1, "archived": true })).unwrap();
+        let out = call(
+            &root,
+            "work_task_archive",
+            json!({ "id": 1, "archived": true }),
+        )
+        .unwrap();
         assert_eq!(out.events.len(), 1);
         let doc = load(&root);
         assert!(doc.find(1).unwrap().archived_at.is_some());
-        call(&root, "work_task_archive", json!({ "id": 1, "archived": false })).unwrap();
+        call(
+            &root,
+            "work_task_archive",
+            json!({ "id": 1, "archived": false }),
+        )
+        .unwrap();
         let doc = load(&root);
         assert_eq!(doc.find(1).unwrap().archived_at, None);
 
-        let out = call(&root, "work_task_defer", json!({ "id": 1, "deferred": true })).unwrap();
+        let out = call(
+            &root,
+            "work_task_defer",
+            json!({ "id": 1, "deferred": true }),
+        )
+        .unwrap();
         assert_eq!(out.events.len(), 1);
-        call(&root, "work_task_defer", json!({ "id": 1, "deferred": false })).unwrap();
+        call(
+            &root,
+            "work_task_defer",
+            json!({ "id": 1, "deferred": false }),
+        )
+        .unwrap();
         let doc = load(&root);
         assert_eq!(doc.find(1).unwrap().deferred_at, None);
 
         // merge_unqueue 清空 merge_queued。
         let mut doc = load(&root);
-        doc.find_mut(1).unwrap().merge_queued = canon_row(json!({ "message": "m", "delete_worktree": false }));
+        doc.find_mut(1).unwrap().merge_queued =
+            canon_row(json!({ "message": "m", "delete_worktree": false }));
         persist(&root, &doc);
         call(&root, "work_task_merge_unqueue", json!({ "id": 1 })).unwrap();
         let raw = fs::read_to_string(root.join(".data").join(FILE)).unwrap();
-        assert!(!raw.contains("\"merge_queued\""), "omitempty 应把 null 的 merge_queued 去掉");
+        assert!(
+            !raw.contains("\"merge_queued\""),
+            "omitempty 应把 null 的 merge_queued 去掉"
+        );
     }
 
     #[test]
@@ -2007,7 +2114,10 @@ mod tests {
         let doc = load(&root);
         let task = doc.find(1).unwrap();
         assert_eq!(task.status, "done");
-        assert_eq!(task.completion_kind.as_deref(), Some("accepted_without_merge"));
+        assert_eq!(
+            task.completion_kind.as_deref(),
+            Some("accepted_without_merge")
+        );
         assert!(task.finished_at.is_some());
         assert_eq!(
             call(&root, "work_task_complete", json!({ "id": 1 })).unwrap_err(),
@@ -2030,7 +2140,9 @@ mod tests {
             "该任务没有隔离工作树"
         );
         assert_eq!(
-            call(&root, "work_task_diff", json!({ "id": 1 })).unwrap().result,
+            call(&root, "work_task_diff", json!({ "id": 1 }))
+                .unwrap()
+                .result,
             json!(""),
             "无工作树时 diff 为空串"
         );
@@ -2042,7 +2154,12 @@ mod tests {
     fn settings_roundtrip() {
         let root = temp_root("settings");
         // 默认值。
-        let out = call(&root, "work_task_settings_effective", json!({ "folderId": 5 })).unwrap();
+        let out = call(
+            &root,
+            "work_task_settings_effective",
+            json!({ "folderId": 5 }),
+        )
+        .unwrap();
         assert_eq!(
             out.result,
             json!({
@@ -2057,7 +2174,13 @@ mod tests {
             })
         );
         assert_eq!(
-            call(&root, "work_task_settings_get_own", json!({ "folderId": 5 })).unwrap().result,
+            call(
+                &root,
+                "work_task_settings_get_own",
+                json!({ "folderId": 5 })
+            )
+            .unwrap()
+            .result,
             Value::Null
         );
         call(
@@ -2072,7 +2195,12 @@ mod tests {
             } }),
         )
         .unwrap();
-        let out = call(&root, "work_task_settings_get_own", json!({ "folderId": 5 })).unwrap();
+        let out = call(
+            &root,
+            "work_task_settings_get_own",
+            json!({ "folderId": 5 }),
+        )
+        .unwrap();
         assert_eq!(out.result["max_concurrent"], json!(3), "Go 的 int() 截断");
         assert_eq!(out.result["merge_strategy"], json!("squash"));
         assert_eq!(out.result["config_values"]["k"], json!("12"));
@@ -2083,7 +2211,12 @@ mod tests {
             json!({ "folderId": 5, "settings": { "merge_strategy": "rebase" } }),
         )
         .unwrap();
-        let out = call(&root, "work_task_settings_effective", json!({ "folderId": 5 })).unwrap();
+        let out = call(
+            &root,
+            "work_task_settings_effective",
+            json!({ "folderId": 5 }),
+        )
+        .unwrap();
         assert_eq!(out.result["merge_strategy"], json!("merge"));
         call(&root, "work_task_settings_delete", json!({ "folderId": 5 })).unwrap();
         let raw = fs::read_to_string(root.join(".data").join(FILE)).unwrap();
@@ -2094,12 +2227,19 @@ mod tests {
     fn templates_save_updates_by_name() {
         let root = temp_root("templates");
         assert_eq!(
-            call(&root, "work_task_template_list", json!({})).unwrap().result,
+            call(&root, "work_task_template_list", json!({}))
+                .unwrap()
+                .result,
             Value::Null,
             "Go 的 nil templates 序列化为 null"
         );
         assert_eq!(
-            call(&root, "work_task_template_save", json!({ "draft": { "name": "  " } })).unwrap_err(),
+            call(
+                &root,
+                "work_task_template_save",
+                json!({ "draft": { "name": "  " } })
+            )
+            .unwrap_err(),
             "请填写模板名称"
         );
         let out = call(
@@ -2182,7 +2322,10 @@ mod tests {
         .unwrap();
         let task = out.result;
         assert_eq!(task["source_kind"], json!("forge_issue"));
-        assert_eq!(task["source_key"], json!("github:github.com:acme/app:issue:42"));
+        assert_eq!(
+            task["source_key"],
+            json!("github:github.com:acme/app:issue:42")
+        );
         assert_eq!(task["source_meta"]["number"], json!(42));
         assert_eq!(task["status"], json!("todo"));
         let prompt = task["config"]["display_text"].as_str().unwrap();
@@ -2191,7 +2334,10 @@ mod tests {
             "处理 acme/app 的议题 #42：按钮坏了\n\n点哪儿都没反应\n"
         );
         let raw = fs::read_to_string(root.join(".data").join(FILE)).unwrap();
-        assert!(raw.contains("\"source_meta\":{\"number\":42,\"owner_repo\":\"acme/app\""), "Row 应排序");
+        assert!(
+            raw.contains("\"source_meta\":{\"number\":42,\"owner_repo\":\"acme/app\""),
+            "Row 应排序"
+        );
     }
 
     #[test]
@@ -2231,7 +2377,10 @@ mod tests {
         let config = append_task_note(Some(config), "补充");
         assert_eq!(config.display_text, "原文\n\n补充");
         let config = append_task_note(None, "新块");
-        assert_eq!(config.prompt_blocks, vec![json!({ "type": "text", "text": "新块" })]);
+        assert_eq!(
+            config.prompt_blocks,
+            vec![json!({ "type": "text", "text": "新块" })]
+        );
     }
 
     #[test]

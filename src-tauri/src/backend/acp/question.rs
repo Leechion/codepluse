@@ -56,8 +56,14 @@ mod tests {
 
     #[test]
     fn tool_result_shapes_match_go() {
-        assert_eq!(question_tool_result(None), json!({"declined": true, "answers": []}));
-        assert_eq!(question_tool_result(Some(&Value::Null)), json!({"declined": true, "answers": []}));
+        assert_eq!(
+            question_tool_result(None),
+            json!({"declined": true, "answers": []})
+        );
+        assert_eq!(
+            question_tool_result(Some(&Value::Null)),
+            json!({"declined": true, "answers": []})
+        );
         assert_eq!(
             question_tool_result(Some(&json!({"declined": false, "answers": [1]}))),
             json!({"declined": false, "answers": [1]})
@@ -88,7 +94,10 @@ mod tests {
         let mut registry: QuestionRegistry = HashMap::new();
         registry.insert(
             "q1".into(),
-            ParkedQuestion { conn_id: "c1".into(), answer_tx: tx },
+            ParkedQuestion {
+                conn_id: "c1".into(),
+                answer_tx: tx,
+            },
         );
         let park = registry.remove("q1").unwrap();
         assert!(park.answer_tx.send(declined_answer()).is_err());

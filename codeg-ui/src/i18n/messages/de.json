@@ -848,7 +848,7 @@
       "loadFailed": "Delegationseinstellungen konnten nicht geladen werden: {detail}",
       "tabGeneral": "Allgemein",
       "tabMainAgent": "Main-Agent-Einstellungen",
-      "tabAgentDefaults": "Subagent-Standards",
+      "tabAgentDefaults": "Subagent-Konfiguration",
       "agentDefaultsDescription": "Pro-Agent-Überschreibungen, die angewendet werden, wenn die Multi-Agent-Zusammenarbeit einen Subagenten für einen Delegationsaufruf startet. Die hier gezeigten Optionen stammen aus einer Live-Abfrage – Ihre Auswahl ist exakt das, was der Agent akzeptiert.",
       "agentDefaultsAgentHint": "Optionen auf Standard behalten den eigenen Wert des Agenten.",
       "agentDefaultsDelegationOff": "Multi-Agent-Zusammenarbeit ist aus. Schalte sie ein, um diese Standards zu bearbeiten.",

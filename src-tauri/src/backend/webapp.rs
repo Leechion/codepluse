@@ -87,12 +87,18 @@ fn env_flag(name: &str) -> bool {
 
 /// Go `delegation.go:73` `companionRequest`.
 pub fn companion_method_not_allowed() -> Response {
-    respond(StatusCode::METHOD_NOT_ALLOWED, &json!({"error": "POST required"}))
+    respond(
+        StatusCode::METHOD_NOT_ALLOWED,
+        &json!({"error": "POST required"}),
+    )
 }
 
 /// The companion token did not match a live caller.
 pub fn companion_unauthorized() -> Response {
-    respond(StatusCode::UNAUTHORIZED, &json!({"error": "Invalid companion token"}))
+    respond(
+        StatusCode::UNAUTHORIZED,
+        &json!({"error": "Invalid companion token"}),
+    )
 }
 
 /// The tool call itself failed (Go answers 400 with the error text).
@@ -207,6 +213,7 @@ pub fn guard(
     } else if header_str(headers, header::HeaderName::from_static("sec-fetch-site"))
         .map(|site| site.eq_ignore_ascii_case("cross-site"))
         .unwrap_or(false)
+        && !is_cross_site_static_read(method, path)
     {
         return Err(Deny::CrossSite);
     }
@@ -230,6 +237,16 @@ pub fn guard(
     Ok(())
 }
 
+/// Browser shells can report UI document and asset requests as cross-site
+/// when opened from another app. Only static reads are allowed through this
+/// exception; API routes remain protected by the fetch-site and Origin checks.
+fn is_cross_site_static_read(method: &Method, path: &str) -> bool {
+    (*method == Method::GET || *method == Method::HEAD)
+        && !path.starts_with("/api/")
+        && path != "/ws"
+        && path != "/ws/events"
+}
+
 /// The WebSocket upgrade check: the browser's Origin must be one of ours.
 pub fn origin_allowed_for_ws(origin: &str, request_host: &str, listen_port: u16) -> bool {
     let origin = origin.trim_end_matches('/').to_lowercase();
@@ -246,13 +263,14 @@ pub fn origin_allowed_for_ws(origin: &str, request_host: &str, listen_port: u16)
 // ---------------------------------------------------------------------------
 
 /// Go `attachments.go` `uploadAttachment`.
-pub fn upload_attachment(root: &Path, method: &Method, headers: &HeaderMap, body: &[u8]) -> Response {
+pub fn upload_attachment(
+    root: &Path,
+    method: &Method,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Response {
     if method != Method::POST {
-        return error_envelope(
-            StatusCode::METHOD_NOT_ALLOWED,
-            "invalid_input",
-            "Use POST",
-        );
+        return error_envelope(StatusCode::METHOD_NOT_ALLOWED, "invalid_input", "Use POST");
     }
     if body.len() > MAX_ATTACHMENT_REQUEST {
         return error_envelope(StatusCode::BAD_REQUEST, "invalid_input", "无法读取附件");
@@ -446,7 +464,11 @@ fn find(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
 /// extension, Content-Length, Last-Modified, ETag/If-None-Match, Range).
 pub fn static_asset(root: &Path, uri_path: &str, headers: &HeaderMap) -> Response {
     let base = root.join("codeg-ui").join("out");
-    let request = if uri_path == "/" { "/index.html" } else { uri_path };
+    let request = if uri_path == "/" {
+        "/index.html"
+    } else {
+        uri_path
+    };
     // Go: filepath.Clean("/"+request) — collapses `..` and never escapes the
     // root, so `/../../etc/passwd` becomes `<out>/etc/passwd`.
     let cleaned = clean_absolute(request);
@@ -500,14 +522,20 @@ pub fn static_asset(root: &Path, uri_path: &str, headers: &HeaderMap) -> Respons
     // `checkPreconditions`).
     if let Some(requested) = header_str(headers, header::IF_NONE_MATCH) {
         if etag_matches(&requested, &etag) {
-            return builder.status(StatusCode::NOT_MODIFIED).body(Body::empty()).unwrap();
+            return builder
+                .status(StatusCode::NOT_MODIFIED)
+                .body(Body::empty())
+                .unwrap();
         }
     } else if let (Some(since), Some(modified)) = (
         header_str(headers, header::IF_MODIFIED_SINCE).and_then(|value| parse_http_date(&value)),
         modified,
     ) {
         if modified <= since {
-            return builder.status(StatusCode::NOT_MODIFIED).body(Body::empty()).unwrap();
+            return builder
+                .status(StatusCode::NOT_MODIFIED)
+                .body(Body::empty())
+                .unwrap();
         }
     }
 
@@ -578,7 +606,10 @@ fn clean_absolute(request: &str) -> String {
 }
 
 fn with_extension(path: &Path, extension: &str) -> PathBuf {
-    let mut name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let mut name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
     name.push('.');
     name.push_str(extension);
     path.with_file_name(name)
@@ -645,7 +676,10 @@ fn etag_matches(requested: &str, etag: &str) -> bool {
 
 /// `Mon, 02 Jan 2006 15:04:05 GMT`
 fn http_date(time: SystemTime) -> String {
-    let seconds = time.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let seconds = time
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     format_http_date(seconds)
 }
 
@@ -959,7 +993,12 @@ mod tests {
         let uploads = root.join(".data").join("uploads");
         let written: Vec<_> = std::fs::read_dir(&uploads).unwrap().collect();
         assert_eq!(written.len(), 1);
-        assert!(written[0].as_ref().unwrap().path().join("note.txt").is_file());
+        assert!(written[0]
+            .as_ref()
+            .unwrap()
+            .path()
+            .join("note.txt")
+            .is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
 

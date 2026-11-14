@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 //! codepluse desktop shell.
 //!
@@ -29,6 +29,11 @@ use tauri::{Manager, RunEvent, State, Url, WebviewUrl, WebviewWindow, WebviewWin
 mod backend;
 
 const SHELL_MARKER: &str = "window.__CODEG_SHELL__='tauri-shell';window.__CODEG_TAURI_SHELL__=true;\
+window.__codegGoOpenWindow=function(path){return window.__TAURI_INTERNALS__.invoke('window_open',{path})};\
+window.__codegGoCloseWindow=function(){return window.__TAURI_INTERNALS__.invoke('window_close')};\
+window.__codegGoWindowMinimize=function(){return window.__TAURI_INTERNALS__.invoke('window_minimize')};\
+window.__codegGoWindowToggleMaximize=function(){return window.__TAURI_INTERNALS__.invoke('window_toggle_maximize')};\
+window.__codegGoWindowBeginDrag=function(){return window.__TAURI_INTERNALS__.invoke('window_begin_drag')};\
 window.__codegGoOpenExternal=function(u){return window.__TAURI_INTERNALS__.invoke('open_external',{url:u})};";
 const DEFAULT_PORT: u16 = 8840;
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -73,12 +78,20 @@ fn resolve_root(exe_dir: &Path, resource_dir: Option<&Path>) -> PathBuf {
 }
 
 fn ensure_frontend(root: &Path) -> Result<(), String> {
-    if root.join("codeg-ui").join("out").join("workspace.html").is_file() {
+    if root
+        .join("codeg-ui")
+        .join("out")
+        .join("workspace.html")
+        .is_file()
+    {
         return Ok(());
     }
     Err(format!(
         "界面尚未构建：{}\n请先执行 pnpm --dir codeg-ui build（或运行 scripts/build-tauri.ps1）。",
-        root.join("codeg-ui").join("out").join("workspace.html").display()
+        root.join("codeg-ui")
+            .join("out")
+            .join("workspace.html")
+            .display()
     ))
 }
 
@@ -113,9 +126,7 @@ fn run_headless() {
     let port = backend_port();
     let root = std::env::var("CODEPLUSE_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     eprintln!("[headless] 127.0.0.1:{port} (root {})", root.display());
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -140,6 +151,7 @@ fn build_window(
     path: &str,
     port: u16,
     primary: bool,
+    root: &Path,
 ) -> Result<(), String> {
     if !path.starts_with('/') {
         // Keep the destination on this server: a path is appended to the
@@ -154,14 +166,25 @@ fn build_window(
     } else {
         (1200.0, 860.0)
     };
-    WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
+    let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
         .title("codepluse")
         .inner_size(width, height)
         .min_inner_size(880.0, 560.0)
-        .decorations(false)
+        .decorations(cfg!(windows))
+        .data_directory(root.join(".data").join("webview2"))
         .initialization_script(SHELL_MARKER)
-        .build()
-        .map_err(|e| format!("窗口创建失败：{e}"))?;
+        .background_color(tauri::window::Color(245, 248, 252, 255));
+    #[cfg(windows)]
+    let builder = if backend::desktop_settings::disable_hardware_acceleration(root) {
+        builder.additional_browser_args("--disable-gpu")
+    } else {
+        builder
+    };
+    // Let Windows own the non-client frame and resize hit testing. The web
+    // titlebar and resize overlays must be disabled for these framed windows.
+    #[cfg(windows)]
+    let builder = builder.initialization_script("window.__CODEG_NATIVE_WINDOW_CHROME__=true;");
+    builder.build().map_err(|e| format!("窗口创建失败：{e}"))?;
     Ok(())
 }
 
@@ -230,7 +253,11 @@ fn open_in_system_browser(target: &str) -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
-        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
         std::process::Command::new(opener)
             .arg(target)
             .spawn()
@@ -240,9 +267,20 @@ fn open_in_system_browser(target: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn window_open(app: tauri::AppHandle, state: State<'_, Backend>, path: String) -> Result<(), String> {
+fn window_open(
+    app: tauri::AppHandle,
+    state: State<'_, Backend>,
+    path: String,
+) -> Result<(), String> {
     let index = state.next_window.fetch_add(1, Ordering::SeqCst) + 1;
-    build_window(&app, &format!("app-{index}"), &path, state.port, false)
+    build_window(
+        &app,
+        &format!("app-{index}"),
+        &path,
+        state.port,
+        false,
+        &state.root,
+    )
 }
 
 fn main() {
@@ -297,10 +335,10 @@ fn main() {
 
             app.manage(Backend {
                 port,
-                root,
+                root: root.clone(),
                 next_window: AtomicUsize::new(0),
             });
-            build_window(app.handle(), "main", "/workspace", port, true)
+            build_window(app.handle(), "main", "/workspace", port, true, &root)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
             Ok(())
         })

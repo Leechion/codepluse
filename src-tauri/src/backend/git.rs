@@ -20,11 +20,15 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
 
+use crate::backend::store_file;
+
 const GIT_TIMEOUT: Duration = Duration::from_secs(45);
+static CUSTOM_GIT_PROGRAM: RwLock<Option<PathBuf>> = RwLock::new(None);
 
 /// Commands owned by this module. `git_commit` is deliberately absent.
 pub fn owns(command: &str) -> bool {
@@ -60,6 +64,9 @@ pub fn owns(command: &str) -> bool {
             | "git_fetch"
             | "git_fetch_remote"
             | "git_pull"
+            | "git_start_pull_merge"
+            | "git_update_branch"
+            | "git_delete_remote_branch"
             | "git_push"
             | "git_push_info"
             | "git_stash_push"
@@ -77,10 +84,16 @@ pub fn owns(command: &str) -> bool {
             | "git_continue_operation"
             | "git_reset"
             | "git_worktree_add"
+            | "resolve_worktree_folder"
+            | "detect_git"
+            | "test_git_path"
+            | "get_git_settings"
+            | "update_git_settings"
             | "open_commit_window"
             | "open_push_window"
             | "open_stash_window"
             | "open_merge_window"
+            | "clone_repository"
     )
 }
 
@@ -89,6 +102,75 @@ pub fn handle(root: &Path, command: &str, args: &Value) -> Option<Result<Value, 
         return None;
     }
     Some(run(root, command, args))
+}
+
+pub fn load_settings(root: &Path) {
+    let path = root.join(".data").join("codeg-workspace.json");
+    let configured = store_file::read_json(&path)
+        .ok()
+        .flatten()
+        .and_then(|doc| {
+            doc.get("settings")
+                .and_then(|settings| settings.get("get_git_settings"))
+                .cloned()
+        })
+        .and_then(|value| {
+            value
+                .get("custom_path")
+                .and_then(Value::as_str)
+                .map(PathBuf::from)
+        })
+        .filter(|path| path.is_file());
+    *CUSTOM_GIT_PROGRAM.write().unwrap() = configured;
+}
+
+fn git_program() -> std::ffi::OsString {
+    CUSTOM_GIT_PROGRAM
+        .read()
+        .unwrap()
+        .clone()
+        .map(PathBuf::into_os_string)
+        .unwrap_or_else(|| "git".into())
+}
+
+fn probe_git(program: &std::ffi::OsStr) -> Option<String> {
+    let mut command = std::process::Command::new(program);
+    command.arg("--version");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn git_info(program: &Path) -> Value {
+    match probe_git(program.as_os_str()) {
+        Some(version) => {
+            json!({"installed":true,"version":version,"path":program.to_string_lossy()})
+        }
+        None => json!({"installed":false,"version":Value::Null,"path":Value::Null}),
+    }
+}
+
+fn find_git_in_path() -> Option<PathBuf> {
+    for dir in std::env::split_paths(&std::env::var_os("PATH")?) {
+        for name in if cfg!(windows) {
+            vec!["git.exe"]
+        } else {
+            vec!["git"]
+        } {
+            let candidate = dir.join(name);
+            if candidate.is_file() && probe_git(candidate.as_os_str()).is_some() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 // ── arg accessors, Go's `text` / `number` ──────────────────────────────────
@@ -289,7 +371,7 @@ fn git_spawn(repo: &str, args: &[&str]) -> Result<GitOut, String> {
     ];
     argv.extend_from_slice(args);
 
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = std::process::Command::new(git_program());
     cmd.args(&argv)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(std::process::Stdio::null())
@@ -303,9 +385,7 @@ fn git_spawn(repo: &str, args: &[&str]) -> Result<GitOut, String> {
         cmd.creation_flags(0x0800_0000);
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("git {}: {}", args[0], e))?;
+    let mut child = cmd.spawn().map_err(|e| format!("git {}: {}", args[0], e))?;
     let mut stdout_pipe = child.stdout.take();
     let mut stderr_pipe = child.stderr.take();
 
@@ -495,8 +575,130 @@ fn current_branch(repo: &Path, a: &Value) -> Result<String, String> {
 // ── command dispatch ────────────────────────────────────────────────────────
 
 fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
+    if command == "clone_repository" {
+        return clone_repository(root, a);
+    }
+    match command {
+        "detect_git" => {
+            if let Some(path) = CUSTOM_GIT_PROGRAM.read().unwrap().clone() {
+                return Ok(git_info(&path));
+            }
+            return Ok(find_git_in_path()
+                .map(|path| git_info(&path))
+                .unwrap_or_else(
+                    || json!({"installed":false,"version":Value::Null,"path":Value::Null}),
+                ));
+        }
+        "test_git_path" => {
+            let raw_value = text(a, "path");
+            let raw = raw_value.trim();
+            if raw.is_empty() {
+                return Ok(json!({"installed":false,"version":Value::Null,"path":Value::Null}));
+            }
+            let path = PathBuf::from(raw);
+            return Ok(git_info(&path));
+        }
+        "get_git_settings" => {
+            let path = root.join(".data").join("codeg-workspace.json");
+            let doc = store_file::read_json(&path)?.unwrap_or_else(|| json!({}));
+            return Ok(doc
+                .get("settings")
+                .and_then(|s| s.get("get_git_settings"))
+                .cloned()
+                .unwrap_or_else(|| json!({"custom_path":Value::Null})));
+        }
+        "update_git_settings" => {
+            let settings = a
+                .get("settings")
+                .and_then(Value::as_object)
+                .ok_or("Git 设置无效")?;
+            let custom_path = match settings.get("custom_path") {
+                None | Some(Value::Null) => Value::Null,
+                Some(Value::String(path)) if !path.trim().is_empty() => {
+                    let info = git_info(Path::new(path));
+                    if info["installed"] != true {
+                        return Err("Git 路径无效或无法执行".into());
+                    }
+                    json!(path)
+                }
+                _ => return Err("Git 路径无效".into()),
+            };
+            let updated = json!({"custom_path":custom_path});
+            let path = root.join(".data").join("codeg-workspace.json");
+            let _guard = store_file::lock(&path)?;
+            let mut doc = store_file::read_json(&path)?.unwrap_or_else(|| json!({}));
+            let object = doc.as_object_mut().ok_or("工作区设置格式无效")?;
+            let saved = object.entry("settings").or_insert_with(|| json!({}));
+            saved
+                .as_object_mut()
+                .ok_or("工作区设置格式无效")?
+                .insert("get_git_settings".into(), updated.clone());
+            store_file::write_json(&path, &doc)?;
+            *CUSTOM_GIT_PROGRAM.write().unwrap() =
+                updated["custom_path"].as_str().map(PathBuf::from);
+            return Ok(updated);
+        }
+        _ => {}
+    }
     if command.starts_with("open_") {
         return Ok(git_window(command, a));
+    }
+    if command == "resolve_worktree_folder" {
+        let repo = resolve(root, &text(a, "repoPath"))?;
+        let branch = text(a, "branch");
+        if branch.is_empty() {
+            return Err("分支名不能为空".into());
+        }
+        let output = git_string(&repo, &["worktree", "list", "--porcelain"])?;
+        let mut found: Option<PathBuf> = None;
+        for block in output.split("\n\n") {
+            let mut path = None;
+            let mut branch_name = None;
+            for line in block.lines() {
+                if let Some(value) = line.strip_prefix("worktree ") {
+                    path = Some(PathBuf::from(value));
+                }
+                if let Some(value) = line.strip_prefix("branch refs/heads/") {
+                    branch_name = Some(value);
+                }
+            }
+            if branch_name == Some(branch.as_str()) {
+                found = path;
+                break;
+            }
+        }
+        let Some(path) = found else {
+            return Ok(json!({"path":Value::Null,"folder_id":Value::Null}));
+        };
+        let path = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
+        let path_key = normalize_path(&path.to_string_lossy());
+        let doc = crate::backend::store_file::read_json(
+            &root.join(".data").join("codeg-workspace.json"),
+        )?;
+        let folder_id = doc
+            .as_ref()
+            .and_then(|doc| doc.get("folders"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|folder| {
+                folder
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .map(|p| {
+                        normalize_path(
+                            &crate::backend::git::strip_verbatim(
+                                crate::backend::git::eval_symlinks(Path::new(p)),
+                            )
+                            .to_string_lossy(),
+                        ) == path_key
+                    })
+                    .unwrap_or(false)
+            })
+            .and_then(|folder| folder.get("id"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        return Ok(json!({"path":path.to_string_lossy(),"folder_id":folder_id}));
     }
 
     let path = resolve(root, &text(a, "path"))?;
@@ -577,8 +779,12 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
             match git_string(&path, &argv) {
                 Ok(out) => Ok(Value::String(out)),
                 Err(_) if command == "git_diff" => {
-                    let mut args: Vec<String> =
-                        vec!["diff".into(), "--cached".into(), "--no-ext-diff".into(), "--".into()];
+                    let mut args: Vec<String> = vec![
+                        "diff".into(),
+                        "--cached".into(),
+                        "--no-ext-diff".into(),
+                        "--".into(),
+                    ];
                     if !file.is_empty() {
                         args.push(file.clone());
                     }
@@ -598,7 +804,10 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
                 revision = "HEAD".into();
             }
             git_ref(&revision)?;
-            let ref_err = git_run(&path, &["rev-parse", "--verify", "--end-of-options", &revision]);
+            let ref_err = git_run(
+                &path,
+                &["rev-parse", "--verify", "--end-of-options", &revision],
+            );
             let data = git_bytes(&path, &["show", &format!("{revision}:{file}")]);
             if command == "git_show_file" {
                 let data = data?;
@@ -633,8 +842,7 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
                 for raw in list {
                     let input = raw.as_str().unwrap_or("");
                     let p = resolve_file(root, &path, input)?;
-                    let rel =
-                        lexical_rel(&path, &p).ok_or("文件超出工作区目录")?;
+                    let rel = lexical_rel(&path, &p).ok_or("文件超出工作区目录")?;
                     files.push(rel.replace('\\', "/"));
                 }
             }
@@ -646,8 +854,7 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
                 &["diff", "--cached", "--name-only", "--diff-filter=D", "-z"],
             )
             .unwrap_or_default();
-            let deleted: std::collections::HashSet<&str> =
-                staged.split('\0').collect();
+            let deleted: std::collections::HashSet<&str> = staged.split('\0').collect();
             let to_add: Vec<&str> = files
                 .iter()
                 .map(|s| s.as_str())
@@ -749,11 +956,15 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
                 }
                 _ => {
                     // merge / rebase: the git subcommand is not the command id.
-                    let op = if command == "git_rebase" { "rebase" } else { "merge" };
+                    let op = if command == "git_rebase" {
+                        "rebase"
+                    } else {
+                        "merge"
+                    };
                     let before = git_string(&path, &["rev-parse", "HEAD"]).unwrap_or_default();
                     let outcome = git_run(&path, &[op, &branch_name]);
-                    let conflict = list_conflicts(&path)
-                        .unwrap_or_else(|_| json!({"has_conflicts": false}));
+                    let conflict =
+                        list_conflicts(&path).unwrap_or_else(|_| json!({"has_conflicts": false}));
                     if let Err(err) = outcome {
                         if !conflict_flag(&conflict) {
                             return Err(err);
@@ -785,7 +996,13 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
             let commit = ref_arg("commit")?;
             let value = git_string(
                 &path,
-                &["branch", "-a", "--contains", &commit, "--format=%(refname:short)"],
+                &[
+                    "branch",
+                    "-a",
+                    "--contains",
+                    &commit,
+                    "--format=%(refname:short)",
+                ],
             )?;
             Ok(Value::Array(
                 git_lines(&value).into_iter().map(Value::String).collect(),
@@ -850,12 +1067,11 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
                     return Err(err);
                 }
             };
-            let has_upstream =
-                git_run(&path, &["rev-parse", "--verify", "@{upstream}"]).is_ok();
+            let has_upstream = git_run(&path, &["rev-parse", "--verify", "@{upstream}"]).is_ok();
             let mut unpushed = std::collections::HashSet::new();
             if has_upstream {
-                let diff = git_string(&path, &["rev-list", "@{upstream}..HEAD"])
-                    .unwrap_or_default();
+                let diff =
+                    git_string(&path, &["rev-list", "@{upstream}..HEAD"]).unwrap_or_default();
                 for id in git_lines(&diff) {
                     unpushed.insert(id);
                 }
@@ -911,6 +1127,23 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
             }
             Ok(Value::Null)
         }
+        "git_delete_remote_branch" => {
+            let remote = text(a, "remote");
+            let branch = text(a, "branch");
+            git_ref(&remote)?;
+            git_ref(&branch)?;
+            if a.get("credentials")
+                .and_then(Value::as_object)
+                .is_some_and(|credentials| !credentials.is_empty())
+            {
+                return Err("当前移植使用系统 Git 凭据配置，尚未接入自定义凭据".into());
+            }
+            git_run(
+                &path,
+                &["push", remote.as_str(), "--delete", branch.as_str()],
+            )?;
+            Ok(Value::Null)
+        }
         "git_fetch" | "git_fetch_remote" | "git_pull" | "git_push" => {
             if let Some(credentials) = a.get("credentials").and_then(|v| v.as_object()) {
                 if !credentials.is_empty() {
@@ -929,18 +1162,16 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
                 "git_pull" => {
                     let before = git_string(&path, &["rev-parse", "HEAD"]).unwrap_or_default();
                     let outcome = git_run(&path, &["pull", "--no-rebase"]);
-                    let conflict = list_conflicts(&path)
-                        .unwrap_or_else(|_| json!({"has_conflicts": false}));
+                    let conflict =
+                        list_conflicts(&path).unwrap_or_else(|_| json!({"has_conflicts": false}));
                     if let Err(err) = outcome {
                         if !conflict_flag(&conflict) {
                             return Err(err);
                         }
                     }
-                    let files = git_string(
-                        &path,
-                        &["diff", "--name-only", before.trim(), "HEAD", "--"],
-                    )
-                    .unwrap_or_default();
+                    let files =
+                        git_string(&path, &["diff", "--name-only", before.trim(), "HEAD", "--"])
+                            .unwrap_or_default();
                     Ok(json!({
                         "updated_files": git_lines(&files).len(),
                         "conflict": conflict,
@@ -966,11 +1197,18 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
                     }
                     let count = git_string(
                         &path,
-                        &["rev-list", "--count", &format!("{remote}/{branch}..{branch}")],
+                        &[
+                            "rev-list",
+                            "--count",
+                            &format!("{remote}/{branch}..{branch}"),
+                        ],
                     )
                     .unwrap_or_default();
                     let n = count.trim().parse::<i64>().unwrap_or(0);
-                    git_run(&path, &["push", "--set-upstream", remote.as_str(), branch.as_str()])?;
+                    git_run(
+                        &path,
+                        &["push", "--set-upstream", remote.as_str(), branch.as_str()],
+                    )?;
                     Ok(json!({"pushed_commits": n, "upstream_set": true}))
                 }
             }
@@ -996,11 +1234,8 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
             }))
         }
         "git_stash_push" => {
-            let mut args: Vec<String> = vec![
-                "stash".into(),
-                "push".into(),
-                "--include-untracked".into(),
-            ];
+            let mut args: Vec<String> =
+                vec!["stash".into(), "push".into(), "--include-untracked".into()];
             if truthy(a, "keepIndex") {
                 args.push("--keep-index".into());
             }
@@ -1013,10 +1248,7 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
             Ok(Value::String(git_string(&path, &argv)?))
         }
         "git_stash_list" => {
-            let value = git_string(
-                &path,
-                &["stash", "list", "--format=%gd%x00%gs%x00%ci"],
-            )?;
+            let value = git_string(&path, &["stash", "list", "--format=%gd%x00%gs%x00%ci"])?;
             let mut rows = Vec::new();
             for (i, line) in git_lines(&value).iter().enumerate() {
                 let parts: Vec<&str> = line.split('\0').collect();
@@ -1053,6 +1285,91 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
             Ok(Value::String(git_string(&path, &argv)?))
         }
         "git_list_conflicts" => list_conflicts(&path),
+        "git_start_pull_merge" => {
+            let upstream = text(a, "upstreamCommit");
+            let upstream = if upstream.trim().is_empty() {
+                "@{upstream}".to_string()
+            } else {
+                git_ref(&upstream)?;
+                upstream
+            };
+            git_run(&path, &["merge", "--no-commit", "--no-ff", &upstream])?;
+            Ok(Value::Null)
+        }
+        "git_update_branch" => {
+            let branch = text(a, "branch");
+            git_ref(&branch)?;
+            if a.get("credentials")
+                .and_then(Value::as_object)
+                .is_some_and(|credentials| !credentials.is_empty())
+            {
+                return Err("当前移植使用系统 Git 凭据配置，尚未接入自定义凭据".into());
+            }
+            let is_remote = truthy(a, "isRemote");
+            let current = git_string(&path, &["symbolic-ref", "--short", "HEAD"])
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if !is_remote && branch == current {
+                let before = git_string(&path, &["rev-parse", "HEAD"])?;
+                let outcome = git_run(&path, &["pull", "--no-rebase"]);
+                let conflict =
+                    list_conflicts(&path).unwrap_or_else(|_| json!({"has_conflicts":false}));
+                if let Err(error) = outcome {
+                    if !conflict_flag(&conflict) {
+                        return Err(error);
+                    }
+                }
+                let files =
+                    git_string(&path, &["diff", "--name-only", before.trim(), "HEAD", "--"])
+                        .unwrap_or_default();
+                return Ok(json!({
+                    "updated_files": git_lines(&files).len(),
+                    "conflict": conflict,
+                }));
+            }
+            git_run(&path, &["fetch", "--all"])?;
+            if is_remote {
+                let (remote, remote_branch) = branch.split_once('/').ok_or("远端分支格式无效")?;
+                git_ref(remote)?;
+                git_ref(remote_branch)?;
+                git_run(&path, &["fetch", remote, remote_branch])?;
+                return Ok(json!({"updated_files":0,"conflict":null}));
+            }
+            let upstream = git_string(
+                &path,
+                &[
+                    "rev-parse",
+                    "--symbolic-full-name",
+                    &format!("{branch}@{{upstream}}"),
+                ],
+            )?;
+            let upstream = upstream.trim();
+            let old = git_string(&path, &["rev-parse", &format!("refs/heads/{branch}")])?;
+            let new = git_string(&path, &["rev-parse", upstream])?;
+            if git_run(
+                &path,
+                &["merge-base", "--is-ancestor", old.trim(), new.trim()],
+            )
+            .is_err()
+            {
+                return Err(format!("分支 {branch} 无法快进到其上游"));
+            }
+            git_run(
+                &path,
+                &[
+                    "update-ref",
+                    &format!("refs/heads/{branch}"),
+                    new.trim(),
+                    old.trim(),
+                ],
+            )?;
+            let files = git_string(
+                &path,
+                &["diff", "--name-only", old.trim(), new.trim(), "--"],
+            )?;
+            Ok(json!({"updated_files":git_lines(&files).len(),"conflict":null}))
+        }
         "git_has_merge_head" => {
             let out = git_string(&path, &["rev-parse", "--verify", "MERGE_HEAD"]);
             Ok(Value::Bool(matches!(out, Ok(v) if !v.trim().is_empty())))
@@ -1060,19 +1377,21 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
         "git_conflict_file_versions" => {
             let mut versions = Map::new();
             for (name, stage) in [("base", ":1:"), ("ours", ":2:"), ("theirs", ":3:")] {
-                let value = git_string(&path, &["show", &format!("{stage}{file}")])
-                    .unwrap_or_default();
+                let value =
+                    git_string(&path, &["show", &format!("{stage}{file}")]).unwrap_or_default();
                 versions.insert(name.into(), Value::String(value));
             }
             let p = resolve_file(root, &path, &raw_file)?;
             let data = std::fs::read(&p).map_err(|e| e.to_string())?;
-            versions.insert("merged".into(), Value::String(String::from_utf8_lossy(&data).into_owned()));
+            versions.insert(
+                "merged".into(),
+                Value::String(String::from_utf8_lossy(&data).into_owned()),
+            );
             Ok(Value::Object(versions))
         }
         "git_resolve_conflict" => {
             let p = resolve_file(root, &path, &raw_file)?;
-            std::fs::write(&p, text(a, "content").as_bytes())
-                .map_err(|e| e.to_string())?;
+            std::fs::write(&p, text(a, "content").as_bytes()).map_err(|e| e.to_string())?;
             git_run(&path, &["add", "--", &file])?;
             Ok(Value::Null)
         }
@@ -1117,6 +1436,120 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
     }
 }
 
+fn clone_repository(root: &Path, args: &Value) -> Result<Value, String> {
+    let url = text(args, "url");
+    let raw_target = text(args, "targetDir");
+    if url.trim().is_empty() || raw_target.trim().is_empty() {
+        return Err("仓库地址和目标目录不能为空".into());
+    }
+    let parsed = url::Url::parse(&url);
+    let scp_style_ssh = url.starts_with("git@") && url.contains(':');
+    if let Ok(parsed) = parsed {
+        if !matches!(parsed.scheme(), "https" | "http" | "ssh" | "git") {
+            return Err("仅支持 HTTP、HTTPS、SSH 或 Git 仓库地址".into());
+        }
+    } else if !scp_style_ssh {
+        return Err("仓库地址无效".into());
+    }
+    let target = resolve_existing_path(&raw_target, root);
+    if target.exists() {
+        return Err("目标目录已存在".into());
+    }
+    let parent = target
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .ok_or("目标目录无效")?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("创建目标父目录失败：{e}"))?;
+    let canonical_parent = std::fs::canonicalize(parent).map_err(|e| e.to_string())?;
+    let target = canonical_parent.join(target.file_name().ok_or("目标目录无效")?);
+
+    let mut command = std::process::Command::new(git_program());
+    command
+        .arg("clone")
+        .arg("--")
+        .arg(&url)
+        .arg(&target)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    if let (Some(username), Some(password)) = (
+        args.pointer("/credentials/username")
+            .and_then(Value::as_str),
+        args.pointer("/credentials/password")
+            .and_then(Value::as_str),
+    ) {
+        if !username.is_empty() || !password.is_empty() {
+            use base64::Engine;
+            let auth =
+                base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
+            command
+                .env("GIT_CONFIG_COUNT", "1")
+                .env("GIT_CONFIG_KEY_0", "http.extraheader")
+                .env("GIT_CONFIG_VALUE_0", format!("Authorization: Basic {auth}"));
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("启动 Git clone 失败：{e}"))?;
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    let stdout_thread = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(pipe) = stdout.as_mut() {
+            let _ = pipe.read_to_end(&mut bytes);
+        }
+        bytes
+    });
+    let stderr_thread = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(pipe) = stderr.as_mut() {
+            let _ = pipe.read_to_end(&mut bytes);
+        }
+        bytes
+    });
+    let deadline = Instant::now() + GIT_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+        }
+    };
+    let _stdout = stdout_thread.join().unwrap_or_default();
+    let stderr = stderr_thread.join().unwrap_or_default();
+    let Some(status) = status else {
+        let _ = std::fs::remove_dir_all(&target);
+        return Err("Git clone 超时（45 秒）".into());
+    };
+    if !status.success() {
+        let _ = std::fs::remove_dir_all(&target);
+        let details = String::from_utf8_lossy(&stderr).trim().to_string();
+        return Err(if details.is_empty() {
+            format!("Git clone 失败，退出码 {:?}", status.code())
+        } else {
+            format!("Git clone 失败：{details}")
+        });
+    }
+    Ok(Value::Null)
+}
+
 /// `gitWindow` from git.go — builds the route for the commit/push/stash/merge
 /// windows. Keys are emitted sorted, like Go's `url.Values.Encode`.
 fn git_window(command: &str, a: &Value) -> Value {
@@ -1124,10 +1557,8 @@ fn git_window(command: &str, a: &Value) -> Value {
         .strip_prefix("open_")
         .map(|p| p.strip_suffix("_window").unwrap_or(p))
         .unwrap_or("");
-    let mut params: Vec<(String, String)> = vec![(
-        "folderId".into(),
-        number(a, "folderId").to_string(),
-    )];
+    let mut params: Vec<(String, String)> =
+        vec![("folderId".into(), number(a, "folderId").to_string())];
     for key in ["operation", "upstreamCommit", "branch"] {
         let value = text(a, key);
         if !value.is_empty() {
@@ -1263,6 +1694,32 @@ mod tests {
     }
 
     #[test]
+    fn pull_merge_command_is_owned_and_stages_a_merge_for_the_resolver() {
+        let root = repo("pull-merge-command");
+        let branch = git_string(&root, &["branch", "--show-current"])
+            .unwrap()
+            .trim()
+            .to_string();
+        git_run(&root, &["checkout", "-b", "incoming"]).unwrap();
+        fs::write(root.join("incoming.txt"), "from upstream\n").unwrap();
+        git_run(&root, &["add", "--", "incoming.txt"]).unwrap();
+        git_run(&root, &["commit", "-m", "incoming"]).unwrap();
+        git_run(&root, &["checkout", &branch]).unwrap();
+
+        assert!(owns("git_start_pull_merge"));
+        call(
+            &root,
+            "git_start_pull_merge",
+            json!({"path":root,"upstreamCommit":"incoming"}),
+        )
+        .unwrap();
+        assert!(matches!(
+            call(&root, "git_has_merge_head", json!({"path":root})),
+            Ok(Value::Bool(true))
+        ));
+    }
+
+    #[test]
     fn query_escape_matches_go() {
         assert_eq!(query_escape("a b"), "a+b");
         assert_eq!(query_escape("a/b"), "a%2Fb");
@@ -1308,7 +1765,10 @@ mod tests {
 
         let status = call(&root, "git_status", json!({"path": path})).unwrap();
         let rows = status.as_array().unwrap();
-        assert!(rows.iter().any(|r| r["file"] == "b.txt"), "status: {status}");
+        assert!(
+            rows.iter().any(|r| r["file"] == "b.txt"),
+            "status: {status}"
+        );
 
         let log = call(&root, "git_log", json!({"path": path})).unwrap();
         assert_eq!(log["entries"][0]["message"], "first");
@@ -1333,10 +1793,20 @@ mod tests {
         let user = call(&root, "git_current_user", json!({"path": path})).unwrap();
         assert_eq!(user, json!("Tester"));
 
-        let tracked = call(&root, "git_is_tracked", json!({"path": path, "file": "a.txt"})).unwrap();
+        let tracked = call(
+            &root,
+            "git_is_tracked",
+            json!({"path": path, "file": "a.txt"}),
+        )
+        .unwrap();
         assert_eq!(tracked, json!(true));
 
-        let file = call(&root, "git_show_file", json!({"path": path, "file": "a.txt"})).unwrap();
+        let file = call(
+            &root,
+            "git_show_file",
+            json!({"path": path, "file": "a.txt"}),
+        )
+        .unwrap();
         assert_eq!(file, json!("hello\n"));
 
         let b64 = call(
@@ -1383,10 +1853,18 @@ mod tests {
         let diff = call(&root, "git_diff", json!({"path": path})).unwrap();
         assert!(diff.as_str().unwrap().contains("changed"));
 
-        call(&root, "git_stash_push", json!({"path": path, "message": "wip"})).unwrap();
+        call(
+            &root,
+            "git_stash_push",
+            json!({"path": path, "message": "wip"}),
+        )
+        .unwrap();
         let list = call(&root, "git_stash_list", json!({"path": path})).unwrap();
         let message = list[0]["message"].as_str().unwrap();
-        assert!(message.starts_with("On ") && message.ends_with(": wip"), "{message}");
+        assert!(
+            message.starts_with("On ") && message.ends_with(": wip"),
+            "{message}"
+        );
         assert_eq!(list[0]["ref_name"], json!("stash@{0}"));
 
         call(&root, "git_stash_pop", json!({"path": path})).unwrap();
@@ -1422,7 +1900,10 @@ mod tests {
         assert_eq!(remotes[0]["name"], json!("origin"));
 
         let info = call(&root, "git_push_info", json!({"path": path})).unwrap();
-        assert_eq!(info["remotes"][0]["url"], json!("https://example.com/r.git"));
+        assert_eq!(
+            info["remotes"][0]["url"],
+            json!("https://example.com/r.git")
+        );
         assert_eq!(info["tracking_remote"], Value::Null);
 
         // Regression: the config lookup must pass the `config` subcommand
@@ -1436,7 +1917,12 @@ mod tests {
         let info = call(&root, "git_push_info", json!({"path": path})).unwrap();
         assert_eq!(info["tracking_remote"], json!("origin"));
 
-        call(&root, "git_remove_remote", json!({"path": path, "name": "origin"})).unwrap();
+        call(
+            &root,
+            "git_remove_remote",
+            json!({"path": path, "name": "origin"}),
+        )
+        .unwrap();
         let remotes = call(&root, "git_list_remotes", json!({"path": path})).unwrap();
         assert_eq!(remotes, json!([]));
     }

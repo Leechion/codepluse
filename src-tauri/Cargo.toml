@@ -48,6 +48,9 @@ windows = { version = "0.62", features = [
     "Win32_System_Console",
     "Win32_System_Pipes",
     "Win32_System_Threading",
+    "Win32_System_JobObjects",
+    "Win32_System_Registry",
+    "Win32_Storage_FileSystem",
 ] }
 # computer_window_thumbnail：PrintWindow → GetDIBits → PNG。`png` 0.18 已在
 # 依赖树里（Tauri 图标处理带入），此行不触发新下载；computer.rs 的 Win32 调用

@@ -87,7 +87,10 @@ fn detect() -> Value {
 }
 
 fn skill_dirs(root: &Path) -> [PathBuf; 2] {
-    [root.join("codeg-assets"), root.join(".data").join("office-skills")]
+    [
+        root.join("codeg-assets"),
+        root.join(".data").join("office-skills"),
+    ]
 }
 
 fn base_name(dir: &Path) -> String {
@@ -169,7 +172,9 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
             }
             Err("本仓库不分发 OfficeCLI 二进制：请从上游获取后放入 PATH 或 ~/.officecli/".into())
         }
-        "officecli_uninstall" => Ok(json!({"uninstalled": true, "message": "未托管安装，无需卸载"})),
+        "officecli_uninstall" => {
+            Ok(json!({"uninstalled": true, "message": "未托管安装，无需卸载"}))
+        }
         "officecli_list_skills" | "officecli_sync_skills" => Ok(list_skills(root)),
         "officecli_skill_read_content" => {
             let skill_id = args.get("skillId").and_then(|v| v.as_str()).unwrap_or("");

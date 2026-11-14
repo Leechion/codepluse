@@ -1,6 +1,10 @@
 import type { NextConfig } from "next"
 import createNextIntlPlugin from "next-intl/plugin"
-import packageJson from "./package.json"
+import { readFileSync } from "node:fs"
+
+const packageJson = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf8")
+) as { version: string }
 
 const isProd = process.env.NODE_ENV === "production"
 const internalHost = process.env.TAURI_DEV_HOST || "localhost"

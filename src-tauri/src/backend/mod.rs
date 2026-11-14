@@ -21,10 +21,7 @@ use std::sync::{Arc, OnceLock};
 
 use axum::{
     body::Bytes,
-    extract::{
-        ws::WebSocketUpgrade,
-        Path, Request, State,
-    },
+    extract::{ws::WebSocketUpgrade, Path, Request, State},
     http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
     response::{IntoResponse, Response},
     routing::{any, get},
@@ -33,40 +30,44 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 
+pub mod account_channels;
 pub mod acp;
-pub mod turn_store;
+pub mod acp_registry;
+pub mod agent_tool_settings;
+pub mod automations;
+pub mod background;
+pub mod browser;
+pub mod computer;
+pub mod custom_agents;
+pub mod desktop_settings;
+pub mod events_ws;
 pub mod exec_providers;
-pub mod harness_connections;
-pub mod harness_instances;
 pub mod experts;
 pub mod files;
 pub mod folder_commands;
+pub mod folder_links;
 pub mod forge;
-pub mod acp_registry;
 pub mod git;
 pub mod goformat;
-pub mod net;
-pub mod provider_catalog;
-pub mod providers;
-pub mod provider_writeback;
+pub mod harness_connections;
+pub mod harness_instances;
 pub mod mcp_companion;
-pub mod account_channels;
-pub mod office;
-pub mod automations;
-pub mod custom_agents;
 pub mod misc;
-pub mod terminal;
-pub mod workspace_state;
+pub mod net;
+pub mod office;
+pub mod provider_catalog;
+pub mod provider_writeback;
+pub mod providers;
+pub mod store_file;
 pub mod store_reads;
 pub mod store_writes;
+pub mod terminal;
+pub mod turn_store;
 pub mod updater;
-pub mod store_file;
-pub mod browser;
-pub mod computer;
+pub mod webapp;
+pub mod workspace_state;
 pub mod worktask;
 pub mod worktask_engine;
-pub mod events_ws;
-pub mod webapp;
 
 pub struct Config {
     /// Port the webview connects to (this server).
@@ -120,8 +121,7 @@ async fn forward_commands(state: &ProxyState, forwards: &[(String, Value)]) {
         if command == "terminal_kill" {
             if let Some(tid) = args.get("terminalId").and_then(|v| v.as_str()) {
                 let tid = tid.to_string();
-                let _ =
-                    tokio::task::spawn_blocking(move || terminal::kill_for_canvas(&tid)).await;
+                let _ = tokio::task::spawn_blocking(move || terminal::kill_for_canvas(&tid)).await;
             }
             continue;
         }
@@ -147,9 +147,15 @@ async fn forward_commands(state: &ProxyState, forwards: &[(String, Value)]) {
 
 /// Starts the front door. Returns once the listener is bound.
 pub async fn serve(cfg: Config) -> std::io::Result<()> {
+    git::load_settings(&cfg.root);
+    if let Err(error) = desktop_settings::apply_proxy_from_store(&cfg.root) {
+        eprintln!("[backend] 忽略无效的应用代理设置：{error}");
+    }
     // The work task engine still lives in the sidecar; its handlers learn the
     // upstream address here so Rust-owned commands can hand work back to it.
-    let upstream_http = cfg.upstream_port.map(|port| format!("http://127.0.0.1:{port}"));
+    let upstream_http = cfg
+        .upstream_port
+        .map(|port| format!("http://127.0.0.1:{port}"));
     if let Some(base) = upstream_http.clone() {
         worktask::set_upstream(base);
     }
@@ -188,8 +194,18 @@ pub async fn serve(cfg: Config) -> std::io::Result<()> {
         root: cfg.root,
     });
 
-    let app = Router::new()
-        .route("/api/health", get(health))
+    let app = app_router(state);
+
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", cfg.listen_port)).await?;
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+fn app_router(state: Arc<ProxyState>) -> Router {
+    Router::new()
+        // The browser's credential discovery posts here before opening its
+        // event socket. A GET-only route strands connected agents in the UI.
+        .route("/api/health", get(health).post(health))
         .route("/api/upload_attachment", any(upload_attachment))
         .route("/api/codeg_mcp", any(companion))
         .route("/api/{command}", any(api_dispatch))
@@ -197,11 +213,7 @@ pub async fn serve(cfg: Config) -> std::io::Result<()> {
         .route("/ws/events", get(ws_events))
         .fallback(any(static_or_dev))
         .with_state(state.clone())
-        .layer(axum::middleware::from_fn_with_state(state, guard_layer));
-
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", cfg.listen_port)).await?;
-    axum::serve(listener, app).await?;
-    Ok(())
+        .layer(axum::middleware::from_fn_with_state(state, guard_layer))
 }
 
 /// Health is answered locally (Phase 3): the sidecar is gone, and the row Go
@@ -224,10 +236,7 @@ async fn upload_attachment(State(st): State<Arc<ProxyState>>, req: Request) -> R
 /// Go `delegation.go` `companionRequest`: the MCP companion endpoint. The
 /// caller token must match one of the live ACP callers; the tool call itself
 /// is dispatched by `mcp_companion::dispatch`.
-async fn companion(
-    State(st): State<Arc<ProxyState>>,
-    req: Request,
-) -> Response {
+async fn companion(State(st): State<Arc<ProxyState>>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
     // Go answers a non-POST companion request with 405 before the token check.
     if parts.method != Method::POST {
@@ -290,7 +299,10 @@ async fn dev_proxy(
     headers: &HeaderMap,
     body: Bytes,
 ) -> Response {
-    let path = uri.path_and_query().map(|value| value.as_str()).unwrap_or("/");
+    let path = uri
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or("/");
     let url = format!("{}{}", target.trim_end_matches('/'), path);
     let mut outgoing = HeaderMap::new();
     webapp::copy_headers(headers, &mut outgoing);
@@ -363,7 +375,14 @@ async fn api_dispatch(
     }
     // The content-type contract is enforced by the guard middleware (Go
     // `cmd/serve/guard.go`), which sees every request.
-    let body = match axum::body::to_bytes(body, webapp::MAX_COMMAND_BODY + 1024).await {
+    // Background images are base64 JSON. Their normal 64 MiB asset cap needs
+    // about 86 MiB on the wire; all other commands retain Go's 2 MiB limit.
+    let command_body_limit = if command == "background_set" {
+        90 * 1024 * 1024
+    } else {
+        webapp::MAX_COMMAND_BODY
+    };
+    let body = match axum::body::to_bytes(body, command_body_limit + 1024).await {
         Ok(bytes) => bytes,
         Err(err) => return fail(format!("读取请求体失败：{err}")),
     };
@@ -371,7 +390,7 @@ async fn api_dispatch(
     // Go caps POST bodies at 2MB (MaxBytesReader) and answers with its
     // invalid_input envelope; mirrored here so owned commands enforce the
     // same contract (forwarded ones hit the sidecar's own cap regardless).
-    if body.len() > webapp::MAX_COMMAND_BODY {
+    if body.len() > command_body_limit {
         let mut response = go_json(json!({
             "code": "invalid_input",
             "message": "http: request body too large",
@@ -396,11 +415,32 @@ async fn api_dispatch(
         }
     };
 
+    if background::owns(&command) {
+        let root = st.root.clone();
+        let owned = command.clone();
+        let outcome =
+            tokio::task::spawn_blocking(move || background::handle(&root, &owned, &args)).await;
+        return match outcome {
+            Ok(Some(Ok(value))) => go_json(value),
+            Ok(Some(Err(message))) => fail(message),
+            Ok(None) => fail("背景图片命令未注册".into()),
+            Err(join) => fail(format!("背景图片命令执行失败：{join}")),
+        };
+    }
+
     // The ACP layer is stateful (driver pool, connections): dispatch is async
     // and owns its dispatch table. `turn_in_progress` maps to Go's 409.
     if acp::owns(&command) {
         let root = st.root.clone();
-        let upstream_port = st.upstream_http.as_deref().and_then(|base| base.rsplit(':').next().and_then(|port| port.parse::<u16>().ok())).unwrap_or_default();
+        let upstream_port = st
+            .upstream_http
+            .as_deref()
+            .and_then(|base| {
+                base.rsplit(':')
+                    .next()
+                    .and_then(|port| port.parse::<u16>().ok())
+            })
+            .unwrap_or_default();
         let state_for_sink = st.clone();
         let sink: acp::connections::EmitSink = Arc::new(move |channel, payload| {
             emit_events(&state_for_sink, &[(channel.to_string(), payload.clone())]);
@@ -450,16 +490,13 @@ async fn api_dispatch(
         let root = st.root.clone();
         let owned = command.clone();
         let owned_args = args.clone();
-        let outcome =
-            tokio::task::spawn_blocking(move || {
-                updater::handle(&root, &owned, &owned_args)
-                    .or_else(|| forge::handle(&root, &owned, &owned_args))
-                    .or_else(|| provider_catalog::handle(&root, &owned, &owned_args))
-                    .or_else(|| acp_registry::handle(&root, &owned, &owned_args))
-
-
-            })
-            .await;
+        let outcome = tokio::task::spawn_blocking(move || {
+            updater::handle(&root, &owned, &owned_args)
+                .or_else(|| forge::handle(&root, &owned, &owned_args))
+                .or_else(|| provider_catalog::handle(&root, &owned, &owned_args))
+                .or_else(|| acp_registry::handle(&root, &owned, &owned_args))
+        })
+        .await;
         return match outcome {
             Ok(Some(Ok(value))) => {
                 // `codepluse_providers_list` answers with the Data struct; the
@@ -491,6 +528,23 @@ async fn api_dispatch(
         return match outcome {
             Ok(value) => go_json(value),
             Err(message) => fail(message),
+        };
+    }
+    if folder_links::owns(&command) {
+        let root = st.root.clone();
+        let owned = command.clone();
+        let owned_args = args.clone();
+        let outcome =
+            tokio::task::spawn_blocking(move || folder_links::handle(&root, &owned, &owned_args))
+                .await;
+        return match outcome {
+            Ok(Some(Ok(outcome))) => {
+                emit_events(&st, &outcome.events);
+                go_json(outcome.result)
+            }
+            Ok(Some(Err(message))) => fail(message),
+            Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
+            Err(join) => fail(format!("文件夹链接命令失败：{join}")),
         };
     }
     if let Some(outcome) = store_reads::handle(&st.root, &command, &args) {
@@ -539,10 +593,8 @@ async fn api_dispatch(
         let root = st.root.clone();
         let owned = command.clone();
         let owned_args = args.clone();
-        let outcome = tokio::task::spawn_blocking(move || {
-            git::handle(&root, &owned, &owned_args)
-        })
-        .await;
+        let outcome =
+            tokio::task::spawn_blocking(move || git::handle(&root, &owned, &owned_args)).await;
         return match outcome {
             Ok(Some(Ok(value))) => go_json(value),
             Ok(Some(Err(message))) => fail(message),
@@ -565,6 +617,46 @@ async fn api_dispatch(
             Ok(Ok(value)) => go_json_struct(value),
             Ok(Err(message)) => fail(message),
             Err(join) => fail(format!("账号渠道命令执行失败：{join}")),
+        };
+    }
+
+    // Agent-tool settings are shared by the settings UI and the status-bar MCP
+    // controls. Persist them in the workspace store and relay committed
+    // updates to every open window.
+    if agent_tool_settings::owns(&command) {
+        let root = st.root.clone();
+        let owned = command.clone();
+        let owned_args = args.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            agent_tool_settings::handle(&root, &owned, &owned_args)
+        })
+        .await;
+        return match outcome {
+            Ok(Some(Ok(outcome))) => {
+                emit_events(&st, &outcome.events);
+                go_json(outcome.result)
+            }
+            Ok(Some(Err(message))) => fail(message),
+            Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
+            Err(join) => fail(format!("智能体工具设置失败：{join}")),
+        };
+    }
+
+    // Desktop preferences were formerly supplied by Go's desktop layer.
+    // Persist and read them locally; registry writes stay off the async worker.
+    if desktop_settings::owns(&command) {
+        let root = st.root.clone();
+        let owned = command.clone();
+        let owned_args = args.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            desktop_settings::handle(&root, &owned, &owned_args)
+        })
+        .await;
+        return match outcome {
+            Ok(Some(Ok(value))) => go_json(value),
+            Ok(Some(Err(message))) => fail(message),
+            Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
+            Err(join) => fail(format!("桌面设置命令失败：{join}")),
         };
     }
 
@@ -690,10 +782,9 @@ async fn api_dispatch(
         let root = st.root.clone();
         let owned = command.clone();
         let owned_args = args.clone();
-        let outcome = tokio::task::spawn_blocking(move || {
-            custom_agents::handle(&root, &owned, &owned_args)
-        })
-        .await;
+        let outcome =
+            tokio::task::spawn_blocking(move || custom_agents::handle(&root, &owned, &owned_args))
+                .await;
         return match outcome {
             Ok(Some(Ok(value))) => go_json(value),
             Ok(Some(Err(message))) => fail(message),
@@ -744,8 +835,7 @@ async fn api_dispatch(
         let owned = command.clone();
         let owned_args = args.clone();
         let outcome =
-            tokio::task::spawn_blocking(move || worktask::handle(&root, &owned, &owned_args))
-                .await;
+            tokio::task::spawn_blocking(move || worktask::handle(&root, &owned, &owned_args)).await;
         return match outcome {
             Ok(Some(Ok(outcome))) => {
                 emit_events(&st, &outcome.events);
@@ -775,8 +865,7 @@ async fn api_dispatch(
         let owned = command.clone();
         let owned_args = args.clone();
         let outcome =
-            tokio::task::spawn_blocking(move || computer::handle(&root, &owned, &owned_args))
-                .await;
+            tokio::task::spawn_blocking(move || computer::handle(&root, &owned, &owned_args)).await;
         return match outcome {
             Ok(Some(Ok(outcome))) => {
                 emit_events(&st, &outcome.events);
@@ -925,4 +1014,67 @@ fn go_decode_message(err: &serde_json::Error) -> String {
         return rest.to_string();
     }
     text
+}
+
+#[cfg(test)]
+mod transport_contract_tests {
+    use super::*;
+    use futures_util::StreamExt;
+
+    #[tokio::test]
+    async fn browser_health_discovery_and_event_socket_work_on_the_same_router() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+            .unwrap();
+        let state = Arc::new(ProxyState {
+            client: client.clone(),
+            upstream_http: None,
+            root: std::env::temp_dir(),
+            listen_port: port,
+        });
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app_router(state)).await.unwrap();
+        });
+        let base = format!("http://127.0.0.1:{port}");
+        let get = client
+            .get(format!("{base}/api/health"))
+            .send()
+            .await
+            .unwrap();
+        let post = client
+            .post(format!("{base}/api/health"))
+            .header("Origin", &base)
+            .json(&json!({}))
+            .send()
+            .await
+            .unwrap();
+        let get_status = get.status();
+        let post_status = post.status();
+        let get_body = get.json::<Value>().await.unwrap();
+        let post_body = post.json::<Value>().await.unwrap();
+        let (mut ws, _) =
+            tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}/ws/events"))
+                .await
+                .unwrap();
+        let ready = tokio::time::timeout(std::time::Duration::from_secs(3), ws.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let ready: Value = serde_json::from_str(ready.to_text().unwrap()).unwrap();
+        let _ = ws.close(None).await;
+        server.abort();
+        assert_eq!(get_status.as_u16(), 200);
+        assert_eq!(
+            post_status.as_u16(),
+            200,
+            "browser discovery must accept POST"
+        );
+        assert_eq!(post_body, get_body);
+        assert_eq!(ready["channel"], "__ready__");
+    }
 }

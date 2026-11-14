@@ -63,7 +63,11 @@ struct InstanceSpec {
     name: String,
     #[serde(default)]
     real_tool: String,
-    #[serde(rename = "providerId", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "providerId",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     provider_id: String,
     #[serde(
         rename = "defaultModel",
@@ -122,7 +126,11 @@ pub(crate) fn validate_profile_auth(tool: &str, mode: &str, pin: &str) -> Result
     Ok(())
 }
 
-pub(crate) fn validate_profile_provider(root: &Path, tool: &str, id: &str) -> Result<provider_catalog::Provider, String> {
+pub(crate) fn validate_profile_provider(
+    root: &Path,
+    tool: &str,
+    id: &str,
+) -> Result<provider_catalog::Provider, String> {
     let provider = provider_catalog::find(root, id)?;
     if provider.agent != tool {
         return Err("供应商不属于所选 Harness".into());
@@ -136,7 +144,10 @@ pub(crate) fn validate_profile_provider(root: &Path, tool: &str, id: &str) -> Re
     Ok(provider)
 }
 
-pub(crate) fn validate_profile_model(provider: &provider_catalog::Provider, model: &str) -> Result<(), String> {
+pub(crate) fn validate_profile_model(
+    provider: &provider_catalog::Provider,
+    model: &str,
+) -> Result<(), String> {
     for model_entry in &provider.models {
         if model_entry.id == model && model_entry.enabled == Some(false) {
             return Err("此模型已停用，请选择其他模型".into());
@@ -174,13 +185,20 @@ fn base_wire_of(agent: &agents::Agent) -> String {
 
 // ── commands ────────────────────────────────────────────────────────────────
 
-fn run(root: &Path, command: &str, args: &Value, events: &mut Vec<(String, Value)>) -> Result<Value, String> {
+fn run(
+    root: &Path,
+    command: &str,
+    args: &Value,
+    events: &mut Vec<(String, Value)>,
+) -> Result<Value, String> {
     match command {
         "codepluse_instance_list" => {
             let rows: Vec<Value> = agents_rows(root)
                 .into_iter()
                 .filter(|row| {
-                    row.get("instance").and_then(Value::as_bool).unwrap_or(false)
+                    row.get("instance")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
                         && !row
                             .get("agent_type")
                             .and_then(Value::as_str)
@@ -264,8 +282,9 @@ fn run(root: &Path, command: &str, args: &Value, events: &mut Vec<(String, Value
                 validate_profile_auth(&tool, &auth_mode_of(args, has_auth), &pin)?;
             }
             if has_provider && !provider_id.is_empty() {
-                let provider = validate_profile_provider(root, &specs[index].real_tool, &provider_id)
-                    .map_err(|e| format!("钉住供应商失败: {e}"))?;
+                let provider =
+                    validate_profile_provider(root, &specs[index].real_tool, &provider_id)
+                        .map_err(|e| format!("钉住供应商失败: {e}"))?;
                 let model = if has_model {
                     default_model.clone()
                 } else {
@@ -338,8 +357,8 @@ fn run(root: &Path, command: &str, args: &Value, events: &mut Vec<(String, Value
             }
             let mut next_cfg = cfg.clone();
             if !provider_id.is_empty() || auth_mode == "subscription" {
-                let base = agents::pick(root, &wire)
-                    .ok_or_else(|| "所选 Harness 不可用".to_string())?;
+                let base =
+                    agents::pick(root, &wire).ok_or_else(|| "所选 Harness 不可用".to_string())?;
                 let tool = if base.real_tool.is_empty() {
                     agents::wire_agent(&base)
                 } else {
@@ -363,7 +382,10 @@ fn run(root: &Path, command: &str, args: &Value, events: &mut Vec<(String, Value
                 }
                 use sha2::{Digest, Sha256};
                 let digest = Sha256::digest(identity.as_bytes());
-                let digest = digest.iter().map(|b| format!("{b:02x}")).collect::<String>();
+                let digest = digest
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>();
                 // 账号执行端的 real_tool 带 ':'（account:workbuddy），
                 // 实例 id 里要换成 '_'（上游 main_bot.go 的 toolKey）。
                 let tool_key = base.real_tool.replace(':', "_");
@@ -510,7 +532,11 @@ mod tests {
         .unwrap();
     }
 
-    fn call(root: &Path, command: &str, args: Value) -> (Result<Value, String>, Vec<(String, Value)>) {
+    fn call(
+        root: &Path,
+        command: &str,
+        args: Value,
+    ) -> (Result<Value, String>, Vec<(String, Value)>) {
         handle(root, command, &args).unwrap()
     }
 
@@ -547,10 +573,9 @@ mod tests {
         assert!(events
             .iter()
             .any(|(channel, _)| channel == "main-bot://changed"));
-        let doc =
-            store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
-                .unwrap()
-                .unwrap();
+        let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+            .unwrap()
+            .unwrap();
         assert_eq!(
             doc["settings"]["get_main_bot_settings"]["agent_type"],
             "codex"
@@ -571,9 +596,7 @@ mod tests {
             "codepluse_instance_create",
             json!({"name": "x", "realTool": tool}),
         );
-        assert!(result
-            .unwrap_err()
-            .starts_with("本机未安装"));
+        assert!(result.unwrap_err().starts_with("本机未安装"));
     }
 
     #[test]
@@ -654,10 +677,9 @@ mod tests {
             json!({"agentType": wire}),
         );
         assert_eq!(result.unwrap(), Value::Null);
-        assert!(events
-            .iter()
-            .any(|(channel, payload)| channel == EVENT_AGENT_CHANGED
-                && payload["kind"] == "remove"));
+        assert!(events.iter().any(
+            |(channel, payload)| channel == EVENT_AGENT_CHANGED && payload["kind"] == "remove"
+        ));
         assert!(!std::fs::read_to_string(instances_path(&root))
             .unwrap()
             .contains("prov1"));

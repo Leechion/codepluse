@@ -14,7 +14,7 @@ import { HERMES_PROVIDERS } from "./types"
 describe("HERMES_PROVIDERS Rust↔TS parity", () => {
   it("matches the backend HERMES_PROVIDERS table", () => {
     // vitest runs from the project root.
-    const rustPath = join(process.cwd(), "src-tauri/src/commands/acp.rs")
+    const rustPath = join(process.cwd(), "src-tauri/src/backend/acp/native_commands.rs")
     const rust = readFileSync(rustPath, "utf8")
     const start = rust.indexOf("const HERMES_PROVIDERS: &[HermesProvider] = &[")
     expect(start).toBeGreaterThan(-1)

@@ -57,7 +57,10 @@ struct BITMAPINFO {
 
 #[link(name = "user32")]
 extern "system" {
-    fn EnumWindows(callback: Option<unsafe extern "system" fn(HWND, LPARAM) -> BOOL>, l_param: LPARAM) -> BOOL;
+    fn EnumWindows(
+        callback: Option<unsafe extern "system" fn(HWND, LPARAM) -> BOOL>,
+        l_param: LPARAM,
+    ) -> BOOL;
     fn GetWindowTextW(hwnd: HWND, buffer: *mut u16, max: i32) -> i32;
     fn GetClassNameW(hwnd: HWND, buffer: *mut u16, max: i32) -> i32;
     fn IsWindowVisible(hwnd: HWND) -> BOOL;
@@ -217,9 +220,9 @@ fn run(command: &str, a: &Value) -> Result<Outcome, String> {
             }),
             events: Vec::new(),
         }),
-        "computer_request_permission" | "computer_open_permission_settings" => Err(
-            "电脑操作权限申请需要桌面助手，当前不可用".into(),
-        ),
+        "computer_request_permission" | "computer_open_permission_settings" => {
+            Err("电脑操作权限申请需要桌面助手，当前不可用".into())
+        }
         "computer_reveal_helper" => Err("桌面助手未安装".into()),
         "computer_list_shareable_windows" => Ok(Outcome {
             result: json!({ "windows": list_shareable_windows() }),
@@ -243,8 +246,7 @@ fn run(command: &str, a: &Value) -> Result<Outcome, String> {
             let mut events = Vec::new();
             if let Value::Array(ids) = &a["targetIds"] {
                 for id in ids {
-                    let (_, mut added) =
-                        computer_share(&text_of(id), &text_of(&a["level"]));
+                    let (_, mut added) = computer_share(&text_of(id), &text_of(&a["level"]));
                     events.append(&mut added);
                 }
             }
@@ -253,9 +255,9 @@ fn run(command: &str, a: &Value) -> Result<Outcome, String> {
                 events,
             })
         }
-        "computer_share_app" | "computer_share_screen" => Err(
-            "整屏/应用共享需要桌面助手，当前不可用".into(),
-        ),
+        "computer_share_app" | "computer_share_screen" => {
+            Err("整屏/应用共享需要桌面助手，当前不可用".into())
+        }
         "computer_revoke_all" => {
             with_state(|st| st.shared = None);
             Ok(Outcome {
@@ -274,9 +276,9 @@ fn run(command: &str, a: &Value) -> Result<Outcome, String> {
             }),
             events: Vec::new(),
         }),
-        "computer_driver_info" | "computer_driver_uninstall" => Err(
-            "输入驱动层待实现：本构建提供窗口枚举与截图，不含合成输入".into(),
-        ),
+        "computer_driver_info" | "computer_driver_uninstall" => {
+            Err("输入驱动层待实现：本构建提供窗口枚举与截图，不含合成输入".into())
+        }
         _ => Err(format!("未知的电脑操作命令：{command}")),
     }
 }
@@ -299,9 +301,7 @@ fn computer_share(target_id: &str, level: &str) -> (Value, Vec<(String, Value)>)
             }
         }
         let entry = json!({ "target_id": target_id, "level": level });
-        st.shared
-            .get_or_insert_with(Vec::new)
-            .push(entry.clone());
+        st.shared.get_or_insert_with(Vec::new).push(entry.clone());
         event.push((
             "computer://agent-grant".into(),
             json!({ "target_id": target_id, "level": level }),
@@ -319,10 +319,7 @@ fn computer_share(target_id: &str, level: &str) -> (Value, Vec<(String, Value)>)
 fn list_shareable_windows() -> Value {
     let mut out: Vec<Value> = Vec::new();
     unsafe {
-        EnumWindows(
-            Some(enum_proc),
-            &mut out as *mut Vec<Value> as LPARAM,
-        );
+        EnumWindows(Some(enum_proc), &mut out as *mut Vec<Value> as LPARAM);
     }
     json!(out)
 }
@@ -371,7 +368,12 @@ fn utf16(buf: &[u16], len: usize) -> String {
 }
 
 fn window_rect(hwnd: HWND) -> RECT {
-    let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
     unsafe { GetWindowRect(hwnd, &mut rect) };
     rect
 }
@@ -407,7 +409,12 @@ fn window_thumbnail(target_id: &str) -> Result<String, String> {
     }
 }
 
-unsafe fn capture(screen_dc: HDC, hwnd: HWND, width: usize, height: usize) -> Result<String, String> {
+unsafe fn capture(
+    screen_dc: HDC,
+    hwnd: HWND,
+    width: usize,
+    height: usize,
+) -> Result<String, String> {
     let mem_dc = CreateCompatibleDC(screen_dc);
     if mem_dc == 0 {
         return Err("无法创建兼容设备上下文".into());
@@ -515,7 +522,10 @@ mod tests {
         let _guard = serialized();
         let out = call("get_computer_tools_settings", json!({})).unwrap();
         assert_eq!(out.result["preferences"]["grantTtlMinutes"], json!(15));
-        assert_eq!(out.result["preferences"]["stopShortcut"], json!("ctrl+alt+q"));
+        assert_eq!(
+            out.result["preferences"]["stopShortcut"],
+            json!("ctrl+alt+q")
+        );
         assert_eq!(out.result["preferences"]["showIndicator"], json!(true));
         assert_eq!(out.result["enabled"], json!(false));
 
@@ -542,7 +552,11 @@ mod tests {
         let _guard = serialized();
         call("computer_revoke_all", json!({})).unwrap();
         let out = call("computer_status", json!({})).unwrap();
-        assert_eq!(out.result["shared"], Value::Null, "Go 的 nil slice 序列化为 null");
+        assert_eq!(
+            out.result["shared"],
+            Value::Null,
+            "Go 的 nil slice 序列化为 null"
+        );
 
         let out = call(
             "computer_share_window",
@@ -598,7 +612,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(out.result["width"], json!(800));
-        assert_eq!(out.result["height"], json!(0), "字符串在 Go 的 number() 里是 0");
+        assert_eq!(
+            out.result["height"],
+            json!(0),
+            "字符串在 Go 的 number() 里是 0"
+        );
     }
 
     #[test]
@@ -634,10 +652,7 @@ mod tests {
             assert!(entry["bounds"]["Bottom"].is_i64());
         }
         // 可解析但无效的 hwnd：GetWindowRect 失败留零矩形 → Go 的「窗口尺寸异常」。
-        assert_eq!(
-            window_thumbnail("999999999").unwrap_err(),
-            "窗口尺寸异常"
-        );
+        assert_eq!(window_thumbnail("999999999").unwrap_err(), "窗口尺寸异常");
         // 解析不出数字 → hwnd 0 → 「窗口不存在」。
         assert_eq!(window_thumbnail("not-a-number").unwrap_err(), "窗口不存在");
         // 真实窗口（若枚举到了）应当能截图；没有窗口的机器上跳过。

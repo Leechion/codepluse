@@ -848,7 +848,7 @@
       "loadFailed": "Error al cargar la configuración de delegación: {detail}",
       "tabGeneral": "General",
       "tabMainAgent": "Configuración del agente principal",
-      "tabAgentDefaults": "Valores por defecto del agente",
+      "tabAgentDefaults": "Configuración de subagentes",
       "agentDefaultsDescription": "Anulaciones por agente que se aplican cuando Colaboración multiagente inicia un subagente para una llamada de delegación. Las opciones mostradas provienen de un sondeo en vivo: lo que selecciones es exactamente lo que el agente aceptará.",
       "agentDefaultsAgentHint": "Las opciones que dejes en Predeterminado conservan el valor del propio agente.",
       "agentDefaultsDelegationOff": "La colaboración multiagente está desactivada. Actívala para editar estos valores.",

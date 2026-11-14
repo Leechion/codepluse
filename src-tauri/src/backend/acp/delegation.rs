@@ -133,7 +133,10 @@ pub fn load(root: &Path, into: &mut HashMap<String, Delegation>) {
                     .unwrap_or(0),
                 native_session_id: text("native_session_id"),
                 next_prompt: text("next_prompt"),
-                depth: row.get("depth").and_then(|value| value.as_i64()).unwrap_or(0),
+                depth: row
+                    .get("depth")
+                    .and_then(|value| value.as_i64())
+                    .unwrap_or(0),
                 parent_tool_use_id: text("parent_tool_use_id"),
                 split_id: text("split_id"),
                 title: text("title"),

@@ -182,10 +182,16 @@ impl Emitter for SinkEmitter {
 
 /// Which session state file the runtime uses (Go main.go:513-516).
 fn state_file(root: &Path) -> Option<PathBuf> {
-    if std::env::var("HARNESS_HUB_STATE_FILE").map(|v| v == ":memory:").unwrap_or(false) {
+    if std::env::var("HARNESS_HUB_STATE_FILE")
+        .map(|v| v == ":memory:")
+        .unwrap_or(false)
+    {
         return None;
     }
-    let name = if std::env::var("HARNESS_HUB_CODEG").map(|v| v == "1").unwrap_or(false) {
+    let name = if std::env::var("HARNESS_HUB_CODEG")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
         "codeg-sessions.json"
     } else {
         "sessions.json"
@@ -215,7 +221,9 @@ pub fn init_layer(root: PathBuf, base_url: String, sink: EmitSink) -> Arc<Layer>
             delegations: HashMap::new(),
             warm: HashMap::new(),
             warming: HashSet::new(),
-            started: std::env::var("HARNESS_HUB_WARM").map(|v| v != "0").unwrap_or(true),
+            started: std::env::var("HARNESS_HUB_WARM")
+                .map(|v| v == "1")
+                .unwrap_or(false),
             callers: HashMap::new(),
             questions: HashMap::new(),
             splits: HashMap::new(),
@@ -230,8 +238,12 @@ pub fn init_layer(root: PathBuf, base_url: String, sink: EmitSink) -> Arc<Layer>
         state_file: state_file(&root),
         timeout_ms: timeout_ms(),
         resolver: Arc::new(ProductionResolver { root }),
-        emitter: Arc::new(SinkEmitter { sink: layer.sink.clone() }),
-        hooks: Arc::new(CodegHooks { layer: Arc::downgrade(&layer) }),
+        emitter: Arc::new(SinkEmitter {
+            sink: layer.sink.clone(),
+        }),
+        hooks: Arc::new(CodegHooks {
+            layer: Arc::downgrade(&layer),
+        }),
     });
     let _ = layer.runtime.set(runtime);
     splits::load(&layer.root, &mut layer.state.lock().unwrap().splits);
@@ -308,7 +320,9 @@ impl Layer {
             None => question::declined_answer(),
         };
         let mut state = self.state.lock().unwrap();
-        let Some(park) = state.questions.remove(&qid) else { return };
+        let Some(park) = state.questions.remove(&qid) else {
+            return;
+        };
         if let Some(conn) = state.connections.get(&park.conn_id) {
             let mut c = conn.lock().unwrap();
             if text(c.pending_question.get("question_id")) == qid {
@@ -316,7 +330,10 @@ impl Layer {
             }
         }
         drop(state);
-        self.emit_event(&park.conn_id, &json!({"type": "question_resolved", "question_id": qid}));
+        self.emit_event(
+            &park.conn_id,
+            &json!({"type": "question_resolved", "question_id": qid}),
+        );
         let layer = self.self_arc();
         let conn_id = park.conn_id.clone();
         tokio::spawn(async move {
@@ -364,11 +381,21 @@ impl Layer {
         };
         if dropped.is_some() {
             let root = self.root.clone();
-            let rows: Vec<Value> = self.state.lock().unwrap().splits.values().map(splits::split_wire).collect();
+            let rows: Vec<Value> = self
+                .state
+                .lock()
+                .unwrap()
+                .splits
+                .values()
+                .map(splits::split_wire)
+                .collect();
             tokio::task::spawn_blocking(move || splits::save(&root, &rows));
         }
         if action == "reject" {
-            self.event(&parent, json!({"type": "task_split_resolved", "split_id": split_id, "action": "reject"}));
+            self.event(
+                &parent,
+                json!({"type": "task_split_resolved", "split_id": split_id, "action": "reject"}),
+            );
             return Ok(json!({"split_id": split_id, "action": "reject"}));
         }
         let _ = outcome;
@@ -376,7 +403,6 @@ impl Layer {
         // retired, so the user's decision is not lost to a retry.
         Err("协作派发尚未移植：拆分提案已撤销，请重新提案后使用 delegate_to_agent 分工".into())
     }
-
 
     /// Go `s.event` (connections.go:372): connection-scoped bookkeeping plus
     /// the `acp://event` firehose frame.
@@ -421,14 +447,20 @@ impl Layer {
             }
             "thinking" => {
                 let parent = text(e.get("parent_tool_use_id"));
-                append_live_block(&mut conn_state.live, "thinking", &parent, &text(e.get("text")));
+                append_live_block(
+                    &mut conn_state.live,
+                    "thinking",
+                    &parent,
+                    &text(e.get("text")),
+                );
             }
             "tool_call" | "tool_call_update" => {
                 let id = text(e.get("tool_call_id"));
                 let mut found = false;
                 for tool in conn_state.tools.iter_mut() {
                     if text(tool.get("tool_call_id")) == id {
-                        if let (Some(tool_obj), Some(e_obj)) = (tool.as_object_mut(), e.as_object()) {
+                        if let (Some(tool_obj), Some(e_obj)) = (tool.as_object_mut(), e.as_object())
+                        {
                             for (k, v) in e_obj {
                                 if !v.is_null() {
                                     tool_obj.insert(k.clone(), v.clone());
@@ -513,7 +545,10 @@ impl Layer {
         );
         let modes = view.get("modes").cloned().unwrap_or(Value::Null);
         if !modes.is_null() {
-            self.event(cid, json!({"type": "session_modes", "modes": mode_wire(&modes)}));
+            self.event(
+                cid,
+                json!({"type": "session_modes", "modes": mode_wire(&modes)}),
+            );
         }
         self.event(
             cid,
@@ -527,18 +562,37 @@ impl Layer {
 
     /// Go `snapshot` (connections.go:812).
     pub async fn snapshot(&self, cid: &str) -> Value {
-        let (conversation_id, folder_id, status, seq, live, tools, pending, pending_split,
-             pending_question, feedback, rid, agent)
-        = {
+        let (
+            conversation_id,
+            folder_id,
+            status,
+            seq,
+            live,
+            tools,
+            pending,
+            pending_split,
+            pending_question,
+            feedback,
+            rid,
+            agent,
+        ) = {
             let state = self.state.lock().unwrap();
             match state.connections.get(cid) {
                 Some(conn) => {
                     let c = conn.lock().unwrap();
                     (
-                        c.conversation_id, c.folder_id, c.status.clone(), c.seq,
-                        c.live.clone(), c.tools.clone(), c.pending.clone(),
-                        c.pending_split.clone(), c.pending_question.clone(),
-                        c.feedback.clone(), c.runtime_id.clone(), c.agent.clone(),
+                        c.conversation_id,
+                        c.folder_id,
+                        c.status.clone(),
+                        c.seq,
+                        c.live.clone(),
+                        c.tools.clone(),
+                        c.pending.clone(),
+                        c.pending_split.clone(),
+                        c.pending_question.clone(),
+                        c.feedback.clone(),
+                        c.runtime_id.clone(),
+                        c.agent.clone(),
                     )
                 }
                 None => return Value::Null,
@@ -575,7 +629,10 @@ impl Layer {
         out["modes"] = mode_wire(&modes);
         out["config_options"] = json!(config_wire(&view));
         if let Some(modes_obj) = view.get("modes") {
-            out["current_mode"] = modes_obj.get("currentModeId").cloned().unwrap_or(Value::Null);
+            out["current_mode"] = modes_obj
+                .get("currentModeId")
+                .cloned()
+                .unwrap_or(Value::Null);
         }
         out
     }
@@ -615,13 +672,22 @@ impl Layer {
             let mut c = conn.lock().unwrap();
             c.runtime_id = runtime_id.to_string();
             let cid = c.id.clone();
-            let root_id = if c.root_id.is_empty() { c.id.clone() } else { c.root_id.clone() };
+            let root_id = if c.root_id.is_empty() {
+                c.id.clone()
+            } else {
+                c.root_id.clone()
+            };
             let depth = c.depth;
             if !state.callers.contains_key(&cid) {
                 let token = format!("{}{}", goformat::hex_id(), goformat::hex_id());
                 state.callers.insert(
                     cid.clone(),
-                    Caller { token, connection_id: cid.clone(), root_id, depth },
+                    Caller {
+                        token,
+                        connection_id: cid.clone(),
+                        root_id,
+                        depth,
+                    },
                 );
             }
         }
@@ -648,14 +714,16 @@ impl Layer {
             return;
         }
         let (root, depth, folder) = {
-            let doc = store_file::read_json(&self.root.join("codeg-workspace.json"))
+            let doc = store_file::read_json(&self.root.join(".data").join("codeg-workspace.json"))
                 .ok()
                 .flatten()
                 .unwrap_or(Value::Null);
             tree_root(&doc, conv, folder_of(&doc, conv))
         };
         let mut state = self.state.lock().unwrap();
-        let Some(conn) = state.connections.get(&conn.lock().unwrap().id).cloned() else { return };
+        let Some(conn) = state.connections.get(&conn.lock().unwrap().id).cloned() else {
+            return;
+        };
         let mut c = conn.lock().unwrap();
         c.conversation_id = conv;
         c.folder_id = folder;
@@ -674,7 +742,12 @@ impl Layer {
 }
 
 fn folder_of(doc: &Value, conv: i64) -> i64 {
-    for row in doc.get("conversations").and_then(Value::as_array).into_iter().flatten() {
+    for row in doc
+        .get("conversations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         if crate::backend::acp::wire::number(row.get("id")) == conv {
             return crate::backend::acp::wire::number(row.get("folder_id"));
         }
@@ -695,13 +768,20 @@ fn tree_root(doc: &Value, conv: i64, folder: i64) -> (i64, i64, i64) {
         }
         seen.insert(conv);
         let mut row = None;
-        for candidate in doc.get("conversations").and_then(Value::as_array).into_iter().flatten() {
+        for candidate in doc
+            .get("conversations")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             if crate::backend::acp::wire::number(candidate.get("id")) == conv {
                 row = Some(candidate.clone());
                 break;
             }
         }
-        let Some(r) = row else { return (conv, depth, folder) };
+        let Some(r) = row else {
+            return (conv, depth, folder);
+        };
         let parent = crate::backend::acp::wire::number(r.get("parent_id"));
         if parent == 0 {
             return (conv, depth, folder);
@@ -712,7 +792,9 @@ fn tree_root(doc: &Value, conv: i64, folder: i64) -> (i64, i64, i64) {
 }
 
 fn append_live_block(live: &mut Value, kind: &str, parent: &str, text_chunk: &str) {
-    let Some(live_obj) = live.as_object_mut() else { return };
+    let Some(live_obj) = live.as_object_mut() else {
+        return;
+    };
     let content = live_obj
         .entry("content")
         .or_insert_with(|| json!([]))
@@ -720,8 +802,7 @@ fn append_live_block(live: &mut Value, kind: &str, parent: &str, text_chunk: &st
         .expect("content array");
     let extend = match content.last() {
         Some(last)
-            if text(last.get("kind")) == kind
-                && text(last.get("parent_tool_use_id")) == parent =>
+            if text(last.get("kind")) == kind && text(last.get("parent_tool_use_id")) == parent =>
         {
             true
         }
@@ -750,7 +831,8 @@ pub fn resolve_workdir(root: &Path, input: &str) -> Result<PathBuf, String> {
             input = root.to_string_lossy().to_string();
         }
     }
-    let candidate = normalize(&std::path::absolute(&input).map_err(|e| format!("无法解析工作目录：{e}"))?);
+    let candidate =
+        normalize(&std::path::absolute(&input).map_err(|e| format!("无法解析工作目录：{e}"))?);
     let allowed_root = std::env::var("HARNESS_HUB_ALLOWED_ROOT")
         .ok()
         .filter(|v| !v.is_empty())
@@ -777,12 +859,18 @@ pub fn resolve_workdir(root: &Path, input: &str) -> Result<PathBuf, String> {
         let rel = relative(&ancestor, &candidate)?;
         resolved = resolved.join(rel);
     }
-    if std::env::var("HARNESS_HUB_ALLOW_ANY_PATH").map(|v| v == "1").unwrap_or(false) {
+    if std::env::var("HARNESS_HUB_ALLOW_ANY_PATH")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
         return Ok(resolved);
     }
     let rel = relative(&real_root, &resolved)?;
     if rel == ".." || rel.starts_with("..\\") || rel.starts_with("../") || is_abs_rel(&rel) {
-        return Err(format!("工作目录必须位于 {} 之内", real_root.to_string_lossy()));
+        return Err(format!(
+            "工作目录必须位于 {} 之内",
+            real_root.to_string_lossy()
+        ));
     }
     Ok(resolved)
 }
@@ -932,7 +1020,9 @@ pub fn image_data(root: &Path, block: &Value) -> Result<String, String> {
     }
     let uri = text(block.get("uri"));
     let u = url::Url::parse(&uri).map_err(|_| "图片上传地址无效".to_string())?;
-    if u.scheme() != "file" || (!u.host_str().unwrap_or("").is_empty() && u.host_str() != Some("localhost")) {
+    if u.scheme() != "file"
+        || (!u.host_str().unwrap_or("").is_empty() && u.host_str() != Some("localhost"))
+    {
         return Err("图片上传地址无效".to_string());
     }
     let mut path = u.path().to_string();
@@ -940,10 +1030,15 @@ pub fn image_data(root: &Path, block: &Value) -> Result<String, String> {
     if path.len() >= 3 && path.starts_with('/') && path.as_bytes()[2] == b':' {
         path = path[1..].to_string();
     }
-    let uploads = std::path::absolute(root.join(".data").join("uploads")).map_err(|e| e.to_string())?;
+    let uploads =
+        std::path::absolute(root.join(".data").join("uploads")).map_err(|e| e.to_string())?;
     let path = std::path::absolute(Path::new(&path)).map_err(|e| e.to_string())?;
-    let uploads = std::fs::canonicalize(&uploads).map(|p| normalize(&p)).map_err(|e| e.to_string())?;
-    let path = std::fs::canonicalize(&path).map(|p| normalize(&p)).map_err(|e| e.to_string())?;
+    let uploads = std::fs::canonicalize(&uploads)
+        .map(|p| normalize(&p))
+        .map_err(|e| e.to_string())?;
+    let path = std::fs::canonicalize(&path)
+        .map(|p| normalize(&p))
+        .map_err(|e| e.to_string())?;
     let rel = relative(&uploads, &path)?;
     if rel == ".." || rel.starts_with("..\\") || rel.starts_with("../") || is_abs_rel(&rel) {
         return Err("图片不在上传目录中".into());
@@ -965,6 +1060,9 @@ impl Layer {
         let agent = crate::backend::acp::agents::pick(&self.root, &agent_type)
             .ok_or_else(|| format!("执行端 {agent_type} 未连接"))?;
         let cwd = resolve_workdir(&self.root, &text(args.get("workingDir")))?;
+        if agent_type == "pi" || agent.wire == "pi" || agent.real_tool == "pi" {
+            crate::backend::acp::pi_trust::check_launch(&self.root, &cwd)?;
+        }
         let mut permission = "readonly".to_string();
         // DSH advertises model configuration but no ACP permission modes; its
         // native policy owns tools, so the session is not enforced read-only.
@@ -1080,11 +1178,17 @@ impl Layer {
             }
             let mut conversation_id = 0i64;
             {
-                let doc = store_file::read_json(&self.root.join("codeg-workspace.json"))
-                    .ok()
+                let doc =
+                    store_file::read_json(&self.root.join(".data").join("codeg-workspace.json"))
+                        .ok()
+                        .flatten()
+                        .unwrap_or(Value::Null);
+                for row in doc
+                    .get("conversations")
+                    .and_then(Value::as_array)
+                    .into_iter()
                     .flatten()
-                    .unwrap_or(Value::Null);
-                for row in doc.get("conversations").and_then(Value::as_array).into_iter().flatten() {
+                {
                     if text(row.get("external_id")) == previous
                         && text(row.get("agent_type")) == conn.agent_type
                     {
@@ -1096,9 +1200,17 @@ impl Layer {
             let conn_arc = Arc::new(Mutex::new(conn));
             self.bind_conversation(&conn_arc, conversation_id);
             // continue with the bound connection below
-            return self.connect_finish(conn_arc, &agent, &options, args, &permission).await;
+            return self
+                .connect_finish(conn_arc, &agent, &options, args, &permission)
+                .await;
         }
-        let pool_key = self.warm_pool_key(&conn.agent_type, &options.workdir, &permission, &mode, &model);
+        let pool_key = self.warm_pool_key(
+            &conn.agent_type,
+            &options.workdir,
+            &permission,
+            &mode,
+            &model,
+        );
         let warm = args.get("_warm").and_then(Value::as_bool).unwrap_or(false);
         if !warm && previous.is_empty() && conn.depth == 0 && conn.root_id.is_empty() {
             if let Some(claimed) = self.take_warm(&pool_key).await {
@@ -1108,8 +1220,13 @@ impl Layer {
         }
         conn.warm = warm;
         let conn_arc = Arc::new(Mutex::new(conn));
-        self.state.lock().unwrap().connections.insert(cid.clone(), conn_arc.clone());
-        self.connect_finish(conn_arc, &agent, &options, args, &permission).await
+        self.state
+            .lock()
+            .unwrap()
+            .connections
+            .insert(cid.clone(), conn_arc.clone());
+        self.connect_finish(conn_arc, &agent, &options, args, &permission)
+            .await
     }
 
     /// The second half of Go `connect` (lines 179-197): the runtime session
@@ -1126,14 +1243,22 @@ impl Layer {
             Ok(native) => native,
             Err(err) => {
                 let cid = conn_arc.lock().unwrap().id.clone();
-                self.state.lock().unwrap().connections.remove(&cid);
+                let mut state = self.state.lock().unwrap();
+                state.connections.remove(&cid);
+                state.callers.remove(&cid);
                 return Err(err);
             }
         };
         let warm = args.get("_warm").and_then(Value::as_bool).unwrap_or(false);
         let pool_key = {
             let c = conn_arc.lock().unwrap();
-            self.warm_pool_key(&c.agent_type, &options.workdir, &options.permission, &options.mode, &options.model)
+            self.warm_pool_key(
+                &c.agent_type,
+                &options.workdir,
+                &options.permission,
+                &options.mode,
+                &options.model,
+            )
         };
         {
             let mut c = conn_arc.lock().unwrap();
@@ -1141,11 +1266,15 @@ impl Layer {
             c.status = "connected".into();
         }
         if warm {
-            self.put_warm(&pool_key, &conn_arc.lock().unwrap().id.clone());
-            return Ok(conn_arc.lock().unwrap().id.clone());
+            let cid = conn_arc.lock().unwrap().id.clone();
+            self.put_warm(&pool_key, &cid);
+            return Ok(cid);
         }
         let cid = conn_arc.lock().unwrap().id.clone();
-        self.event(&cid, json!({"type": "status_changed", "status": "connected"}));
+        self.event(
+            &cid,
+            json!({"type": "status_changed", "status": "connected"}),
+        );
         self.publish_session(&cid).await;
         self.queue_warm(args, &pool_key);
         Ok(cid)
@@ -1154,7 +1283,14 @@ impl Layer {
     // ----------------------------- warm pool -----------------------------
 
     /// Go `warmPoolKey` (connections.go:204).
-    fn warm_pool_key(&self, agent_type: &str, cwd: &str, permission: &str, mode: &str, model: &str) -> String {
+    fn warm_pool_key(
+        &self,
+        agent_type: &str,
+        cwd: &str,
+        permission: &str,
+        mode: &str,
+        model: &str,
+    ) -> String {
         format!("{agent_type}|{cwd}|{permission}|{mode}|{model}")
     }
 
@@ -1181,7 +1317,8 @@ impl Layer {
                     Some(conn) => {
                         let mut c = conn.lock().unwrap();
                         let warm = c.warm;
-                        let valid = warm && c.status == "connected" && !c.busy && c.conversation_id == 0;
+                        let valid =
+                            warm && c.status == "connected" && !c.busy && c.conversation_id == 0;
                         if valid {
                             c.warm = false;
                         }
@@ -1207,7 +1344,10 @@ impl Layer {
                 }
                 continue;
             }
-            self.event(&e.id, json!({"type": "status_changed", "status": "connected"}));
+            self.event(
+                &e.id,
+                json!({"type": "status_changed", "status": "connected"}),
+            );
             self.publish_session(&e.id).await;
             return Some(e.id);
         }
@@ -1225,7 +1365,10 @@ impl Layer {
             .warm
             .entry(key.to_string())
             .or_default()
-            .push(WarmEntry { id: cid.to_string(), placed_at: std::time::Instant::now() });
+            .push(WarmEntry {
+                id: cid.to_string(),
+                placed_at: std::time::Instant::now(),
+            });
     }
 
     /// Go `retireAgentConnections` (instances.go:350): release every warm
@@ -1338,7 +1481,9 @@ impl Layer {
     fn queue_warm(&self, args: &Value, pool_key: &str) {
         let started = self.state.lock().unwrap().started;
         if !started
-            || std::env::var("HARNESS_HUB_WARM").map(|v| v == "0").unwrap_or(false)
+            || std::env::var("HARNESS_HUB_WARM")
+                .map(|v| v == "0")
+                .unwrap_or(false)
         {
             return;
         }
@@ -1376,7 +1521,10 @@ impl Layer {
             if !agent.enabled || !agent.real {
                 continue;
             }
-            if std::env::var("HARNESS_HUB_WARM").map(|v| v == "0").unwrap_or(false) {
+            if std::env::var("HARNESS_HUB_WARM")
+                .map(|v| v == "0")
+                .unwrap_or(false)
+            {
                 return;
             }
             if let Err(err) = self
@@ -1431,7 +1579,11 @@ fn spawn_permissions_loop(layer: Arc<Layer>) {
                     continue;
                 }
                 let view = layer.runtime_view(&runtime_id).await;
-                let cards = view.get("permissions").and_then(Value::as_array).cloned().unwrap_or_default();
+                let cards = view
+                    .get("permissions")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
                 for card in cards {
                     let pid = text(card.get("id"));
                     let card_state = text(card.get("state"));
@@ -1456,23 +1608,29 @@ fn spawn_permissions_loop(layer: Arc<Layer>) {
                             let mut c = conn.lock().unwrap();
                             c.pending = payload.clone();
                         }
-                        layer.event(&cid, json!({
-                            "type": "permission_request",
-                            "request_id": pid,
-                            "tool_call": card.get("toolCall").cloned().unwrap_or(Value::Null),
-                            "options": permission_options(card.get("options")),
-                            "queued": 0,
-                        }));
+                        layer.event(
+                            &cid,
+                            json!({
+                                "type": "permission_request",
+                                "request_id": pid,
+                                "tool_call": card.get("toolCall").cloned().unwrap_or(Value::Null),
+                                "options": permission_options(card.get("options")),
+                                "queued": 0,
+                            }),
+                        );
                     } else if previous == "pending" {
                         {
                             let mut c = conn.lock().unwrap();
                             c.pending = Value::Null;
                         }
-                        layer.event(&cid, json!({
-                            "type": "permission_resolved",
-                            "request_id": pid,
-                            "option_id": card.get("selected").cloned().unwrap_or(Value::Null),
-                        }));
+                        layer.event(
+                            &cid,
+                            json!({
+                                "type": "permission_resolved",
+                                "request_id": pid,
+                                "option_id": card.get("selected").cloned().unwrap_or(Value::Null),
+                            }),
+                        );
                     }
                 }
             }
@@ -1506,20 +1664,26 @@ fn native_update_by_runtime(layer: &Arc<Layer>, runtime_id: &str, u: &Value) {
     match text(u.get("sessionUpdate")).as_str() {
         "agent_message_chunk" => {
             let content = u.get("content").cloned().unwrap_or(Value::Null);
-            layer.event(&cid, json!({
-                "type": "content_delta",
-                "text": text(content.get("text")),
-                "source_message_id": u.get("messageId").cloned().unwrap_or(Value::Null),
-                "parent_tool_use_id": parent,
-            }));
+            layer.event(
+                &cid,
+                json!({
+                    "type": "content_delta",
+                    "text": text(content.get("text")),
+                    "source_message_id": u.get("messageId").cloned().unwrap_or(Value::Null),
+                    "parent_tool_use_id": parent,
+                }),
+            );
         }
         "agent_thought_chunk" => {
             let content = u.get("content").cloned().unwrap_or(Value::Null);
-            layer.event(&cid, json!({
-                "type": "thinking",
-                "text": text(content.get("text")),
-                "parent_tool_use_id": parent,
-            }));
+            layer.event(
+                &cid,
+                json!({
+                    "type": "thinking",
+                    "text": text(content.get("text")),
+                    "parent_tool_use_id": parent,
+                }),
+            );
         }
         "tool_call" | "tool_call_update" => {
             let mut event = json!({
@@ -1553,14 +1717,17 @@ fn native_update_by_runtime(layer: &Arc<Layer>, runtime_id: &str, u: &Value) {
             layer.event(&cid, json!({"type": "plan_update", "entries": u.get("entries").cloned().unwrap_or(Value::Null)}));
         }
         "notice" => {
-            layer.event(&cid, json!({
-                "type": "session_notice",
-                "notice": {
-                    "severity": u.get("severity").cloned().unwrap_or(Value::Null),
-                    "title": u.get("title").cloned().unwrap_or(Value::Null),
-                    "description": u.get("description").cloned().unwrap_or(Value::Null),
-                },
-            }));
+            layer.event(
+                &cid,
+                json!({
+                    "type": "session_notice",
+                    "notice": {
+                        "severity": u.get("severity").cloned().unwrap_or(Value::Null),
+                        "title": u.get("title").cloned().unwrap_or(Value::Null),
+                        "description": u.get("description").cloned().unwrap_or(Value::Null),
+                    },
+                }),
+            );
         }
         "config_option_update" | "current_mode_update" => {
             // publish_session reads the runtime view (async); the sync hook
@@ -1629,7 +1796,12 @@ impl Layer {
         let mut wire_content: Vec<Value> = Vec::new();
         let mut attachment_count = 0usize;
         let mut user_blocks: Vec<Value> = Vec::new();
-        for raw in args.get("blocks").and_then(Value::as_array).into_iter().flatten() {
+        for raw in args
+            .get("blocks")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             let block = raw.as_object().cloned().unwrap_or_default();
             let block = Value::Object(block);
             match text(block.get("type")).as_str() {
@@ -1664,25 +1836,27 @@ impl Layer {
                     attachment_count += 1;
                     user_blocks.push(json!({"type": "image", "data": data, "mime_type": mime, "uri": block.get("uri").cloned().unwrap_or(Value::Null)}));
                 }
-                "resource_link" => {
-                    match resource_link(&block) {
-                        Ok((wire, display)) => {
-                            wire_content.push(wire);
-                            user_blocks.push(display);
-                            attachment_count += 1;
-                        }
-                        Err(err) => {
-                            self.release_run(&conn, my_seq);
-                            return Err(err);
-                        }
+                "resource_link" => match resource_link(&block) {
+                    Ok((wire, display)) => {
+                        wire_content.push(wire);
+                        user_blocks.push(display);
+                        attachment_count += 1;
                     }
-                }
+                    Err(err) => {
+                        self.release_run(&conn, my_seq);
+                        return Err(err);
+                    }
+                },
                 "resource" => {
                     let caps = {
                         let rid = conn.lock().unwrap().runtime_id.clone();
                         self.runtime().prompt_capabilities(&rid)
                     };
-                    if !caps.get("embedded_context").and_then(Value::as_bool).unwrap_or(false) {
+                    if !caps
+                        .get("embedded_context")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    {
                         self.release_run(&conn, my_seq);
                         return Err("当前执行端不支持嵌入资源".into());
                     }
@@ -1711,7 +1885,11 @@ impl Layer {
         // Store half (connections.go:594-631) on the blocking pool.
         let (workdir, agent_type, runtime_id) = {
             let c = conn.lock().unwrap();
-            (c.options.workdir.clone(), c.agent_type.clone(), c.runtime_id.clone())
+            (
+                c.options.workdir.clone(),
+                c.agent_type.clone(),
+                c.runtime_id.clone(),
+            )
         };
         let native = text(self.runtime_view(&runtime_id).await.get("nativeSessionId"));
         let root = self.root.clone();
@@ -1752,7 +1930,10 @@ impl Layer {
         self.bind_conversation(&conn_for_bind, store.conversation_id);
         self.event(&cid, json!({"type": "conversation_linked", "conversation_id": store.conversation_id, "folder_id": store.folder_id}));
         self.event(&cid, json!({"type": "conversation_status_changed", "conversation_id": store.conversation_id, "status": "in_progress"}));
-        self.event(&cid, json!({"type": "status_changed", "status": "prompting"}));
+        self.event(
+            &cid,
+            json!({"type": "status_changed", "status": "prompting"}),
+        );
         // Spawn the turn (Go: go s.runWithContent(c, prompt, wireContent)).
         let layer_self = self.self_arc();
         let agent = conn.lock().unwrap().agent.clone();
@@ -1805,7 +1986,10 @@ impl Layer {
             blocks.extend(wire_blocks);
             wire_blocks = blocks;
         }
-        let result = self.runtime().prompt_blocks(agent, &wire_blocks, options).await;
+        let result = self
+            .runtime()
+            .prompt_blocks(agent, &wire_blocks, options)
+            .await;
         // Completion (connections.go:667-733): a self-healed run must not
         // clobber the live turn's state.
         let stale = conn.lock().unwrap().run_seq != my_seq;
@@ -1868,12 +2052,15 @@ impl Layer {
         if reason.is_empty() {
             reason = "end_turn".into();
         }
-        self.event(&cid, json!({
-            "type": "turn_complete",
-            "session_id": result.meta.get("sessionId").cloned().unwrap_or(Value::Null),
-            "stop_reason": reason,
-            "agent_type": agent_type_of(conn),
-        }));
+        self.event(
+            &cid,
+            json!({
+                "type": "turn_complete",
+                "session_id": result.meta.get("sessionId").cloned().unwrap_or(Value::Null),
+                "stop_reason": reason,
+                "agent_type": agent_type_of(conn),
+            }),
+        );
     }
 
     /// Go `delegationContext` (delegation_recovery.go:141): the layer has no
@@ -1944,7 +2131,10 @@ impl Layer {
                 conn.lock().unwrap().status = "disconnected".into();
             }
         }
-        self.event(cid, json!({"type": "status_changed", "status": "disconnected"}));
+        self.event(
+            cid,
+            json!({"type": "status_changed", "status": "disconnected"}),
+        );
         Ok(())
     }
 
@@ -1972,11 +2162,14 @@ impl Layer {
             dropped
         };
         for sp in dropped {
-            self.event(cid, json!({
-                "type": "task_split_resolved",
-                "split_id": sp.id,
-                "action": "expired",
-            }));
+            self.event(
+                cid,
+                json!({
+                    "type": "task_split_resolved",
+                    "split_id": sp.id,
+                    "action": "expired",
+                }),
+            );
         }
     }
 
@@ -2005,7 +2198,10 @@ impl Layer {
                     }
                 }
             }
-            self.event(&park.conn_id, json!({"type": "question_resolved", "question_id": id}));
+            self.event(
+                &park.conn_id,
+                json!({"type": "question_resolved", "question_id": id}),
+            );
             self.publish_session(&park.conn_id).await;
             let _ = park.answer_tx.send(question::declined_answer());
         }
@@ -2116,7 +2312,10 @@ impl Layer {
                     conn.lock().unwrap().feedback.push(note.clone());
                 }
             }
-            self.event(&cid, json!({"type": "feedback_submitted", "item": note.clone()}));
+            self.event(
+                &cid,
+                json!({"type": "feedback_submitted", "item": note.clone()}),
+            );
             return Ok(note);
         }
         if !blocks.is_empty() {
@@ -2135,7 +2334,10 @@ impl Layer {
                 None => return Err("no active turn".into()),
             }
         }
-        self.event(&cid, json!({"type": "feedback_submitted", "item": note.clone()}));
+        self.event(
+            &cid,
+            json!({"type": "feedback_submitted", "item": note.clone()}),
+        );
         Ok(note)
     }
 }

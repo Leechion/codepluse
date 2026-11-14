@@ -40,6 +40,9 @@ const eslintConfig = defineConfig([
     "src-tauri/target/**",
     "src-tauri/experts/**",
     "public/vs/**",
+    // Static assets and generated chunks are served verbatim, not authored
+    // source. Keep ESLint focused on files maintained by this project.
+    "public/**",
     // PDF.js's worker and wasm-decoder fallbacks, copied out of
     // node_modules by postinstall like Monaco's above.
     "public/pdfjs/**",
@@ -52,6 +55,7 @@ const eslintConfig = defineConfig([
     // copy rather than a merge (browser-agent/vendor/playwright/VENDOR.md).
     // It is written against Playwright's lint and compiler settings, not ours.
     "browser-agent/vendor/**",
+    "browser-agent/agent.bundle.js",
     // esbuild's output, committed so a cargo build needs no node.
     "src-tauri/src/browser/js/**",
   ]),

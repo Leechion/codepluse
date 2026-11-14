@@ -19,6 +19,15 @@ use crate::backend::store_file;
 
 const FILE: &str = "codeg-workspace.json";
 
+/// 工作台文档的落盘位置。这里收到的 `root` 是工作区根目录（与
+/// `store_reads` / `store_writes` / `turn_store` 一致），文档在 `.data/` 下。
+/// 早期 ACP 侧把文件拼在根目录，结果 `create_conversation` 写进 `.data/` 而
+/// `prompt_side_write` 读的是根目录下那份空文档，新建会话第一条消息必然
+/// 报「会话不存在」。两条路径必须由同一个 helper 给出，避免再次分叉。
+fn store_path(root: &Path) -> std::path::PathBuf {
+    root.join(".data").join(FILE)
+}
+
 /// `(conversation_id, folder_id)` plus the WS frames the write produced.
 pub struct StoreOutcome {
     pub conversation_id: i64,
@@ -27,7 +36,7 @@ pub struct StoreOutcome {
 }
 
 fn locked_doc(root: &Path) -> Result<(store_file::WriteLock, Map<String, Value>), String> {
-    let path = root.join(FILE);
+    let path = store_path(root);
     let guard = store_file::lock(&path)?;
     let doc = store_file::read_json(&path)?
         .unwrap_or(json!({"next": 1}))
@@ -43,7 +52,7 @@ fn persist(root: &Path, doc: &Map<String, Value>) -> Result<(), String> {
     let mut doc = doc.clone();
     doc.remove("turns");
     let body = goformat::marshal_store(&Value::Object(doc));
-    store_file::write_bytes(&root.join(FILE), &body)
+    store_file::write_bytes(&store_path(root), &body)
 }
 
 fn allocate(doc: &mut Map<String, Value>) -> i64 {
@@ -60,9 +69,7 @@ fn rows_mut<'a>(doc: &'a mut Map<String, Value>, key: &str) -> &'a mut Vec<Value
 }
 
 fn turns_of_mut<'a>(doc: &'a mut Map<String, Value>, conversation_id: i64) -> &'a mut Vec<Value> {
-    let turns = doc
-        .entry("turns".to_string())
-        .or_insert_with(|| json!({}));
+    let turns = doc.entry("turns".to_string()).or_insert_with(|| json!({}));
     let map = turns.as_object_mut().expect("turns object");
     map.entry(conversation_id.to_string())
         .or_insert_with(|| json!([]))
@@ -85,7 +92,12 @@ fn text(value: Option<&Value>) -> String {
 }
 
 fn folder_kind(doc: &Map<String, Value>, folder_id: i64) -> String {
-    for row in doc.get("folders").and_then(Value::as_array).into_iter().flatten() {
+    for row in doc
+        .get("folders")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         if number(row.get("id")) == folder_id {
             return text(row.get("kind"));
         }
@@ -107,7 +119,11 @@ pub fn open_folder_locked(doc: &mut Map<String, Value>, path: &str, kind: &str) 
     }
     let id = allocate(doc);
     let now = goformat::timestamp();
-    let sort_order = doc.get("folders").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
+    let sort_order = doc
+        .get("folders")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
     let row = json!({
         "id": id,
         "name": std::path::Path::new(path)
@@ -238,6 +254,7 @@ pub fn prompt_side_write(
     user_blocks: &[Value],
     native_session_id: &str,
 ) -> Result<StoreOutcome, String> {
+    crate::backend::turn_store::ensure_initialized(root)?;
     let (_guard, mut doc) = locked_doc(root)?;
     let mut conversation_id = conversation_id_arg;
     let mut folder_id = folder_id_arg;
@@ -272,7 +289,11 @@ pub fn prompt_side_write(
                 obj.insert("status".into(), json!("in_progress"));
                 obj.insert(
                     "external_id".into(),
-                    if native_session_id.is_empty() { Value::Null } else { json!(native_session_id) },
+                    if native_session_id.is_empty() {
+                        Value::Null
+                    } else {
+                        json!(native_session_id)
+                    },
                 );
             }
             event_row = candidate.clone();
@@ -306,6 +327,7 @@ pub fn completion_side_write(
     if conversation_id == 0 {
         return Ok(Vec::new());
     }
+    crate::backend::turn_store::ensure_initialized(root)?;
     let (_guard, mut doc) = locked_doc(root)?;
     let mut row = None;
     for candidate in rows_mut(&mut doc, "conversations").iter() {
@@ -327,7 +349,8 @@ pub fn completion_side_write(
         if !source_turn_id.is_empty() {
             assistant_turn["source_turn_id"] = json!(source_turn_id);
         }
-        if let Some(usage) = usage.filter(|u| u.as_object().map(|m| !m.is_empty()).unwrap_or(false)) {
+        if let Some(usage) = usage.filter(|u| u.as_object().map(|m| !m.is_empty()).unwrap_or(false))
+        {
             assistant_turn["usage"] = usage.clone();
         }
         if !model.is_empty() {
@@ -344,7 +367,10 @@ pub fn completion_side_write(
     for candidate in rows_mut(&mut doc, "conversations").iter_mut() {
         if number(candidate.get("id")) == conversation_id {
             if let Some(obj) = candidate.as_object_mut() {
-                obj.insert("status".into(), json!(if ok { "pending_review" } else { "cancelled" }));
+                obj.insert(
+                    "status".into(),
+                    json!(if ok { "pending_review" } else { "cancelled" }),
+                );
                 if !native_session_id.is_empty() {
                     obj.insert("external_id".into(), json!(native_session_id));
                 }
@@ -359,13 +385,16 @@ pub fn completion_side_write(
 
 /// Read-only lookups the fork transaction needs (fork.go:62-91): the
 /// conversation row and its turn list.
-pub fn fork_prepare(
-    root: &Path,
-    conversation_id: i64,
-) -> Result<(Value, Vec<Value>), String> {
+pub fn fork_prepare(root: &Path, conversation_id: i64) -> Result<(Value, Vec<Value>), String> {
+    crate::backend::turn_store::ensure_initialized(root)?;
     let (_guard, doc) = locked_doc(root)?;
     let mut row = None;
-    for candidate in doc.get("conversations").and_then(Value::as_array).into_iter().flatten() {
+    for candidate in doc
+        .get("conversations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         if number(candidate.get("id")) == conversation_id {
             row = Some(candidate.clone());
             break;
@@ -388,9 +417,15 @@ pub fn fork_commit(
     original_native: &str,
     fork_native: &str,
 ) -> Result<i64, String> {
+    crate::backend::turn_store::ensure_initialized(root)?;
     let (_guard, mut doc) = locked_doc(root)?;
     let mut row = None;
-    for candidate in doc.get("conversations").and_then(Value::as_array).into_iter().flatten() {
+    for candidate in doc
+        .get("conversations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         if number(candidate.get("id")) == conversation_id {
             row = Some(candidate.clone());
             break;
@@ -442,17 +477,15 @@ mod tests {
     use std::fs;
 
     fn temp_root(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "acp-storeconv-{tag}-{}",
-            goformat::hex_id()
-        ));
-        fs::create_dir_all(&dir).unwrap();
+        let dir = std::env::temp_dir().join(format!("acp-storeconv-{tag}-{}", goformat::hex_id()));
+        // The workspace document (and the SQLite turn store) live under `.data`.
+        fs::create_dir_all(dir.join(".data")).unwrap();
         dir
     }
 
     fn seed(root: &Path) {
         fs::write(
-            root.join(FILE),
+            store_path(root),
             json!({
                 "next": 3,
                 "folders": [{"id": 1, "name": "ws", "path": "E:/ws/a", "kind": "regular", "open": false}],
@@ -476,7 +509,10 @@ mod tests {
             "E:/ws/new",
             "claude_code",
             "你好",
-            &[json!({"type": "text", "text": "你好"}), json!({"type": "image", "data": "x"})],
+            &[
+                json!({"type": "text", "text": "你好"}),
+                json!({"type": "image", "data": "x"}),
+            ],
             "native-1",
         )
         .expect("write");
@@ -489,7 +525,7 @@ mod tests {
         assert_eq!(out.events[0].1["summary"]["status"], "in_progress");
         assert_eq!(out.events[0].1["summary"]["external_id"], "native-1");
 
-        let doc = store_file::read_json(&root.join(FILE)).unwrap().unwrap();
+        let doc = store_file::read_json(&store_path(&root)).unwrap().unwrap();
         let folders = doc.get("folders").unwrap().as_array().unwrap();
         assert_eq!(folders.len(), 2);
         assert_eq!(folders[1]["path"], "E:/ws/new");
@@ -502,12 +538,74 @@ mod tests {
         fs::remove_dir_all(root).ok();
     }
 
+    /// Regression for the new-conversation send failure: the front door's
+    /// `create_conversation` persists the row into
+    /// `<root>/.data/codeg-workspace.json`. If the ACP prompt half ever drifts
+    /// back to a different path, the first message of a brand-new conversation
+    /// dies with 「会话不存在」. Keep both halves on the same document.
+    #[test]
+    fn prompt_adopts_conversation_created_by_front_door() {
+        let root = temp_root("shared-store");
+        seed(&root);
+        let created = crate::backend::store_writes::handle(
+            &root,
+            "create_conversation",
+            &json!({"folderId": 1, "agentType": "claude_code", "title": "新会话"}),
+        )
+        .expect("store_writes owns create_conversation")
+        .result
+        .expect("create conversation");
+        let id = created.as_i64().expect("numeric conversation id");
+        assert_eq!(id, 3, "id comes from the seeded next counter");
+        // No stray root-level document: both halves must share one file.
+        assert!(!root.join(FILE).exists());
+
+        let out = prompt_side_write(
+            &root,
+            id,
+            1,
+            "",
+            "claude_code",
+            "你好",
+            &[json!({"type": "text", "text": "你好"})],
+            "native-1",
+        )
+        .expect("prompt must see the row create_conversation just wrote");
+        assert_eq!(out.conversation_id, id);
+
+        let doc = store_file::read_json(&store_path(&root)).unwrap().unwrap();
+        let row = doc["conversations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"].as_i64() == Some(id))
+            .expect("created row survived the prompt write");
+        assert_eq!(row["status"], "in_progress");
+        assert_eq!(row["message_count"], 1);
+        assert_eq!(
+            crate::backend::turn_store::all_turns_for(&root, id)
+                .unwrap()
+                .len(),
+            1
+        );
+        fs::remove_dir_all(&root).ok();
+    }
+
     #[test]
     fn completion_side_write_promotes_and_cancels() {
         let root = temp_root("completion");
         seed(&root);
-        prompt_side_write(&root, 2, 1, "", "", "问", &[json!({"type": "text", "text": "问"})], "native-9")
-            .expect("prompt write");
+        prompt_side_write(
+            &root,
+            2,
+            1,
+            "",
+            "",
+            "问",
+            &[json!({"type": "text", "text": "问"})],
+            "native-9",
+        )
+        .expect("prompt write");
         let events = completion_side_write(
             &root,
             2,
@@ -523,7 +621,7 @@ mod tests {
         )
         .expect("completion write");
         assert_eq!(events.len(), 1);
-        let doc = store_file::read_json(&root.join(FILE)).unwrap().unwrap();
+        let doc = store_file::read_json(&store_path(&root)).unwrap().unwrap();
         let row = &doc.get("conversations").unwrap().as_array().unwrap()[0];
         assert_eq!(row["status"], "pending_review");
         assert_eq!(row["message_count"], 2);
@@ -536,10 +634,11 @@ mod tests {
         assert_eq!(last["usage"]["input_tokens"], 10);
 
         // failure path flips status to cancelled without appending
-        let events = completion_side_write(&root, 2, false, "", &[], "", "", None, "", None, "native-9")
-            .expect("cancel write");
+        let events =
+            completion_side_write(&root, 2, false, "", &[], "", "", None, "", None, "native-9")
+                .expect("cancel write");
         assert_eq!(events.len(), 1);
-        let doc = store_file::read_json(&root.join(FILE)).unwrap().unwrap();
+        let doc = store_file::read_json(&store_path(&root)).unwrap().unwrap();
         let row = &doc.get("conversations").unwrap().as_array().unwrap()[0];
         assert_eq!(row["status"], "cancelled");
         let turns = crate::backend::turn_store::all_turns_for(&root, 2).unwrap();
@@ -550,25 +649,65 @@ mod tests {
     fn fork_commit_keeps_original_as_sibling() {
         let root = temp_root("fork");
         seed(&root);
-        prompt_side_write(&root, 2, 1, "", "", "q", &[json!({"type": "text", "text": "q"})], "n1")
-            .unwrap();
-        completion_side_write(&root, 2, true, "a1", &[], "", "fixture-message-1", None, "", None, "n1")
-            .unwrap();
-        completion_side_write(&root, 2, true, "a2", &[], "", "fixture-message-2", None, "", None, "n1")
-            .unwrap();
+        prompt_side_write(
+            &root,
+            2,
+            1,
+            "",
+            "",
+            "q",
+            &[json!({"type": "text", "text": "q"})],
+            "n1",
+        )
+        .unwrap();
+        completion_side_write(
+            &root,
+            2,
+            true,
+            "a1",
+            &[],
+            "",
+            "fixture-message-1",
+            None,
+            "",
+            None,
+            "n1",
+        )
+        .unwrap();
+        completion_side_write(
+            &root,
+            2,
+            true,
+            "a2",
+            &[],
+            "",
+            "fixture-message-2",
+            None,
+            "",
+            None,
+            "n1",
+        )
+        .unwrap();
         let sibling = fork_commit(&root, 2, 0, "n1", "n2").expect("fork commit");
         assert_eq!(sibling, 3);
-        let doc = store_file::read_json(&root.join(FILE)).unwrap().unwrap();
+        let doc = store_file::read_json(&store_path(&root)).unwrap().unwrap();
         let conversations = doc.get("conversations").unwrap().as_array().unwrap();
         assert_eq!(conversations.len(), 2);
-        assert_eq!(conversations[1]["external_id"], "n1", "sibling keeps the original native id");
         assert_eq!(
-            crate::backend::turn_store::all_turns_for(&root, 2).unwrap().len(),
+            conversations[1]["external_id"], "n1",
+            "sibling keeps the original native id"
+        );
+        assert_eq!(
+            crate::backend::turn_store::all_turns_for(&root, 2)
+                .unwrap()
+                .len(),
             1,
             "current row truncated at the fork point"
         );
         assert_eq!(
-            crate::backend::turn_store::all_turns_for(&root, 3).unwrap().len(),
+            crate::backend::turn_store::all_turns_for(&root, 3)
+                .unwrap()
+                .len(),
             3,
             "sibling keeps the full history"
         );

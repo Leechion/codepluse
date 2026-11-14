@@ -14,7 +14,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
-use crate::backend::git::{git_string, lexical_rel, readable_roots, resolve, resolve_file, within_root};
+use crate::backend::git::{
+    git_string, lexical_rel, readable_roots, resolve, resolve_file, within_root,
+};
 
 const MAX_FILE: u64 = 8 << 20;
 const IGNORED_DIRS: [&str; 6] = ["node_modules", ".git", ".next", ".data", "dist", "target"];
@@ -33,6 +35,11 @@ pub fn owns(command: &str) -> bool {
             | "read_workspace_file_base64"
             | "save_file_content"
             | "save_file_copy"
+            | "create_directory"
+            | "create_file_tree_entry"
+            | "rename_file_tree_entry"
+            | "move_file_tree_entry"
+            | "delete_file_tree_entry"
             | "get_git_head"
     )
 }
@@ -45,7 +52,10 @@ pub fn handle(root: &Path, command: &str, args: &Value) -> Option<Result<Value, 
 }
 
 fn text(args: &Value, key: &str) -> String {
-    args.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn number(args: &Value, key: &str) -> i64 {
@@ -53,8 +63,13 @@ fn number(args: &Value, key: &str) -> i64 {
 }
 
 fn disk_browse_allowed() -> bool {
-    matches!(std::env::var("HARNESS_HUB_ALLOW_ANY_PATH").as_deref(), Ok("1"))
-        || matches!(std::env::var("HARNESS_HUB_ALLOW_ANY_DIR_BROWSE").as_deref(), Ok("1"))
+    matches!(
+        std::env::var("HARNESS_HUB_ALLOW_ANY_PATH").as_deref(),
+        Ok("1")
+    ) || matches!(
+        std::env::var("HARNESS_HUB_ALLOW_ANY_DIR_BROWSE").as_deref(),
+        Ok("1")
+    )
 }
 
 // ── SHA-256 ────────────────────────────────────────────────────────────────
@@ -154,10 +169,7 @@ pub(crate) fn sha256_hex(data: &[u8]) -> String {
 
 /// `e.Type()&os.ModeSymlink != 0`
 fn is_symlink(entry: &std::fs::DirEntry) -> bool {
-    entry
-        .file_type()
-        .map(|t| t.is_symlink())
-        .unwrap_or(false)
+    entry.file_type().map(|t| t.is_symlink()).unwrap_or(false)
 }
 
 fn is_dir(entry: &std::fs::DirEntry) -> bool {
@@ -200,12 +212,30 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
     let root_path = text(args, "rootPath");
     let input = text(args, "path");
 
+    // File-tree mutations are scoped to an opened workspace folder. Resolve
+    // through the same symlink-aware guard as reads before touching disk.
+    if matches!(
+        command,
+        "create_file_tree_entry"
+            | "rename_file_tree_entry"
+            | "move_file_tree_entry"
+            | "delete_file_tree_entry"
+    ) {
+        return mutate_tree_entry(root, command, args);
+    }
+    if command == "create_directory" {
+        return create_directory(root, args);
+    }
+
     if command == "get_home_directory" {
         let resolved = resolve(root, "")?;
         return Ok(Value::String(resolved.to_string_lossy().into_owned()));
     }
 
-    let path = if matches!(command, "list_directory_entries" | "list_directory_with_files") {
+    let path = if matches!(
+        command,
+        "list_directory_entries" | "list_directory_with_files"
+    ) {
         // The folder picker may list outside the workspace only on an explicit
         // switch, mirroring `diskBrowseAllowed`.
         let mut target = input.clone();
@@ -288,7 +318,14 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
                 max_depth = 32;
             }
             let mut flat: Vec<Value> = Vec::new();
-            let nodes = walk_tree(&path, &path, 1, max_depth, command == "list_workspace_files", &mut flat)?;
+            let nodes = walk_tree(
+                &path,
+                &path,
+                1,
+                max_depth,
+                command == "list_workspace_files",
+                &mut flat,
+            )?;
             if command == "list_workspace_files" {
                 return Ok(Value::Array(flat));
             }
@@ -342,7 +379,9 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
                 ));
             }
             if command == "read_file_preview" {
-                return Ok(json!({"path": path.to_string_lossy(), "content": String::from_utf8_lossy(&data)}));
+                return Ok(
+                    json!({"path": path.to_string_lossy(), "content": String::from_utf8_lossy(&data)}),
+                );
             }
 
             let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
@@ -379,6 +418,133 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
         }
         _ => Err(format!("文件操作未实现：{command}")),
     }
+}
+
+fn single_component(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && !value.contains('/')
+        && !value.contains('\\')
+        && !value.contains('\0')
+}
+
+fn relative_to_root(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn create_directory(root: &Path, args: &Value) -> Result<Value, String> {
+    let parent = text(args, "parentPath");
+    let name = text(args, "name");
+    if !single_component(&name) {
+        return Err("文件夹名称无效".into());
+    }
+    let parent = resolve(root, &parent)?;
+    if !parent.is_dir() {
+        return Err("父目录不存在".into());
+    }
+    let target = parent.join(name);
+    std::fs::create_dir(&target).map_err(|error| match error.kind() {
+        std::io::ErrorKind::AlreadyExists => "目标已存在".to_string(),
+        _ => error.to_string(),
+    })?;
+    Ok(Value::String(target.to_string_lossy().into_owned()))
+}
+
+fn mutate_tree_entry(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
+    let folder = text(args, "rootPath");
+    let folder = if folder.is_empty() {
+        root.to_path_buf()
+    } else {
+        resolve(root, &folder)?
+    };
+    let input = text(args, "path");
+    let source_input = if command == "move_file_tree_entry" {
+        text(args, "sourcePath")
+    } else {
+        input.clone()
+    };
+    let source = resolve_file(root, &folder, &source_input)?;
+    if command != "create_file_tree_entry" && source == folder {
+        return Err("不能对工作区根目录执行此操作".into());
+    }
+    let metadata = std::fs::symlink_metadata(&source).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() {
+        return Err("不允许操作符号链接".into());
+    }
+
+    let target = match command {
+        "create_file_tree_entry" => {
+            let name = text(args, "name");
+            if !single_component(&name) {
+                return Err("文件或文件夹名称无效".into());
+            }
+            if !source.is_dir() {
+                return Err("父目录不存在".into());
+            }
+            let target = source.join(name);
+            if args.get("kind").and_then(Value::as_str) == Some("dir") {
+                std::fs::create_dir(&target).map_err(|error| error.to_string())?;
+            } else if args.get("kind").and_then(Value::as_str) == Some("file") {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&target)
+                    .map_err(|error| error.to_string())?;
+            } else {
+                return Err("创建类型必须是 file 或 dir".into());
+            }
+            target
+        }
+        "rename_file_tree_entry" => {
+            let name = text(args, "newName");
+            if !single_component(&name) {
+                return Err("新名称无效".into());
+            }
+            let target = source.parent().ok_or("源路径无效")?.join(name);
+            if target.exists() {
+                return Err("目标已存在".into());
+            }
+            std::fs::rename(&source, &target).map_err(|error| error.to_string())?;
+            target
+        }
+        "move_file_tree_entry" => {
+            let dest = text(args, "destDir");
+            let destination_dir = if dest.is_empty() {
+                folder.clone()
+            } else {
+                resolve_file(root, &folder, &dest)?
+            };
+            if !destination_dir.is_dir() {
+                return Err("目标目录不存在".into());
+            }
+            let target = destination_dir.join(source.file_name().ok_or("源路径无效")?);
+            if target == source {
+                return Ok(Value::String(relative_to_root(&folder, &target)));
+            }
+            if target.exists() {
+                return Err("目标已存在".into());
+            }
+            if metadata.is_dir() && within_root(&source, &destination_dir) {
+                return Err("不能把文件夹移动到自身内部".into());
+            }
+            std::fs::rename(&source, &target).map_err(|error| error.to_string())?;
+            target
+        }
+        "delete_file_tree_entry" => {
+            if metadata.is_dir() {
+                std::fs::remove_dir_all(&source).map_err(|error| error.to_string())?;
+            } else {
+                std::fs::remove_file(&source).map_err(|error| error.to_string())?;
+            }
+            return Ok(Value::Null);
+        }
+        _ => return Err(format!("文件操作未实现：{command}")),
+    };
+    Ok(Value::String(relative_to_root(&folder, &target)))
 }
 
 /// Depth-limited tree walk. `flat_only` keeps descending past `max_depth` for
@@ -499,6 +665,71 @@ mod tests {
     }
 
     #[test]
+    fn file_tree_mutations_create_rename_move_and_delete_entries() {
+        let root = temp_root("tree-mutations");
+        fs::create_dir(root.join("sub")).unwrap();
+
+        let created = call(
+            &root,
+            "create_file_tree_entry",
+            json!({"rootPath": root, "path": "", "name": "draft.txt", "kind": "file"}),
+        );
+        assert_eq!(created, json!("draft.txt"));
+        assert!(root.join("draft.txt").is_file());
+
+        let renamed = call(
+            &root,
+            "rename_file_tree_entry",
+            json!({"rootPath": root, "path": "draft.txt", "newName": "renamed.txt"}),
+        );
+        assert_eq!(renamed, json!("renamed.txt"));
+        assert!(!root.join("draft.txt").exists());
+
+        let moved = call(
+            &root,
+            "move_file_tree_entry",
+            json!({"rootPath": root, "sourcePath": "renamed.txt", "destDir": "sub"}),
+        );
+        assert_eq!(moved, json!("sub/renamed.txt"));
+        assert!(root.join("sub/renamed.txt").is_file());
+
+        let deleted = call(
+            &root,
+            "delete_file_tree_entry",
+            json!({"rootPath": root, "path": "sub/renamed.txt"}),
+        );
+        assert_eq!(deleted, Value::Null);
+        assert!(!root.join("sub/renamed.txt").exists());
+    }
+
+    #[test]
+    fn file_tree_mutations_reject_traversal_and_overwrite() {
+        let root = temp_root("tree-guard");
+        fs::write(root.join("existing.txt"), "keep").unwrap();
+        let invalid = handle(
+            &root,
+            "create_file_tree_entry",
+            &json!({"rootPath": root, "path": "", "name": "../escape", "kind": "file"}),
+        )
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(invalid, "文件或文件夹名称无效");
+
+        let overwrite = handle(
+            &root,
+            "rename_file_tree_entry",
+            &json!({"rootPath": root, "path": "existing.txt", "newName": "existing.txt"}),
+        )
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(overwrite, "目标已存在");
+        assert_eq!(
+            fs::read_to_string(root.join("existing.txt")).unwrap(),
+            "keep"
+        );
+    }
+
+    #[test]
     fn missing_file_and_copy_guards() {
         let root = temp_root("missing");
         // Go's resolveExistingPath collapses a non-existent tail to its parent
@@ -509,9 +740,13 @@ mod tests {
             .unwrap_err();
         assert_eq!(err, "仅支持小于 8 MiB 的普通文件");
         fs::write(root.join("here.txt"), "x").unwrap();
-        let err = handle(&root, "save_file_copy", &json!({"path": "here.txt", "content": "y"}))
-            .unwrap()
-            .unwrap_err();
+        let err = handle(
+            &root,
+            "save_file_copy",
+            &json!({"path": "here.txt", "content": "y"}),
+        )
+        .unwrap()
+        .unwrap_err();
         assert_eq!(err, "目标文件已存在");
     }
 

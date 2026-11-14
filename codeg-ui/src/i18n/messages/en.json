@@ -848,7 +848,7 @@
       "loadFailed": "Failed to load delegation settings: {detail}",
       "tabGeneral": "General",
       "tabMainAgent": "Main agent config",
-      "tabAgentDefaults": "Agent defaults",
+      "tabAgentDefaults": "Sub-agent configuration",
       "agentDefaultsDescription": "Per-agent overrides applied when Multi-Agent Collaboration spawns a subagent for a delegation call. Options shown here come from a live probe — what you pick is exactly what the agent will accept.",
       "agentDefaultsAgentHint": "Options left on Default keep the agent's own value.",
       "agentDefaultsDelegationOff": "Multi-Agent Collaboration is off. Turn it on to edit these defaults.",

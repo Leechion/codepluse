@@ -209,11 +209,15 @@ fn serve(endpoint: &str, token: &str) -> i32 {
         let params = request.get("params").cloned().unwrap_or(json!({}));
         match method.as_str() {
             "initialize" => {
-                write_message(&mut stdout, id, Ok(json!({
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": { "tools": {} },
-                    "serverInfo": { "name": "codeg-mcp-rust", "version": "0.1.0" },
-                })));
+                write_message(
+                    &mut stdout,
+                    id,
+                    Ok(json!({
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": { "tools": {} },
+                        "serverInfo": { "name": "codeg-mcp-rust", "version": "0.1.0" },
+                    })),
+                );
             }
             "ping" => write_message(&mut stdout, id, Ok(json!({}))),
             "tools/list" => {
@@ -241,8 +245,7 @@ fn serve(endpoint: &str, token: &str) -> i32 {
                             // Go hands the raw response body to the model as
                             // one text block; a non-200 marks it as an error.
                             let text = response.text().unwrap_or_default();
-                            let mut result =
-                                json!({"content": [{"type": "text", "text": text}]});
+                            let mut result = json!({"content": [{"type": "text", "text": text}]});
                             if status != reqwest::StatusCode::OK {
                                 result["isError"] = json!(true);
                             }
@@ -278,7 +281,8 @@ fn serve(endpoint: &str, token: &str) -> i32 {
 /// Go writes the JSON-RPC frames with `json.NewEncoder`, which sorts the map
 /// keys and appends a newline — the same shape `goformat` produces.
 fn go_json_line(value: &Value) -> String {
-    let mut body = crate::backend::goformat::marshal_preserve(&crate::backend::goformat::canon(value));
+    let mut body =
+        crate::backend::goformat::marshal_preserve(&crate::backend::goformat::canon(value));
     body.push(b'\n');
     String::from_utf8_lossy(&body).to_string()
 }
@@ -350,7 +354,10 @@ pub async fn dispatch(
                 .get("task_id")
                 .and_then(|value| value.as_str())
                 .unwrap_or("");
-            let task = args.get("task").and_then(|value| value.as_str()).unwrap_or("");
+            let task = args
+                .get("task")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
             layer.resume_delegation(caller, task_id, task).await
         }
         "send_agent_message" => {
@@ -359,7 +366,10 @@ pub async fn dispatch(
                 .get("task_id")
                 .and_then(|value| value.as_str())
                 .unwrap_or("");
-            let message = args.get("message").and_then(|value| value.as_str()).unwrap_or("");
+            let message = args
+                .get("message")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
             layer.send_agent_message(caller, task_id, message)
         }
         "check_user_feedback" => {
@@ -448,15 +458,16 @@ pub fn delegation_agents(root: &Path) -> Vec<Value> {
     }
     // Without profiles the strict main-bot setting decides whether the bare
     // harnesses are offered at all.
-    let main = crate::backend::store_file::read_json(&root.join("codeg-workspace.json"))
-        .ok()
-        .flatten()
-        .and_then(|doc| {
-            doc.get("settings")
-                .and_then(|settings| settings.get("get_main_bot_settings"))
-                .cloned()
-        })
-        .unwrap_or(Value::Null);
+    let main =
+        crate::backend::store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+            .ok()
+            .flatten()
+            .and_then(|doc| {
+                doc.get("settings")
+                    .and_then(|settings| settings.get("get_main_bot_settings"))
+                    .cloned()
+            })
+            .unwrap_or(Value::Null);
     let strict = !main
         .get("provider_id")
         .and_then(|value| value.as_str())
@@ -566,7 +577,10 @@ pub fn fetch_url(args: &Value) -> Result<Value, String> {
 fn looks_like_html(body: &str) -> bool {
     let head = body.to_lowercase();
     let head = &head[..head.len().min(2048)];
-    head.contains("<html") || head.contains("<body") || head.contains("<div") || head.contains("<p>")
+    head.contains("<html")
+        || head.contains("<body")
+        || head.contains("<div")
+        || head.contains("<p>")
 }
 
 /// Go `htmlToText` (webfetch.go:136): scripts, styles and comments go; block
@@ -598,7 +612,8 @@ fn html_to_text(body: &str) -> String {
                 break;
             };
             let tag = body[index + 1..index + end].to_lowercase();
-            if tag.starts_with("script") || tag.starts_with("style") || tag.starts_with("noscript") {
+            if tag.starts_with("script") || tag.starts_with("style") || tag.starts_with("noscript")
+            {
                 let name = tag.split_whitespace().next().unwrap_or("script");
                 skip_until = format!("</{name}>");
             } else if tag.starts_with("!--") {
@@ -620,8 +635,8 @@ fn html_to_text(body: &str) -> String {
 }
 
 const BLOCK_TAGS: [&str; 17] = [
-    "br", "p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "table",
-    "ul", "ol", "body",
+    "br", "p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "section", "article",
+    "table", "ul", "ol", "body",
 ];
 
 /// Go `decodeEntities` (webfetch.go:201).
@@ -650,7 +665,9 @@ fn decode_entities(text: &str) -> String {
     // Numeric entities.
     loop {
         let Some(start) = out.find("&#") else { break };
-        let Some(offset) = out[start..].find(';') else { break };
+        let Some(offset) = out[start..].find(';') else {
+            break;
+        };
         if offset == 0 {
             break;
         }
@@ -705,10 +722,7 @@ mod tests {
         assert_eq!(tools[0]["name"], json!("list_agents"));
         assert_eq!(tools[0]["inputSchema"]["required"], json!([]));
         assert_eq!(tools[6]["name"], json!("fetch_url"));
-        assert_eq!(
-            tools[6]["inputSchema"]["required"],
-            json!(["url"])
-        );
+        assert_eq!(tools[6]["inputSchema"]["required"], json!(["url"]));
     }
 
     #[test]

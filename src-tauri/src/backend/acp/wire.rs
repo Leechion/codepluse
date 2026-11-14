@@ -138,8 +138,7 @@ pub fn tool_state_wire(tools: &[Value]) -> Vec<Value> {
         .iter()
         .map(|tool| {
             let input: Value =
-                serde_json::from_str(&text(tool.get("raw_input")))
-                    .unwrap_or(Value::Null);
+                serde_json::from_str(&text(tool.get("raw_input"))).unwrap_or(Value::Null);
             let raw_output = text(tool.get("raw_output"));
             let output = if raw_output.is_empty() {
                 Value::Null
@@ -313,7 +312,11 @@ mod tests {
             ]
         });
         let out = config_wire(&view);
-        assert_eq!(out.len(), 2, "non-map guard only; a junk map still emits a null row");
+        assert_eq!(
+            out.len(),
+            2,
+            "non-map guard only; a junk map still emits a null row"
+        );
         assert_eq!(out[0]["id"], "model");
         // group flattened first, then the plain option
         assert_eq!(
@@ -343,8 +346,14 @@ mod tests {
             "junk"
         ])));
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0], json!({"option_id": "yes", "name": "允许", "kind": "allow_once"}));
-        assert_eq!(out[1], json!({"option_id": null, "name": null, "kind": null}));
+        assert_eq!(
+            out[0],
+            json!({"option_id": "yes", "name": "允许", "kind": "allow_once"})
+        );
+        assert_eq!(
+            out[1],
+            json!({"option_id": null, "name": null, "kind": null})
+        );
         assert!(permission_options(None).is_empty());
     }
 
@@ -382,17 +391,24 @@ mod tests {
             "status": "completed", "raw_output": "文件\n", "meta": Value::Null
         })];
         let blocks = persisted_blocks(&live, &tools, "兜底");
-        assert_eq!(blocks.len(), 4, "child blocks skipped, tool ref expands to 2");
+        assert_eq!(
+            blocks.len(),
+            4,
+            "child blocks skipped, tool ref expands to 2"
+        );
         assert_eq!(blocks[0], json!({"type": "text", "text": "开头"}));
         assert_eq!(blocks[1], json!({"type": "thinking", "text": "想想"}));
         assert_eq!(blocks[2]["type"], "tool_use");
         assert_eq!(blocks[2]["tool_use_id"], "t1");
         // Go passes raw_input through as the stored string, without re-parsing.
         assert_eq!(blocks[2]["input_preview"], json!(r#"{"cmd":"ls"}"#));
-        assert_eq!(blocks[3], json!({
-            "type": "tool_result", "tool_use_id": "t1",
-            "output_preview": "文件\n", "is_error": false
-        }));
+        assert_eq!(
+            blocks[3],
+            json!({
+                "type": "tool_result", "tool_use_id": "t1",
+                "output_preview": "文件\n", "is_error": false
+            })
+        );
 
         let bare = persisted_blocks(&json!({"content": []}), &[], "兜底");
         assert_eq!(bare, vec![json!({"type": "text", "text": "兜底"})]);

@@ -128,9 +128,18 @@ mod tests {
 
     #[test]
     fn status_and_state_are_constant() {
-        assert_eq!(call("app_update_status").unwrap()["currentVersion"], VERSION);
-        assert_eq!(call("app_update_status").unwrap()["capability"], "unsupported");
-        assert_eq!(call("app_update_state").unwrap(), json!({"seq": 0, "status": "idle"}));
+        assert_eq!(
+            call("app_update_status").unwrap()["currentVersion"],
+            VERSION
+        );
+        assert_eq!(
+            call("app_update_status").unwrap()["capability"],
+            "unsupported"
+        );
+        assert_eq!(
+            call("app_update_state").unwrap(),
+            json!({"seq": 0, "status": "idle"})
+        );
     }
 
     #[test]
@@ -187,10 +196,7 @@ mod tests {
 
     #[test]
     fn check_with_same_version_or_empty_reports_current() {
-        for payload in [
-            r#"{"version":"0.42.0-go"}"#,
-            r#"{"date":"2026-11-14"}"#,
-        ] {
+        for payload in [r#"{"version":"0.42.0-go"}"#, r#"{"date":"2026-11-14"}"#] {
             let url = serve_manifest(payload);
             assert_eq!(check_update_with(&url).unwrap(), no_update(), "{payload}");
         }

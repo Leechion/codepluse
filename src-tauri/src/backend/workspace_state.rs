@@ -32,7 +32,10 @@ pub fn handle(root: &Path, command: &str, args: &Value) -> Option<Result<Value, 
 }
 
 fn txt(args: &Value, key: &str) -> String {
-    args.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 /// files.go:ignoredDirs。
@@ -123,9 +126,12 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
 fn scan_workspace(root: &Path, w: &WorkspaceWatch, broadcast: bool) -> Result<Value, String> {
     let mut inner = w.inner.lock().unwrap();
     let watch_path = PathBuf::from(&w.root);
-    let tree =
-        crate::backend::files::handle(root, "get_file_tree", &json!({"path": w.root, "maxDepth": 8}))
-            .ok_or("文件树命令不可用")??;
+    let tree = crate::backend::files::handle(
+        root,
+        "get_file_tree",
+        &json!({"path": w.root, "maxDepth": 8}),
+    )
+    .ok_or("文件树命令不可用")??;
 
     let mut files: HashMap<String, String> = HashMap::new();
     walk_stamps(&watch_path, &watch_path, &mut files)?;
@@ -166,7 +172,11 @@ fn scan_workspace(root: &Path, w: &WorkspaceWatch, broadcast: bool) -> Result<Va
             }
         }
         for row in raw.as_array().cloned().unwrap_or_default() {
-            let path = row.get("file").and_then(|p| p.as_str()).unwrap_or("").to_string();
+            let path = row
+                .get("file")
+                .and_then(|p| p.as_str())
+                .unwrap_or("")
+                .to_string();
             let (add, del) = counts.get(&path).copied().unwrap_or((0, 0));
             git_rows.push(json!({
                 "path": path,

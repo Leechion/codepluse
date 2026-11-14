@@ -14,7 +14,7 @@
 //!   list_all_conversations, list_conversations, list_child_conversations,
 //!   list_opened_tabs, list_folder_groups, list_conversation_tags,
 //!   get_conversation_branch_tag, assistant_list, quick_messages_list,
-//!   get_commit_message_settings
+//!   get_commit_message_settings, get_main_bot_settings
 //!
 //! `get_folder_conversation` / `get_conversation` are NOT here: they join in the
 //! SQLite turn store, which needs its own port.
@@ -49,6 +49,7 @@ pub fn owns(command: &str) -> bool {
             | "assistant_list"
             | "quick_messages_list"
             | "get_commit_message_settings"
+            | "get_main_bot_settings"
     )
 }
 
@@ -87,7 +88,10 @@ fn number(value: Option<&Value>) -> i64 {
 }
 
 fn text(row: &Value, key: &str) -> String {
-    row.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+    row.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn id_of(row: &Value, key: &str) -> i64 {
@@ -164,7 +168,14 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
             "stats": stats(&data),
         })),
         "get_stats" => Ok(stats(&data)),
-        "list_open_folder_details" | "load_folder_history" => Ok(Value::Array(regular_folders(&data))),
+        "get_main_bot_settings" => Ok(data
+            .get("settings")
+            .and_then(|settings| settings.get("get_main_bot_settings"))
+            .cloned()
+            .unwrap_or(Value::Null)),
+        "list_open_folder_details" | "load_folder_history" => {
+            Ok(Value::Array(regular_folders(&data)))
+        }
         "list_all_folder_details" => Ok(Value::Array(rows(&data, "folders").to_vec())),
         "list_folders" => Ok(Value::Array(
             rows(&data, "folders")
@@ -179,8 +190,9 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
                 })
                 .collect(),
         )),
-        "get_folder" | "open_folder_by_id" => folder_by_id(&data, id_of(args, "folderId"))
-            .ok_or_else(|| "项目不存在".to_string()),
+        "get_folder" | "open_folder_by_id" => {
+            folder_by_id(&data, id_of(args, "folderId")).ok_or_else(|| "项目不存在".to_string())
+        }
         "get_system_settings" | "load_system_settings" => Ok(data
             .get("settings")
             .cloned()
@@ -188,10 +200,7 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
         "list_all_conversations" | "list_conversations" | "list_child_conversations" => {
             let folder_ids = ids(args, "folderIds");
             let status = args.get("status").and_then(|v| v.as_str()).unwrap_or("");
-            let agent = args
-                .get("agentType")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let agent = args.get("agentType").and_then(|v| v.as_str()).unwrap_or("");
             let folder_path = args
                 .get("folderPath")
                 .and_then(|v| v.as_str())
@@ -205,7 +214,8 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
                 if !folder_ids.is_empty() && !folder_ids.contains(&id_of(row, "folder_id")) {
                     continue;
                 }
-                if !status.is_empty() && row.get("status").and_then(|v| v.as_str()) != Some(status) {
+                if !status.is_empty() && row.get("status").and_then(|v| v.as_str()) != Some(status)
+                {
                     continue;
                 }
                 if !agent.is_empty()
@@ -230,7 +240,9 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
                     continue;
                 }
                 if !search.is_empty()
-                    && !text(row, "title").to_lowercase().contains(&search.to_lowercase())
+                    && !text(row, "title")
+                        .to_lowercase()
+                        .contains(&search.to_lowercase())
                 {
                     continue;
                 }
@@ -358,7 +370,10 @@ mod tests {
     fn folder_lookup_reports_missing() {
         let root = temp_root("folder");
         seed(&root);
-        assert_eq!(call(&root, "get_folder", json!({"folderId": 2}))["name"], "b");
+        assert_eq!(
+            call(&root, "get_folder", json!({"folderId": 2}))["name"],
+            "b"
+        );
         assert_eq!(
             handle(&root, "open_folder_by_id", &json!({"folderId": 99}))
                 .unwrap()
@@ -381,7 +396,11 @@ mod tests {
         // 逆序：只有 parent_id == 0 的顶级会话
         assert_eq!(titles, vec!["gamma", "Alpha"]);
 
-        let with_children = call(&root, "list_all_conversations", json!({"includeChildren": true}));
+        let with_children = call(
+            &root,
+            "list_all_conversations",
+            json!({"includeChildren": true}),
+        );
         assert_eq!(with_children.as_array().unwrap().len(), 3);
 
         let child = call(
@@ -395,7 +414,11 @@ mod tests {
         let by_folder = call(&root, "list_conversations", json!({"folderIds": [2]}));
         assert_eq!(by_folder.as_array().unwrap().len(), 1);
 
-        let by_path = call(&root, "list_conversations", json!({"folderPath": "E:/ws/a"}));
+        let by_path = call(
+            &root,
+            "list_conversations",
+            json!({"folderPath": "E:/ws/a"}),
+        );
         assert_eq!(by_path.as_array().unwrap().len(), 2);
 
         let by_search = call(&root, "list_conversations", json!({"search": "ALP"}));
@@ -433,14 +456,20 @@ mod tests {
             .map(|a| a["id"].as_i64().unwrap())
             .collect();
         assert_eq!(assistants, vec![1, 2]);
-        assert_eq!(call(&root, "quick_messages_list", json!({}))[0]["title"], "q");
+        assert_eq!(
+            call(&root, "quick_messages_list", json!({}))[0]["title"],
+            "q"
+        );
     }
 
     #[test]
     fn settings_and_tabs_read_through() {
         let root = temp_root("settings");
         seed(&root);
-        assert_eq!(call(&root, "get_system_settings", json!({}))["theme"], "dark");
+        assert_eq!(
+            call(&root, "get_system_settings", json!({}))["theme"],
+            "dark"
+        );
         assert_eq!(
             call(&root, "get_conversation_branch_tag", json!({}))["color"],
             "blue"
@@ -467,8 +496,14 @@ mod tests {
         assert_eq!(out["folders"], json!([]));
         assert_eq!(out["stats"]["total_conversations"], 0);
         assert_eq!(call(&root, "get_system_settings", json!({})), json!({}));
-        assert_eq!(call(&root, "list_opened_tabs", json!({})), json!({"items": [], "version": 0}));
-        assert_eq!(call(&root, "get_conversation_branch_tag", json!({})), json!({"enabled": false, "color": "default"}));
+        assert_eq!(
+            call(&root, "list_opened_tabs", json!({})),
+            json!({"items": [], "version": 0})
+        );
+        assert_eq!(
+            call(&root, "get_conversation_branch_tag", json!({})),
+            json!({"enabled": false, "color": "default"})
+        );
     }
 
     #[test]

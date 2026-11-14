@@ -107,7 +107,13 @@ fn set_status(board: &mut Value, id: i64, status: &str, actor: &str, payload: Va
             task["finished_at"] = json!(now);
         }
     });
-    push_event(board, id, "status", actor, payload_with_status(payload, status));
+    push_event(
+        board,
+        id,
+        "status",
+        actor,
+        payload_with_status(payload, status),
+    );
 }
 
 fn payload_with_status(mut payload: Value, status: &str) -> Value {
@@ -167,13 +173,15 @@ fn folder_path(root: &Path, folder_id: i64) -> Option<String> {
         .ok()
         .flatten()
         .and_then(|doc| {
-            doc.get("folders").and_then(Value::as_array).and_then(|rows| {
-                rows.iter()
-                    .find(|row| number(row.get("id")) == folder_id)
-                    .and_then(|row| row.get("path"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
+            doc.get("folders")
+                .and_then(Value::as_array)
+                .and_then(|rows| {
+                    rows.iter()
+                        .find(|row| number(row.get("id")) == folder_id)
+                        .and_then(|row| row.get("path"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
         })
 }
 
@@ -182,11 +190,13 @@ fn folder_row(root: &Path, folder_id: i64) -> Value {
         .ok()
         .flatten()
         .and_then(|doc| {
-            doc.get("folders").and_then(Value::as_array).and_then(|rows| {
-                rows.iter()
-                    .find(|row| number(row.get("id")) == folder_id)
-                    .cloned()
-            })
+            doc.get("folders")
+                .and_then(Value::as_array)
+                .and_then(|rows| {
+                    rows.iter()
+                        .find(|row| number(row.get("id")) == folder_id)
+                        .cloned()
+                })
         })
         .unwrap_or(Value::Null)
 }
@@ -429,7 +439,11 @@ async fn run_task(root: &Path, id: i64) -> Result<(), String> {
             .map_err(|e| format!("创建隔离工作树失败：{e}"))?;
         }
         checkout = target.clone();
-        engine().lock().unwrap().checkout.insert(id, checkout.clone());
+        engine()
+            .lock()
+            .unwrap()
+            .checkout
+            .insert(id, checkout.clone());
         if task.get("base_branch").map(Value::is_null).unwrap_or(true) {
             if let Some(branch) = git_ok(&folder_dir, &["rev-parse", "--abbrev-ref", "HEAD"]) {
                 update_task(&mut board, id, |task| {
@@ -479,8 +493,12 @@ async fn run_task(root: &Path, id: i64) -> Result<(), String> {
     });
 
     let title = truncate_runes(&text(task.get("title")), 80);
-    let conversation_id =
-        crate::backend::acp::store_conv::create_task_conversation(root, folder_id, &agent_type, &title)?;
+    let conversation_id = crate::backend::acp::store_conv::create_task_conversation(
+        root,
+        folder_id,
+        &agent_type,
+        &title,
+    )?;
     update_task(&mut board, id, |task| {
         task["conversation_id"] = json!(conversation_id);
     });
@@ -590,10 +608,13 @@ fn settle_task(root: &Path, id: i64, folder: &str, name: &str, conversation_id: 
     }
     set_status(&mut board, id, "review", "engine", json!({}));
     let _ = save_board(root, &board);
-    let auto_merge = folder_settings(&board, number(find_task(&board, id).and_then(|t| t.get("folder_id"))))
-        .get("auto_merge")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let auto_merge = folder_settings(
+        &board,
+        number(find_task(&board, id).and_then(|t| t.get("folder_id"))),
+    )
+    .get("auto_merge")
+    .and_then(Value::as_bool)
+    .unwrap_or(false);
     if auto_merge {
         let folder_id = number(find_task(&board, id).and_then(|t| t.get("folder_id")));
         let root_owned = root.to_path_buf();
@@ -610,7 +631,12 @@ fn last_assistant_text(root: &Path, conversation_id: i64) -> Option<String> {
         if text(turn.get("role")) != "assistant" {
             continue;
         }
-        for block in turn.get("blocks").and_then(Value::as_array).into_iter().flatten() {
+        for block in turn
+            .get("blocks")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             if text(block.get("type")) == "text" {
                 return Some(text(block.get("text")));
             }
@@ -704,13 +730,7 @@ fn dispatch_merge(
 }
 
 /// Go `processTaskMerge`：合并分支（squash 或 worktree merge）并收尾。
-async fn process_merge(
-    root: &Path,
-    folder_id: i64,
-    id: i64,
-    message: &str,
-    delete_worktree: bool,
-) {
+async fn process_merge(root: &Path, folder_id: i64, id: i64, message: &str, delete_worktree: bool) {
     let mut board = load_board(root);
     set_status(&mut board, id, "merging", "engine", json!({}));
     let _ = save_board(root, &board);
@@ -838,7 +858,11 @@ fn squash_merge(folder: &Path, branch: &str, message: &str) -> Result<(), String
     git(&target, &["add", "-A"])?;
     let _ = git(
         &target,
-        &["commit", "-m", "Agent work (auto-committed before review merge)"],
+        &[
+            "commit",
+            "-m",
+            "Agent work (auto-committed before review merge)",
+        ],
     );
     let message = if message.is_empty() {
         format!("Squash merge {branch}")
@@ -851,7 +875,17 @@ fn squash_merge(folder: &Path, branch: &str, message: &str) -> Result<(), String
     if git(folder, &["commit", "-m", &message]).is_err() {
         return Err("提交合并结果失败".into());
     }
-    if git(folder, &["worktree", "remove", "--force", target.to_string_lossy().as_ref()]).is_ok() {
+    if git(
+        folder,
+        &[
+            "worktree",
+            "remove",
+            "--force",
+            target.to_string_lossy().as_ref(),
+        ],
+    )
+    .is_ok()
+    {
         let _ = git(folder, &["branch", "-D", branch]);
     }
     Ok(())
@@ -868,7 +902,17 @@ fn merge_worktree(folder: &Path, name: &str, message: &str) -> Result<(), String
         return Err("合并失败（可能需要先处理冲突）".into());
     }
     let target = folder.join(".worktrees").join(name);
-    if git(folder, &["worktree", "remove", "--force", target.to_string_lossy().as_ref()]).is_ok() {
+    if git(
+        folder,
+        &[
+            "worktree",
+            "remove",
+            "--force",
+            target.to_string_lossy().as_ref(),
+        ],
+    )
+    .is_ok()
+    {
         let _ = git(folder, &["branch", "-D", &branch]);
     }
     Ok(())
@@ -904,7 +948,12 @@ fn discard_worktree(root: &Path, id: i64) -> Result<(), String> {
     if target.is_dir() {
         result = git(
             &folder_dir,
-            &["worktree", "remove", "--force", target.to_string_lossy().as_ref()],
+            &[
+                "worktree",
+                "remove",
+                "--force",
+                target.to_string_lossy().as_ref(),
+            ],
         )
         .map(|_| ());
         if result.is_ok() {
@@ -923,7 +972,12 @@ pub fn tick(root: &Path) {
     let board = load_board(root);
     let now = goformat::timestamp();
     let mut due = Vec::new();
-    for task in board.get("tasks").and_then(Value::as_array).into_iter().flatten() {
+    for task in board
+        .get("tasks")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let status = text(task.get("status"));
         let id = number(task.get("id"));
         if status == "todo" {
@@ -965,11 +1019,7 @@ mod tests {
             "next": 10, "nextEvent": 1, "nextTemplate": 1,
             "tasks": tasks, "events": {}, "templates": [], "settings": {}
         });
-        std::fs::write(
-            tasks_file(root),
-            serde_json::to_vec_pretty(&board).unwrap(),
-        )
-        .unwrap();
+        std::fs::write(tasks_file(root), serde_json::to_vec_pretty(&board).unwrap()).unwrap();
     }
 
     #[test]
@@ -1009,7 +1059,10 @@ mod tests {
     #[test]
     fn cancel_marks_flag_and_is_idempotent() {
         let root = temp_root("cancel");
-        seed(&root, json!([{"id": 2, "folder_id": 1, "title": "t", "status": "running"}]));
+        seed(
+            &root,
+            json!([{"id": 2, "folder_id": 1, "title": "t", "status": "running"}]),
+        );
         handle(&root, "work_task_engine_cancel_conn", &json!({"id": 2})).unwrap();
         assert!(engine().lock().unwrap().cancel.contains(&2));
         handle(&root, "work_task_engine_cancel_conn", &json!({"id": 2})).unwrap();

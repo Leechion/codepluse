@@ -139,7 +139,9 @@ fn validate(name: &str, api_url: &str, agent_type: &str) -> Result<(), String> {
 /// keeps subseconds, so they are stripped explicitly — otherwise the stored
 /// timestamps differ from the sidecar's and every parity check sees a delta.
 fn now() -> String {
-    let stamp = OffsetDateTime::now_utc().replace_nanosecond(0).unwrap_or_else(|_| OffsetDateTime::now_utc());
+    let stamp = OffsetDateTime::now_utc()
+        .replace_nanosecond(0)
+        .unwrap_or_else(|_| OffsetDateTime::now_utc());
     stamp.format(&Rfc3339).unwrap_or_default()
 }
 
@@ -151,10 +153,10 @@ fn opt(args: &Value, key: &str) -> Option<String> {
 
 pub fn list(root: &Path) -> Result<Value, String> {
     let store = read(root)?;
-    Ok(serde_json::to_value(
-        store.entries.iter().map(public).collect::<Vec<_>>(),
+    Ok(
+        serde_json::to_value(store.entries.iter().map(public).collect::<Vec<_>>())
+            .map_err(|e| e.to_string())?,
     )
-    .map_err(|e| e.to_string())?)
 }
 
 pub fn create(root: &Path, args: &Value) -> Result<Value, String> {

@@ -16,11 +16,11 @@
 //! - `timestamp()` is Go's `time.RFC3339Nano`: UTC, sub-second digits with
 //!   trailing zeros trimmed, no digits at all on whole seconds.
 
-use serde_json::{Map, Value};
 use serde_json::ser::Formatter;
+use serde_json::{Map, Value};
 use std::io;
-use time::OffsetDateTime;
 use time::macros::format_description;
+use time::OffsetDateTime;
 
 const SECONDS: &[time::format_description::FormatItem<'static>] =
     format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]");
@@ -107,10 +107,7 @@ pub fn marshal_store(doc: &Value) -> Vec<u8> {
     let mut out = Map::new();
     // `next` defaults to 1 in newStore; everything else to the zero values
     // above. Unknown top-level keys are dropped — Go's struct drops them too.
-    let next = doc
-        .get("next")
-        .map(number_of)
-        .unwrap_or(1);
+    let next = doc.get("next").map(number_of).unwrap_or(1);
     out.insert("next".into(), Value::from(next));
     for field in STORE_FIELDS {
         if *field == "next" {
@@ -384,7 +381,9 @@ mod tests {
         let b = hex_id();
         assert_eq!(a.len(), 32);
         assert_ne!(a, b);
-        assert!(a.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(a
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 
     #[test]
@@ -421,12 +420,21 @@ mod tests {
         ];
         let mut cursor = 0usize;
         for piece in expected_order {
-            let at = text[cursor..].find(piece).unwrap_or_else(|| panic!("{piece} 不在 {text}"));
-            assert_eq!(cursor + at, text.find(piece).unwrap(), "字段顺序错乱：{text}");
+            let at = text[cursor..]
+                .find(piece)
+                .unwrap_or_else(|| panic!("{piece} 不在 {text}"));
+            assert_eq!(
+                cursor + at,
+                text.find(piece).unwrap(),
+                "字段顺序错乱：{text}"
+            );
             cursor = cursor + at + piece.len();
         }
         assert!(!text.contains("unknown_key"), "未知键必须丢弃：{text}");
-        assert!(!text.contains("customAgents"), "空 customAgents 必须 omitempty：{text}");
+        assert!(
+            !text.contains("customAgents"),
+            "空 customAgents 必须 omitempty：{text}"
+        );
     }
 
     #[test]

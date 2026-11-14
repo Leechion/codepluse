@@ -116,6 +116,14 @@ fn with_db<T>(root: &Path, f: impl FnOnce(&Connection) -> Result<T, String>) -> 
     f(map.get(&key).unwrap())
 }
 
+/// Initialise the SQLite store (including the legacy-turn migration) before a
+/// caller takes the workspace document lock. Migration may itself need that
+/// lock to remove the old `turns` field, so opening the database while already
+/// holding it would wait on our own lock until timeout.
+pub fn ensure_initialized(root: &Path) -> Result<(), String> {
+    with_db(root, |_| Ok(()))
+}
+
 /// turnstore.go 的 importLegacyTurnsLocked：把旧文档里的 turns 迁进 SQLite，
 /// 备份原文件后重写文档（幂等：库里已有行的会话跳过）。
 fn migrate_legacy_turns(root: &Path, connection: &Connection) -> Result<(), String> {
@@ -305,7 +313,11 @@ fn latest(connection: &Connection, conversation: i64) -> Result<Option<TurnState
         })
 }
 
-fn state_at(connection: &Connection, conversation: i64, seq: i64) -> Result<Option<TurnState>, String> {
+fn state_at(
+    connection: &Connection,
+    conversation: i64,
+    seq: i64,
+) -> Result<Option<TurnState>, String> {
     connection
         .query_row(
             "SELECT hash_after, assistant_upto, user_upto, max_ts
@@ -355,8 +367,12 @@ fn append(connection: &Connection, conversation: i64, turn: &Value) -> Result<()
     insert_turn(connection, conversation, seq, &data, &role, &state, &ts)
 }
 
-fn replace_turns(connection: &Connection, conversation: i64, turns: &[Value]) -> Result<(), String> {
-    connection.execute("BEGIN", []).map_err(|e| e.to_string());
+fn replace_turns(
+    connection: &Connection,
+    conversation: i64,
+    turns: &[Value],
+) -> Result<(), String> {
+    connection.execute("BEGIN", []).map_err(|e| e.to_string())?;
     if let Err(err) = connection.execute(
         "DELETE FROM turns WHERE conversation_id = ?",
         [conversation],
@@ -375,21 +391,39 @@ fn replace_turns(connection: &Connection, conversation: i64, turns: &[Value]) ->
         };
         let ts = value_text(turn.get("timestamp"));
         let role = value_text(turn.get("role"));
-        if let Err(err) = insert_turn(connection, conversation, index as i64, &data, &role, &next, &ts) {
+        if let Err(err) = insert_turn(
+            connection,
+            conversation,
+            index as i64,
+            &data,
+            &role,
+            &next,
+            &ts,
+        ) {
             let _ = connection.execute("ROLLBACK", []);
             return Err(err);
         }
         state = Some(next);
     }
-    connection.execute("COMMIT", []).map(|_| ()).map_err(|e| e.to_string())
+    connection
+        .execute("COMMIT", [])
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
-fn range_rows(connection: &Connection, conversation: i64, start: i64, end: i64) -> Result<Vec<Value>, String> {
+fn range_rows(
+    connection: &Connection,
+    conversation: i64,
+    start: i64,
+    end: i64,
+) -> Result<Vec<Value>, String> {
     let mut statement = connection
         .prepare("SELECT data FROM turns WHERE conversation_id = ? AND seq >= ? AND seq < ? ORDER BY seq")
         .map_err(|e| e.to_string())?;
     let rows = statement
-        .query_map(rusqlite::params![conversation, start, end], |row| row.get::<_, String>(0))
+        .query_map(rusqlite::params![conversation, start, end], |row| {
+            row.get::<_, String>(0)
+        })
         .map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for data in rows {
@@ -404,7 +438,9 @@ fn all_turns(connection: &Connection) -> Result<BTreeMap<i64, Vec<Value>>, Strin
         .prepare("SELECT conversation_id, data FROM turns ORDER BY conversation_id, seq")
         .map_err(|e| e.to_string())?;
     let rows = statement
-        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|e| e.to_string())?;
     let mut out: BTreeMap<i64, Vec<Value>> = BTreeMap::new();
     for row in rows {
@@ -532,7 +568,12 @@ fn tool_output_text(raw: &str) -> String {
 
 // ── commands ────────────────────────────────────────────────────────────────
 
-fn run(root: &Path, command: &str, args: &Value, events: &mut Vec<(String, Value)>) -> Result<Value, String> {
+fn run(
+    root: &Path,
+    command: &str,
+    args: &Value,
+    events: &mut Vec<(String, Value)>,
+) -> Result<Value, String> {
     match command {
         "get_conversation" | "get_folder_conversation" => {
             let conversation = number_of(args.get("conversationId"));
@@ -578,14 +619,18 @@ fn run(root: &Path, command: &str, args: &Value, events: &mut Vec<(String, Value
             if start > end {
                 start = end;
             }
-            let page = with_db(root, |connection| range_rows(connection, conversation, start, end))?;
+            let page = with_db(root, |connection| {
+                range_rows(connection, conversation, start, end)
+            })?;
             let boundary = before_index.clamp(0, total);
             let mut assistant_before = 0i64;
             let mut user_before = 0i64;
             let mut prefix_hash = format!("{FNV_SEED:016x}");
             let mut uncovered_max_ts: Value = Value::Null;
             if start > 0 {
-                if let Some(state) = with_db(root, |connection| state_at(connection, conversation, start - 1))? {
+                if let Some(state) = with_db(root, |connection| {
+                    state_at(connection, conversation, start - 1)
+                })? {
                     assistant_before = state.assistant;
                     user_before = state.user;
                     prefix_hash = state.hash.clone();
@@ -601,7 +646,9 @@ fn run(root: &Path, command: &str, args: &Value, events: &mut Vec<(String, Value
             }
             let mut boundary_hash = format!("{FNV_SEED:016x}");
             if boundary > 0 {
-                if let Some(state) = with_db(root, |connection| state_at(connection, conversation, boundary - 1))? {
+                if let Some(state) = with_db(root, |connection| {
+                    state_at(connection, conversation, boundary - 1)
+                })? {
                     boundary_hash = state.hash;
                 }
             }
@@ -621,11 +668,12 @@ fn run(root: &Path, command: &str, args: &Value, events: &mut Vec<(String, Value
             if conversation <= 0 {
                 return Err("会话 ID 无效".into());
             }
-            let mut doc = match store_file::read_json(&root.join(".data").join("codeg-workspace.json"))? {
-                Some(doc) if doc.is_object() => doc,
-                Some(_) => return Err("会话 ID 无效".into()),
-                None => return Err("会话 ID 无效".into()),
-            };
+            let mut doc =
+                match store_file::read_json(&root.join(".data").join("codeg-workspace.json"))? {
+                    Some(doc) if doc.is_object() => doc,
+                    Some(_) => return Err("会话 ID 无效".into()),
+                    None => return Err("会话 ID 无效".into()),
+                };
             if conversation_row(&doc, conversation).is_none() {
                 // Go: unknown conversation is a silent no-op.
                 return Ok(Value::Null);
@@ -684,9 +732,7 @@ fn run(root: &Path, command: &str, args: &Value, events: &mut Vec<(String, Value
                 .and_then(Value::as_array)
                 .map(|tabs| {
                     tabs.iter()
-                        .filter(|tab| {
-                            !removed.contains(&number_of(tab.get("conversation_id")))
-                        })
+                        .filter(|tab| !removed.contains(&number_of(tab.get("conversation_id"))))
                         .cloned()
                         .collect()
                 })
@@ -817,9 +863,10 @@ fn collect_usage_facts(root: &Path) -> Result<(Vec<UsageFact>, bool), String> {
             if value_text(turn.get("role")) != "assistant" {
                 continue;
             }
-            let Some(usage) = turn.get("usage").filter(|u| {
-                u.as_object().map(|m| !m.is_empty()).unwrap_or(false)
-            }) else {
+            let Some(usage) = turn
+                .get("usage")
+                .filter(|u| u.as_object().map(|m| !m.is_empty()).unwrap_or(false))
+            else {
                 continue;
             };
             let Some(at) = parse_rfc3339_millis(&value_text(turn.get("timestamp"))) else {
@@ -853,8 +900,8 @@ fn collect_usage_facts(root: &Path) -> Result<(Vec<UsageFact>, bool), String> {
 fn usage_bucket_key(at_millis: i64, tz_minutes: i64, bucket: &str) -> (String, i64, i64) {
     // 固定偏移时区：at + tz 分钟，再按本地日历分桶。
     let local_millis = at_millis + tz_minutes * 60_000;
-    let local = time::OffsetDateTime::from_unix_timestamp_nanos(local_millis as i128 * 1_000_000)
-        .unwrap();
+    let local =
+        time::OffsetDateTime::from_unix_timestamp_nanos(local_millis as i128 * 1_000_000).unwrap();
     let day_start = local
         .replace_time(time::Time::MIDNIGHT)
         .unix_timestamp_nanos() as i64
@@ -867,7 +914,11 @@ fn usage_bucket_key(at_millis: i64, tz_minutes: i64, bucket: &str) -> (String, i
                 .ok()
                 .map(|d| d.replace_time(time::Time::MIDNIGHT))
                 .unwrap_or(local);
-            let key = format!("{:04}-{:02}", start_local.year(), u8::from(start_local.month()));
+            let key = format!(
+                "{:04}-{:02}",
+                start_local.year(),
+                u8::from(start_local.month())
+            );
             let start = start_local.unix_timestamp_nanos() as i64 / 1_000_000 - tz_minutes * 60_000;
             // 月长：下个月 1 日的 day_start。
             let (next_year, next_month) = if start_local.month() == time::Month::December {
@@ -901,8 +952,8 @@ fn usage_bucket_key(at_millis: i64, tz_minutes: i64, bucket: &str) -> (String, i
 /// Go `time.RFC3339` 在固定偏移时区下的输出：`+08:00` / `Z`。
 fn format_rfc3339_in_zone(utc_millis: i64, tz_minutes: i64) -> String {
     let local = utc_millis + tz_minutes * 60_000;
-    let Some(stamp) = time::OffsetDateTime::from_unix_timestamp_nanos(local as i128 * 1_000_000)
-        .ok()
+    let Some(stamp) =
+        time::OffsetDateTime::from_unix_timestamp_nanos(local as i128 * 1_000_000).ok()
     else {
         return String::new();
     };
@@ -982,10 +1033,18 @@ impl UsageSum {
 /// Go `expandFoldersLocked`：选区 + 全部后代文件夹。
 fn expand_folders(doc: &Value, ids: &[i64]) -> BTreeSet<i64> {
     let mut children: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
-    for folder in doc.get("folders").and_then(Value::as_array).into_iter().flatten() {
+    for folder in doc
+        .get("folders")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let parent = number_of(folder.get("parent_id"));
         if parent > 0 {
-            children.entry(parent).or_default().push(number_of(folder.get("id")));
+            children
+                .entry(parent)
+                .or_default()
+                .push(number_of(folder.get("id")));
         }
     }
     let mut out: BTreeSet<i64> = BTreeSet::new();
@@ -1150,7 +1209,8 @@ fn token_usage_report(root: &Path, args: &Value) -> Result<Value, String> {
         };
         let point = &mut series[index];
         point["input_tokens"] = json!(point["input_tokens"].as_f64().unwrap_or(0.0) + fact.input);
-        point["output_tokens"] = json!(point["output_tokens"].as_f64().unwrap_or(0.0) + fact.output);
+        point["output_tokens"] =
+            json!(point["output_tokens"].as_f64().unwrap_or(0.0) + fact.output);
         point["cache_creation_tokens"] =
             json!(point["cache_creation_tokens"].as_f64().unwrap_or(0.0) + fact.cache_creation);
         point["cache_read_tokens"] =
@@ -1159,11 +1219,23 @@ fn token_usage_report(root: &Path, args: &Value) -> Result<Value, String> {
         point["turn_count"] = json!(point["turn_count"].as_i64().unwrap_or(0) + 1);
 
         conv_meta.insert(fact.conv_id, fact.clone());
-        per_conv.entry(fact.conv_id).or_default().add(fact, tz_minutes);
-        by_folder.entry(fact.folder_id.to_string()).or_default().add(fact, tz_minutes);
-        by_agent.entry(fact.agent_type.clone()).or_default().add(fact, tz_minutes);
+        per_conv
+            .entry(fact.conv_id)
+            .or_default()
+            .add(fact, tz_minutes);
+        by_folder
+            .entry(fact.folder_id.to_string())
+            .or_default()
+            .add(fact, tz_minutes);
+        by_agent
+            .entry(fact.agent_type.clone())
+            .or_default()
+            .add(fact, tz_minutes);
         if !fact.model.is_empty() {
-            by_model.entry(fact.model.clone()).or_default().add(fact, tz_minutes);
+            by_model
+                .entry(fact.model.clone())
+                .or_default()
+                .add(fact, tz_minutes);
         }
         let local = fact.at_millis + tz_minutes * 60_000;
         let cell = (weekday_monday(local), local / 3_600_000 % 24);
@@ -1195,32 +1267,33 @@ fn token_usage_report(root: &Path, args: &Value) -> Result<Value, String> {
     };
     let atoi_safe = |key: &str| key.parse::<i64>().unwrap_or(0);
 
-    let breakdown = |entries: BTreeMap<String, UsageSum>, label: Box<dyn Fn(&str) -> Value>| -> Vec<Value> {
-        let mut out: Vec<Value> = entries
-            .iter()
-            .map(|(key, sum)| {
-                json!({
-                    "key": key,
-                    "label": label(key),
-                    "input_tokens": sum.input,
-                    "output_tokens": sum.output,
-                    "cache_creation_tokens": sum.cache_creation,
-                    "cache_read_tokens": sum.cache_read,
-                    "total_tokens": sum.total(),
-                    "turn_count": sum.turns,
-                    "conversation_count": sum.convs.len(),
+    let breakdown =
+        |entries: BTreeMap<String, UsageSum>, label: Box<dyn Fn(&str) -> Value>| -> Vec<Value> {
+            let mut out: Vec<Value> = entries
+                .iter()
+                .map(|(key, sum)| {
+                    json!({
+                        "key": key,
+                        "label": label(key),
+                        "input_tokens": sum.input,
+                        "output_tokens": sum.output,
+                        "cache_creation_tokens": sum.cache_creation,
+                        "cache_read_tokens": sum.cache_read,
+                        "total_tokens": sum.total(),
+                        "turn_count": sum.turns,
+                        "conversation_count": sum.convs.len(),
+                    })
                 })
-            })
-            .collect();
-        out.sort_by(|a, b| {
-            b["total_tokens"]
-                .as_f64()
-                .unwrap_or(0.0)
-                .partial_cmp(&a["total_tokens"].as_f64().unwrap_or(0.0))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        out
-    };
+                .collect();
+            out.sort_by(|a, b| {
+                b["total_tokens"]
+                    .as_f64()
+                    .unwrap_or(0.0)
+                    .partial_cmp(&a["total_tokens"].as_f64().unwrap_or(0.0))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            out
+        };
 
     let mut heatmap = Vec::new();
     for weekday in 0..7 {
@@ -1230,7 +1303,9 @@ fn token_usage_report(root: &Path, args: &Value) -> Result<Value, String> {
                     "weekday": weekday, "hour": hour,
                     "total_tokens": sum.total(), "turn_count": sum.turns,
                 }),
-                None => json!({"weekday": weekday, "hour": hour, "total_tokens": 0.0, "turn_count": 0}),
+                None => {
+                    json!({"weekday": weekday, "hour": hour, "total_tokens": 0.0, "turn_count": 0})
+                }
             };
             heatmap.push(cell);
         }
@@ -1240,7 +1315,9 @@ fn token_usage_report(root: &Path, args: &Value) -> Result<Value, String> {
     let mut conv_ids: Vec<i64> = per_conv.keys().cloned().collect();
     conv_ids.sort_by(|a, b| {
         let total = |id: i64| per_conv.get(&id).map(|sum| sum.total()).unwrap_or(0.0);
-        total(*b).partial_cmp(&total(*a)).unwrap_or(std::cmp::Ordering::Equal)
+        total(*b)
+            .partial_cmp(&total(*a))
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
     for id in conv_ids.into_iter().take(5) {
         let sum = per_conv.get(&id).unwrap();
@@ -1335,17 +1412,20 @@ fn usage_streak_row(facts: &[UsageFact], tz_minutes: i64) -> Value {
     }
     let keys: Vec<String> = days.iter().cloned().collect();
     let next_day = |day: &str| {
-        time::OffsetDateTime::parse(&format!("{day}T00:00:00Z"), &time::format_description::well_known::Rfc3339)
-            .ok()
-            .map(|t| {
-                format!(
-                    "{:04}-{:02}-{:02}",
-                    (t + time::Duration::days(1)).year(),
-                    u8::from((t + time::Duration::days(1)).month()),
-                    (t + time::Duration::days(1)).day()
-                )
-            })
-            .unwrap_or_default()
+        time::OffsetDateTime::parse(
+            &format!("{day}T00:00:00Z"),
+            &time::format_description::well_known::Rfc3339,
+        )
+        .ok()
+        .map(|t| {
+            format!(
+                "{:04}-{:02}-{:02}",
+                (t + time::Duration::days(1)).year(),
+                u8::from((t + time::Duration::days(1)).month()),
+                (t + time::Duration::days(1)).day()
+            )
+        })
+        .unwrap_or_default()
     };
     let mut longest = 0;
     let mut run_start = 0;
@@ -1366,7 +1446,11 @@ fn usage_streak_row(facts: &[UsageFact], tz_minutes: i64) -> Value {
             }
         }
     }
-    let ends_on = keys.last().cloned().map(Value::String).unwrap_or(Value::Null);
+    let ends_on = keys
+        .last()
+        .cloned()
+        .map(Value::String)
+        .unwrap_or(Value::Null);
     json!({"longest_days": longest, "current_days": current, "current_ends_on": ends_on})
 }
 
@@ -1391,7 +1475,11 @@ fn token_usage_facets(root: &Path) -> Result<Value, String> {
                 .map(|row| {
                     let alias = value_text(row.get("alias"));
                     let name = value_text(row.get("name"));
-                    let label = if alias.is_empty() { name.clone() } else { alias.clone() };
+                    let label = if alias.is_empty() {
+                        name.clone()
+                    } else {
+                        alias.clone()
+                    };
                     let parent = number_of(row.get("parent_id"));
                     json!({
                         "folder_id": number_of(row.get("id")),
@@ -1481,9 +1569,7 @@ pub fn append_turn(
     blocks: Option<&Value>,
 ) -> Result<Value, String> {
     let blocks = match blocks {
-        Some(blocks) if blocks.as_array().map(|a| !a.is_empty()).unwrap_or(false) => {
-            blocks.clone()
-        }
+        Some(blocks) if blocks.as_array().map(|a| !a.is_empty()).unwrap_or(false) => blocks.clone(),
         _ => json!([{ "type": "text", "text": body }]),
     };
     let turn = json!({
@@ -1539,7 +1625,10 @@ pub fn replace_all(root: &Path, conversation: i64, turns: &[Value]) -> Result<()
 pub fn delete_turns(root: &Path, conversation: i64) -> Result<(), String> {
     with_db(root, |connection| {
         connection
-            .execute("DELETE FROM turns WHERE conversation_id = ?", [conversation])
+            .execute(
+                "DELETE FROM turns WHERE conversation_id = ?",
+                [conversation],
+            )
             .map(|_| ())
             .map_err(|e| e.to_string())
     })

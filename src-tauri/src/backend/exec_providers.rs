@@ -116,7 +116,11 @@ fn build_entry(
     entry.insert("hasKey".into(), Value::Bool(false));
     entry.insert("source".into(), Value::String("codepluse".into()));
     if let Some(models) = models {
-        if models.as_array().map(|list| !list.is_empty()).unwrap_or(false) {
+        if models
+            .as_array()
+            .map(|list| !list.is_empty())
+            .unwrap_or(false)
+        {
             entry.insert("models".into(), models.clone());
         }
     }
@@ -180,8 +184,16 @@ pub(crate) fn normalize(args: &Value) -> Result<SaveInput, String> {
             .map(|rows| {
                 rows.iter()
                     .map(|row| PModel {
-                        id: row.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                        name: row.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        id: row
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        name: row
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
                         enabled: row.get("enabled").and_then(|v| v.as_bool()),
                     })
                     .collect()
@@ -196,7 +208,10 @@ pub(crate) fn normalize(args: &Value) -> Result<SaveInput, String> {
             _ => "openai".into(),
         };
     }
-    let known = matches!(protocol.as_str(), "openai" | "openai-responses" | "anthropic");
+    let known = matches!(
+        protocol.as_str(),
+        "openai" | "openai-responses" | "anthropic"
+    );
     if !known
         || (agent == "codex" && protocol != "openai-responses" && protocol != "openai")
         || (agent == "claude" && protocol != "anthropic")
@@ -255,9 +270,9 @@ pub fn save(root: &Path, args: &Value) -> Result<Value, String> {
     let existing = if input.id.is_empty() {
         None
     } else {
-        providers.iter().position(|p| {
-            p.get("id").and_then(|v| v.as_str()) == Some(input.id.as_str())
-        })
+        providers
+            .iter()
+            .position(|p| p.get("id").and_then(|v| v.as_str()) == Some(input.id.as_str()))
     };
 
     let entry = match existing {
@@ -326,10 +341,7 @@ pub fn save(root: &Path, args: &Value) -> Result<Value, String> {
         .unwrap_or("")
         .to_string();
     response.insert("hasKey".into(), Value::Bool(!key.is_empty()));
-    response.insert(
-        "api".into(),
-        Value::Bool(is_api(&input.url, &key)),
-    );
+    response.insert("api".into(), Value::Bool(is_api(&input.url, &key)));
     response.remove("key");
     Ok(Value::Object(response))
 }
@@ -359,7 +371,9 @@ pub fn save_external(root: &Path, args: &Value) -> Result<Value, String> {
     // and the env map dropped.
     provider.has_key = !provider.key.is_empty();
     provider.api = crate::backend::provider_catalog::is_api(&provider);
-    Ok(crate::backend::provider_catalog::provider_public_json(&provider))
+    Ok(crate::backend::provider_catalog::provider_public_json(
+        &provider,
+    ))
 }
 
 pub fn delete(root: &Path, args: &Value) -> Result<Value, String> {

@@ -63,7 +63,10 @@ pub fn current_acp_platform() -> String {
 }
 
 pub fn builtin_registry_id(id: &str) -> bool {
-    matches!(id, "codex-acp" | "claude-acp" | "claude-code-acp" | "deepseek" | "dsh" | "workbuddy")
+    matches!(
+        id,
+        "codex-acp" | "claude-acp" | "claude-code-acp" | "deepseek" | "dsh" | "workbuddy"
+    )
 }
 
 /// Go `customIDPattern` (custom_agents.go:111).
@@ -76,14 +79,16 @@ fn valid_custom_id(id: &str) -> bool {
     if !(first.is_ascii_alphanumeric()) {
         return false;
     }
-    bytes[1..].iter().all(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b == b'.' || *b == b'-')
+    bytes[1..]
+        .iter()
+        .all(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b == b'.' || *b == b'-')
 }
 
 /// Go `customDef` (custom_agents.go:117): resolve the definition behind a
 /// `custom:` wire name from `Store.CustomAgents`.
 pub fn custom_def(root: &Path, wire: &str) -> Option<CustomAgentDef> {
     let rid = wire.strip_prefix("custom:")?;
-    let doc = store_file::read_json(&root.join("codeg-workspace.json")).ok()??;
+    let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json")).ok()??;
     let raw = doc.get("customAgents")?.get(rid)?.clone();
     Some(def_from_json(&raw))
 }
@@ -102,7 +107,10 @@ pub fn def_from_json(raw: &Value) -> CustomAgentDef {
             .filter(|v| !v.is_null())
             .and_then(Value::as_str)
             .map(String::from),
-        skills_shared_store: raw.get("skillsSharedStore").and_then(Value::as_bool).unwrap_or(false),
+        skills_shared_store: raw
+            .get("skillsSharedStore")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         skills_dir: raw
             .get("skillsDir")
             .filter(|v| !v.is_null())
@@ -114,7 +122,10 @@ pub fn def_from_json(raw: &Value) -> CustomAgentDef {
             .filter(|v| !v.is_null())
             .and_then(Value::as_str)
             .map(String::from),
-        supports_mcp: raw.get("supportsMcp").and_then(Value::as_bool).unwrap_or(false),
+        supports_mcp: raw
+            .get("supportsMcp")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     }
 }
 
@@ -200,14 +211,27 @@ pub fn validate_custom_def(d: &CustomAgentDef) -> Result<(), String> {
             .unwrap_or(Value::Null);
         let archive = b.get("archive").and_then(Value::as_str).unwrap_or("");
         let u = url::Url::parse(archive).ok();
-        let ok_host = u.as_ref().map(|u| !u.host_str().unwrap_or("").is_empty()).unwrap_or(false);
-        let ok_scheme = u.as_ref().map(|u| u.scheme() == "https" || u.scheme() == "http").unwrap_or(false);
+        let ok_host = u
+            .as_ref()
+            .map(|u| !u.host_str().unwrap_or("").is_empty())
+            .unwrap_or(false);
+        let ok_scheme = u
+            .as_ref()
+            .map(|u| u.scheme() == "https" || u.scheme() == "http")
+            .unwrap_or(false);
         if !ok_host || !ok_scheme {
             return Err("归档下载地址必须为 HTTP(S) URL".into());
         }
-        safe_custom_path(Path::new("."), b.get("cmd").and_then(Value::as_str).unwrap_or(""))
-            .map_err(|e| format!("归档启动路径无效: {e}"))?;
-        if let Some(sha) = b.get("sha256").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+        safe_custom_path(
+            Path::new("."),
+            b.get("cmd").and_then(Value::as_str).unwrap_or(""),
+        )
+        .map_err(|e| format!("归档启动路径无效: {e}"))?;
+        if let Some(sha) = b
+            .get("sha256")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
             if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
                 return Err("SHA-256 校验值必须是 64 位十六进制字符串".into());
             }
@@ -238,7 +262,13 @@ pub fn custom_cache_dir(root: &Path, d: &CustomAgentDef) -> PathBuf {
     root.join(".data")
         .join("acp-custom")
         .join(&d.registry_id)
-        .join(format!("{:x}", u128::from_be_bytes(hash[..16].try_into().unwrap()))[..16].to_string().get(..16).unwrap().to_string())
+        .join(
+            format!("{:x}", u128::from_be_bytes(hash[..16].try_into().unwrap()))[..16]
+                .to_string()
+                .get(..16)
+                .unwrap()
+                .to_string(),
+        )
 }
 
 /// Go `cachedCustomLaunch` (custom_launch.go:36): a cached launch is valid when
@@ -278,7 +308,12 @@ pub fn npm_cli() -> Result<(String, String), String> {
         .map_err(|_| "未找到 Node.js，请先安装 Node.js 与 npm".to_string())?;
     let mut paths: Vec<PathBuf> = Vec::new();
     if let Some(dir) = Path::new(&node).parent() {
-        paths.push(dir.join("node_modules").join("npm").join("bin").join("npm-cli.js"));
+        paths.push(
+            dir.join("node_modules")
+                .join("npm")
+                .join("bin")
+                .join("npm-cli.js"),
+        );
     }
     for name in ["npm", "npm.cmd"] {
         if let Ok(found) = crate::backend::acp::launch::which(name) {
@@ -288,7 +323,12 @@ pub fn npm_cli() -> Result<(String, String), String> {
                 }
             }
             if let Some(dir) = Path::new(&found).parent() {
-                paths.push(dir.join("node_modules").join("npm").join("bin").join("npm-cli.js"));
+                paths.push(
+                    dir.join("node_modules")
+                        .join("npm")
+                        .join("bin")
+                        .join("npm-cli.js"),
+                );
             }
         }
     }
@@ -334,7 +374,10 @@ pub fn custom_env(base: &[String], extra: &BTreeMap<String, String>) -> Vec<Stri
     for (k, v) in extra {
         values.insert(k.clone(), v.clone());
     }
-    values.into_iter().map(|(k, v)| format!("{k}={v}")).collect()
+    values
+        .into_iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect()
 }
 
 /// Go `runCustomInstaller` (custom_launch.go:119): 5-minute window, combined
@@ -347,25 +390,31 @@ pub fn run_custom_installer(
 ) -> Result<(), String> {
     use std::process::Command;
     let mut cmd = Command::new(command);
-    cmd.args(args)
-        .current_dir(dir)
-        .env_clear();
+    cmd.args(args).current_dir(dir).env_clear();
     for item in env {
         if let Some((k, v)) = item.split_once('=') {
             cmd.env(k, v);
         }
     }
-    let output = cmd.output().map_err(|e| format!("安装自定义 ACP 智能体失败：{e}"))?;
+    let output = cmd
+        .output()
+        .map_err(|e| format!("安装自定义 ACP 智能体失败：{e}"))?;
     if !output.status.success() {
         let mut message = String::from_utf8_lossy(&output.stdout).to_string();
         message.push_str(&String::from_utf8_lossy(&output.stderr));
         let message = message.trim().to_string();
         let message = if message.chars().count() > 6000 {
-            message.chars().skip(message.chars().count() - 6000).collect()
+            message
+                .chars()
+                .skip(message.chars().count() - 6000)
+                .collect()
         } else {
             message
         };
-        return Err(format!("安装自定义 ACP 智能体失败：{}\n{message}", exit_code(&output.status)));
+        return Err(format!(
+            "安装自定义 ACP 智能体失败：{}\n{message}",
+            exit_code(&output.status)
+        ));
     }
     Ok(())
 }
@@ -409,7 +458,12 @@ pub fn safe_custom_path(root: &Path, entry: &str) -> Result<PathBuf, String> {
     Ok(root.join(cleaned))
 }
 
-fn write_custom_entry(root: &Path, name: &str, executable: bool, mut reader: impl std::io::Read) -> Result<(), String> {
+fn write_custom_entry(
+    root: &Path,
+    name: &str,
+    executable: bool,
+    mut reader: impl std::io::Read,
+) -> Result<(), String> {
     let dest = safe_custom_path(root, name)?;
     if let Some(dir) = dest.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -456,7 +510,9 @@ pub fn extract_custom_archive(root: &Path, archive: &Path, address: &str) -> Res
     } else if name.ends_with(".tar") {
         Box::new(file)
     } else {
-        return Err(format!("不支持归档格式：{name}（支持 zip、tar、tar.gz、tar.bz2）"));
+        return Err(format!(
+            "不支持归档格式：{name}（支持 zip、tar、tar.gz、tar.bz2）"
+        ));
     };
     let mut tar = tar::Archive::new(reader);
     for entry in tar.entries().map_err(|e| e.to_string())? {
@@ -467,7 +523,10 @@ pub fn extract_custom_archive(root: &Path, archive: &Path, address: &str) -> Res
         if !entry.header().entry_type().is_file() {
             return Err(format!(
                 "不支持归档中的链接或特殊文件：{}",
-                entry.path().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
+                entry
+                    .path()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default()
             ));
         }
         let name = entry
@@ -493,9 +552,14 @@ pub fn install_custom_archive(root: &Path, dir: &Path, b: &Value) -> Result<Stri
     let response = crate::backend::net::get(archive_url, std::time::Duration::from_secs(5 * 60))
         .map_err(|e| format!("下载智能体失败：{e}"))?;
     if response.status().as_u16() != 200 {
-        return Err(format!("下载智能体失败：HTTP {}", response.status().as_u16()));
+        return Err(format!(
+            "下载智能体失败：HTTP {}",
+            response.status().as_u16()
+        ));
     }
-    let body = response.bytes().map_err(|e| format!("下载智能体失败：{e}"))?;
+    let body = response
+        .bytes()
+        .map_err(|e| format!("下载智能体失败：{e}"))?;
     let mut hasher = Sha256::new();
     hasher.update(&body);
     let hash = format!("{:x}", hasher.finalize());
@@ -539,7 +603,11 @@ pub fn prepare_custom(root: &Path, d: &CustomAgentDef) -> Result<CustomLaunch, S
         return Ok(launch);
     }
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let mut launch = CustomLaunch { version: d.version.clone(), args: Vec::new(), command: String::new() };
+    let mut launch = CustomLaunch {
+        version: d.version.clone(),
+        args: Vec::new(),
+        command: String::new(),
+    };
     match d.kind.as_str() {
         "binary" => {
             let b = d
@@ -558,7 +626,11 @@ pub fn prepare_custom(root: &Path, d: &CustomAgentDef) -> Result<CustomLaunch, S
             let package_name = npm_package_name(package);
             if package_name.is_empty()
                 || !(package_name.starts_with('@')
-                    || package_name.bytes().next().map(|b| b.is_ascii_alphanumeric() || b == b'_').unwrap_or(false))
+                    || package_name
+                        .bytes()
+                        .next()
+                        .map(|b| b.is_ascii_alphanumeric() || b == b'_')
+                        .unwrap_or(false))
             {
                 return Err(format!("npm 包名称无效：{package_name}"));
             }
@@ -575,7 +647,9 @@ pub fn prepare_custom(root: &Path, d: &CustomAgentDef) -> Result<CustomLaunch, S
                     "--".into(),
                     package.into(),
                 ],
-                &std::env::vars().map(|(k, v)| format!("{k}={v}")).collect::<Vec<String>>(),
+                &std::env::vars()
+                    .map(|(k, v)| format!("{k}={v}"))
+                    .collect::<Vec<String>>(),
                 &dir,
             )?;
             let package_dir = dir
@@ -619,7 +693,11 @@ pub fn prepare_custom(root: &Path, d: &CustomAgentDef) -> Result<CustomLaunch, S
             if !entry.exists() {
                 return Err(custom_not_installed(&d.name, None));
             }
-            launch.version = pkg.get("version").and_then(Value::as_str).unwrap_or("").to_string();
+            launch.version = pkg
+                .get("version")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             let mut prefix = [0u8; 128];
             let n = std::fs::File::open(&entry)
                 .and_then(|mut f| std::io::Read::read(&mut f, &mut prefix))
@@ -649,16 +727,33 @@ pub fn prepare_custom(root: &Path, d: &CustomAgentDef) -> Result<CustomLaunch, S
                 args.push(python.into());
             }
             args.push("--".into());
-            args.push(p.get("package").and_then(Value::as_str).unwrap_or("").into());
+            args.push(
+                p.get("package")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .into(),
+            );
             let mut extra = BTreeMap::new();
-            extra.insert("UV_TOOL_DIR".into(), dir.join("tools").to_string_lossy().to_string());
-            extra.insert("UV_TOOL_BIN_DIR".into(), dir.join("bin").to_string_lossy().to_string());
+            extra.insert(
+                "UV_TOOL_DIR".into(),
+                dir.join("tools").to_string_lossy().to_string(),
+            );
+            extra.insert(
+                "UV_TOOL_BIN_DIR".into(),
+                dir.join("bin").to_string_lossy().to_string(),
+            );
             let process_env = custom_env(
-                &std::env::vars().map(|(k, v)| format!("{k}={v}")).collect::<Vec<String>>(),
+                &std::env::vars()
+                    .map(|(k, v)| format!("{k}={v}"))
+                    .collect::<Vec<String>>(),
                 &extra,
             );
             run_custom_installer(&uv, &args, &process_env, &dir)?;
-            let mut name = p.get("cmd").and_then(Value::as_str).unwrap_or("").to_string();
+            let mut name = p
+                .get("cmd")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             if name.is_empty() {
                 name = python_command_name(p.get("package").and_then(Value::as_str).unwrap_or(""));
             }
@@ -669,7 +764,9 @@ pub fn prepare_custom(root: &Path, d: &CustomAgentDef) -> Result<CustomLaunch, S
             if !entry.exists() {
                 return Err(custom_not_installed(
                     &d.name,
-                    Some(&format!("找不到 uv 工具入口 {name}，请在手动配置中填写 cmd")),
+                    Some(&format!(
+                        "找不到 uv 工具入口 {name}，请在手动配置中填写 cmd"
+                    )),
                 ));
             }
             launch.command = entry.to_string_lossy().to_string();
@@ -742,8 +839,14 @@ pub fn custom_agent_launch(root: &Path, agent: &Agent) -> Result<Option<Launch>,
             .and_then(|b| b.get("env"))
             .cloned()
             .unwrap_or(Value::Null),
-        "npx" => spec_part(&d, "npx").and_then(|p| p.get("env")).cloned().unwrap_or(Value::Null),
-        "uvx" => spec_part(&d, "uvx").and_then(|p| p.get("env")).cloned().unwrap_or(Value::Null),
+        "npx" => spec_part(&d, "npx")
+            .and_then(|p| p.get("env"))
+            .cloned()
+            .unwrap_or(Value::Null),
+        "uvx" => spec_part(&d, "uvx")
+            .and_then(|p| p.get("env"))
+            .cloned()
+            .unwrap_or(Value::Null),
         _ => Value::Null,
     };
     if let Some(map) = env_spec.as_object() {
@@ -756,7 +859,9 @@ pub fn custom_agent_launch(root: &Path, agent: &Agent) -> Result<Option<Launch>,
         }
     }
     let mut process_env = custom_env(
-        &std::env::vars().map(|(k, v)| format!("{k}={v}")).collect::<Vec<String>>(),
+        &std::env::vars()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<String>>(),
         &extra,
     );
     // Go LaunchOverlay: the settings-page env overlay merged on top.
@@ -776,7 +881,8 @@ pub fn custom_agent_launch(root: &Path, agent: &Agent) -> Result<Option<Launch>,
 
 fn overlay_env_map(root: &Path, agent: &Agent) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
-    let Ok(Some(doc)) = store_file::read_json(&root.join("codeg-workspace.json")) else {
+    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    else {
         return out;
     };
     let wire = crate::backend::acp::agents::wire_agent(agent);
@@ -854,7 +960,11 @@ mod tests {
         extra.insert("C".to_string(), "3".to_string());
         assert_eq!(
             custom_env(&base, &extra),
-            vec!["A=1".to_string(), "B=override".to_string(), "C=3".to_string()]
+            vec![
+                "A=1".to_string(),
+                "B=override".to_string(),
+                "C=3".to_string()
+            ]
         );
     }
 
@@ -888,7 +998,7 @@ mod tests {
     fn custom_def_reads_store_and_launch_roundtrip() {
         let root = temp_root("def");
         std::fs::write(
-            root.join("codeg-workspace.json"),
+            root.join(".data").join("codeg-workspace.json"),
             json!({
                 "customAgents": {
                     "hello": {"registryId": "hello", "name": "Hello", "description": "",

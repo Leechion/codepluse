@@ -48,8 +48,14 @@ fn current_platform() -> String {
     format!("{}-{}", std::env::consts::OS, arch)
 }
 
-const BUILTIN_REGISTRY_IDS: [&str; 6] =
-    ["codex-acp", "claude-acp", "claude-code-acp", "deepseek", "dsh", "workbuddy"];
+const BUILTIN_REGISTRY_IDS: [&str; 6] = [
+    "codex-acp",
+    "claude-acp",
+    "claude-code-acp",
+    "deepseek",
+    "dsh",
+    "workbuddy",
+];
 
 fn builtin_registry_id(id: &str) -> bool {
     BUILTIN_REGISTRY_IDS.contains(&id)
@@ -94,7 +100,10 @@ pub(crate) fn validate_custom_def(def: &Value, platform: &str) -> Option<String>
     if !valid_id || builtin_registry_id(id) {
         return Some("自定义智能体 ID 无效或与内置执行端冲突".into());
     }
-    let kind = def.get("distributionKind").and_then(|v| v.as_str()).unwrap_or("");
+    let kind = def
+        .get("distributionKind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let spec = def.get("spec").cloned().unwrap_or(json!({}));
     if !kind_runs_here(&spec, kind, platform) {
         return Some(format!("{id} 未提供适用于 {platform} 的 {kind} 发行版"));
@@ -114,7 +123,8 @@ pub(crate) fn validate_custom_def(def: &Value, platform: &str) -> Option<String>
             return Some(format!("归档启动路径无效: {err}"));
         }
         let sha256 = binary.get("sha256").and_then(|s| s.as_str()).unwrap_or("");
-        if !sha256.is_empty() && !(sha256.len() == 64 && sha256.bytes().all(|b| b.is_ascii_hexdigit()))
+        if !sha256.is_empty()
+            && !(sha256.len() == 64 && sha256.bytes().all(|b| b.is_ascii_hexdigit()))
         {
             return Some("SHA-256 校验值必须是 64 位十六进制字符串".into());
         }
@@ -200,7 +210,10 @@ fn normalize_spec(v: &Value) -> Value {
     };
     let package = |raw: &Value| {
         let mut out = serde_json::Map::new();
-        out.insert("package".into(), raw.get("package").cloned().unwrap_or(json!("")));
+        out.insert(
+            "package".into(),
+            raw.get("package").cloned().unwrap_or(json!("")),
+        );
         for key in ["cmd", "args", "env", "python", "nodeRequired", "uvRequired"] {
             if let Some(item) = raw.get(key).filter(|i| non_empty(i)) {
                 out.insert(key.into(), item.clone());
@@ -220,7 +233,10 @@ fn normalize_spec(v: &Value) -> Value {
             let mut platforms = serde_json::Map::new();
             for (platform, raw) in binary {
                 let mut entry = serde_json::Map::new();
-                entry.insert("archive".into(), raw.get("archive").cloned().unwrap_or(json!("")));
+                entry.insert(
+                    "archive".into(),
+                    raw.get("archive").cloned().unwrap_or(json!("")),
+                );
                 entry.insert("cmd".into(), raw.get("cmd").cloned().unwrap_or(json!("")));
                 for key in ["args", "env", "sha256"] {
                     if let Some(item) = raw.get(key).filter(|i| non_empty(i)) {
@@ -238,7 +254,12 @@ fn normalize_spec(v: &Value) -> Value {
 /// Go customAgentDef 经 `json.Marshal` → `json.Unmarshal` 进 Row 后的键集：
 /// 无 omitempty 的字段永远存在（指针缺失 → null，字符串缺失 → ""）。
 fn def_row(map_key: &str, def: &Value) -> Value {
-    let s = |key: &str| def.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let s = |key: &str| {
+        def.get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
     let nullable = |key: &str| def.get(key).cloned().unwrap_or(Value::Null);
     let _ = map_key; // Go 的 registryId/agentType 取结构体字段，不用 map 键。
     json!({
@@ -383,7 +404,11 @@ fn save_custom_agent(root: &Path, params: &Value) -> Result<Value, String> {
     }
     let old = custom.get(&registry_id).cloned();
     // skillsDir：~/ 展开，空置 null，相对路径拒绝。
-    if let Some(dir) = def.get("skillsDir").and_then(Value::as_str).map(str::to_string) {
+    if let Some(dir) = def
+        .get("skillsDir")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    {
         let mut dir = dir.trim().to_string();
         if dir.starts_with("~/") || dir.starts_with("~\\") {
             let home = std::env::var("USERPROFILE")
@@ -559,7 +584,10 @@ mod tests {
     #[test]
     fn platform_matches_go_mapping() {
         // GOOS windows + GOARCH amd64 → windows-x86_64。
-        assert_eq!(current_platform(), format!("{}-{}", std::env::consts::OS, "x86_64"));
+        assert_eq!(
+            current_platform(),
+            format!("{}-{}", std::env::consts::OS, "x86_64")
+        );
     }
 
     #[test]
@@ -585,7 +613,10 @@ mod tests {
         // 包名以 - 开头。
         let bad = json!({"registryId": "myagent", "distributionKind": "npx",
             "spec": {"npx": {"package": "-x"}}});
-        assert_eq!(validate_custom_def(&bad, &platform).as_deref(), Some("包名称无效"));
+        assert_eq!(
+            validate_custom_def(&bad, &platform).as_deref(),
+            Some("包名称无效")
+        );
     }
 
     #[test]
@@ -646,17 +677,25 @@ mod tests {
         assert_eq!(row["launchable"], true);
 
         // 删除。
-        handle(&root, "acp_delete_custom_agent", &json!({"registryId": "demo-agent"}))
-            .unwrap()
-            .unwrap();
+        handle(
+            &root,
+            "acp_delete_custom_agent",
+            &json!({"registryId": "demo-agent"}),
+        )
+        .unwrap()
+        .unwrap();
         let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
             .unwrap()
             .unwrap();
         assert!(doc["customAgents"].get("demo-agent").is_none());
         assert_eq!(
-            handle(&root, "acp_delete_custom_agent", &json!({"registryId": "demo-agent"}))
-                .unwrap()
-                .unwrap_err(),
+            handle(
+                &root,
+                "acp_delete_custom_agent",
+                &json!({"registryId": "demo-agent"})
+            )
+            .unwrap()
+            .unwrap_err(),
             "自定义智能体不存在"
         );
     }
@@ -734,7 +773,10 @@ mod tests {
         let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
             .unwrap()
             .unwrap();
-        assert_eq!(doc["customAgents"]["ok-agent"]["supportsMcp"], false, "继承旧值");
+        assert_eq!(
+            doc["customAgents"]["ok-agent"]["supportsMcp"], false,
+            "继承旧值"
+        );
     }
 
     #[test]

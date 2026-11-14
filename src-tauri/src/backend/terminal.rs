@@ -22,8 +22,8 @@ use std::{mem, ptr};
 
 use serde_json::{json, Value};
 
-use crate::backend::{emit_event, goformat, store_file};
 use crate::backend::git::resolve;
+use crate::backend::{emit_event, goformat, store_file};
 
 pub fn owns(command: &str) -> bool {
     matches!(
@@ -36,6 +36,8 @@ pub fn owns(command: &str) -> bool {
             | "terminal_snapshot"
             | "get_available_terminal_shells"
             | "probe_terminal_shell_path"
+            | "get_system_terminal_settings"
+            | "update_system_terminal_settings"
     )
 }
 
@@ -47,7 +49,10 @@ pub fn handle(root: &Path, command: &str, args: &Value) -> Option<Result<Value, 
 }
 
 fn txt(args: &Value, key: &str) -> String {
-    args.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Go `number()`：JSON 数值 → int，NaN/超界按 Go 的钳制处理。
@@ -72,13 +77,17 @@ fn num(args: &Value, key: &str) -> i64 {
 /// PATHEXT 逐个尝试。找不到时复刻 Go 的错误文案。
 fn look_path(name: &str) -> Result<String, String> {
     let executable = |path: &Path| -> bool {
-        std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false)
+        std::fs::metadata(path)
+            .map(|m| m.is_file())
+            .unwrap_or(false)
     };
     if name.contains('/') || name.contains('\\') {
         if executable(Path::new(name)) {
             return Ok(name.to_string());
         }
-        return Err(format!("exec: \"{name}\": executable file not found in %PATH%"));
+        return Err(format!(
+            "exec: \"{name}\": executable file not found in %PATH%"
+        ));
     }
     let pathext: Vec<String> = match std::env::var("PATHEXT") {
         Ok(v) if !v.trim().is_empty() => v
@@ -86,7 +95,10 @@ fn look_path(name: &str) -> Result<String, String> {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .collect(),
-        _ => [".COM", ".EXE", ".BAT", ".CMD"].iter().map(|s| s.to_string()).collect(),
+        _ => [".COM", ".EXE", ".BAT", ".CMD"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
     };
     let path = std::env::var("PATH").unwrap_or_default();
     for dir in path.split(';') {
@@ -109,7 +121,9 @@ fn look_path(name: &str) -> Result<String, String> {
             return Ok(base.to_string_lossy().to_string());
         }
     }
-    Err(format!("exec: \"{name}\": executable file not found in %PATH%"))
+    Err(format!(
+        "exec: \"{name}\": executable file not found in %PATH%"
+    ))
 }
 
 /// Go `filepath.Base`（\ 与 / 都算分隔符）。
@@ -144,8 +158,8 @@ fn terminal_shell(shell: &str) -> Result<String, String> {
     };
     // 自定义路径只放行已知交互 shell，防止把任意可执行文件当 shell 拉起。
     match shell_base(&resolved).to_lowercase().as_str() {
-        "pwsh.exe" | "pwsh" | "powershell.exe" | "powershell" | "cmd.exe" | "cmd"
-        | "bash.exe" | "bash" | "wsl.exe" | "sh" | "zsh" => Ok(resolved),
+        "pwsh.exe" | "pwsh" | "powershell.exe" | "powershell" | "cmd.exe" | "cmd" | "bash.exe"
+        | "bash" | "wsl.exe" | "sh" | "zsh" => Ok(resolved),
         other => Err(format!("不支持的自定义 Shell：{other}")),
     }
 }
@@ -157,6 +171,53 @@ fn saved_default_shell(root: &Path) -> Option<String> {
         .get("default_shell")?
         .as_str()
         .map(|s| s.to_string())
+}
+
+fn system_terminal_settings(root: &Path) -> Result<Value, String> {
+    let path = root.join(".data").join("codeg-workspace.json");
+    let doc = store_file::read_json(&path)?.unwrap_or_else(|| json!({}));
+    let saved = doc
+        .get("settings")
+        .and_then(|settings| settings.get("get_system_terminal_settings"));
+    Ok(json!({
+        "default_shell": saved.and_then(|value| value.get("default_shell")).cloned().unwrap_or(Value::Null),
+        "colorize_command_output": saved
+            .and_then(|value| value.get("colorize_command_output"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    }))
+}
+
+fn update_system_terminal_settings(root: &Path, args: &Value) -> Result<Value, String> {
+    let settings = args
+        .get("settings")
+        .and_then(Value::as_object)
+        .ok_or("终端设置无效")?;
+    let default_shell = match settings.get("default_shell") {
+        None | Some(Value::Null) => Value::Null,
+        Some(Value::String(shell)) => json!(shell),
+        _ => return Err("默认 Shell 设置无效".into()),
+    };
+    let colorize_command_output = settings
+        .get("colorize_command_output")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let updated = json!({
+        "default_shell": default_shell,
+        "colorize_command_output": colorize_command_output,
+    });
+
+    let path = root.join(".data").join("codeg-workspace.json");
+    let _lock = store_file::lock(&path)?;
+    let mut doc = store_file::read_json(&path)?.unwrap_or_else(|| json!({}));
+    let doc_object = doc.as_object_mut().ok_or("工作区设置格式无效")?;
+    let workspace_settings = doc_object.entry("settings").or_insert_with(|| json!({}));
+    let workspace_settings = workspace_settings
+        .as_object_mut()
+        .ok_or("工作区设置格式无效")?;
+    workspace_settings.insert("get_system_terminal_settings".into(), updated.clone());
+    store_file::write_json(&path, &doc)?;
+    Ok(updated)
 }
 
 fn shell_options(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
@@ -266,7 +327,13 @@ extern "system" {
         attrs: *const core::ffi::c_void,
         size: u32,
     ) -> i32;
-    fn CreatePseudoConsole(size: Coord, input: HANDLE, output: HANDLE, flags: u32, hpc: *mut HPCON) -> i32;
+    fn CreatePseudoConsole(
+        size: Coord,
+        input: HANDLE,
+        output: HANDLE,
+        flags: u32,
+        hpc: *mut HPCON,
+    ) -> i32;
     fn ResizePseudoConsole(hpc: HPCON, size: Coord) -> i32;
     fn ClosePseudoConsole(hpc: HPCON);
     fn InitializeProcThreadAttributeList(
@@ -331,12 +398,17 @@ fn win32_message(code: u32) -> String {
     if n == 0 {
         return format!("错误 {code}");
     }
-    String::from_utf16_lossy(&buf[..n as usize]).trim_end().to_string()
+    String::from_utf16_lossy(&buf[..n as usize])
+        .trim_end()
+        .to_string()
 }
 
 fn wide(s: &str) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
-    std::ffi::OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    std::ffi::OsStr::new(s)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 /// conpty 库的 `createEnvBlock`：把 UTF-8 字节逐字节当 UTF-16 码元编码
@@ -390,7 +462,12 @@ fn close_pipes_early(pty_in: HANDLE, pty_out: HANDLE, cmd_in: HANDLE, cmd_out: H
     unsafe { CloseHandle(cmd_out) };
 }
 
-fn start_native_pty(shell: &str, cwd: &str, cols: i32, rows: i32) -> Result<(PtyHandles, File), String> {
+fn start_native_pty(
+    shell: &str,
+    cwd: &str,
+    cols: i32,
+    rows: i32,
+) -> Result<(PtyHandles, File), String> {
     let mut command = format!("\"{shell}\"");
     let lower = shell.to_lowercase();
     if lower.contains("powershell") || shell_base(shell).eq_ignore_ascii_case("pwsh.exe") {
@@ -412,11 +489,22 @@ fn start_native_pty(shell: &str, cwd: &str, cols: i32, rows: i32) -> Result<(Pty
 
     let mut hpc: HPCON = ptr::null_mut();
     let status = unsafe {
-        CreatePseudoConsole(Coord { x: cols as i16, y: rows as i16 }, pty_in, pty_out, 0, &mut hpc)
+        CreatePseudoConsole(
+            Coord {
+                x: cols as i16,
+                y: rows as i16,
+            },
+            pty_in,
+            pty_out,
+            0,
+            &mut hpc,
+        )
     };
     if status != 0 {
         close_pipes_early(pty_in, pty_out, cmd_in, cmd_out);
-        return Err(format!("CreatePseudoConsole() failed with status 0x{status:x}"));
+        return Err(format!(
+            "CreatePseudoConsole() failed with status 0x{status:x}"
+        ));
     }
 
     // 属性列表挂 pseudoconsole，与 conpty 库同一流程（库不做 Delete 清理）。
@@ -496,7 +584,10 @@ fn start_native_pty(shell: &str, cwd: &str, cols: i32, rows: i32) -> Result<(Pty
         let code = unsafe { GetLastError() };
         close_pipes_early(pty_in, pty_out, cmd_in, cmd_out);
         unsafe { ClosePseudoConsole(hpc) };
-        return Err(format!("Failed to create console process: {}", win32_message(code)));
+        return Err(format!(
+            "Failed to create console process: {}",
+            win32_message(code)
+        ));
     }
 
     Ok((
@@ -617,7 +708,10 @@ fn spawn_session(tid: String, shell: &str, cwd: &str, initial: &str) -> Result<(
     let _ = session.hpc.set(SendPtr(hpc));
 
     // 先登记再起线程：output/exit 事件只有在会话进表后才对得上门牌。
-    sessions().lock().unwrap().insert(tid.clone(), Arc::clone(&session));
+    sessions()
+        .lock()
+        .unwrap()
+        .insert(tid.clone(), Arc::clone(&session));
 
     // 读输出线程：8 KB 块、rune 边界、2 MB 截断，逐块发 output 事件。
     let reader = Arc::clone(&session);
@@ -627,7 +721,11 @@ fn spawn_session(tid: String, shell: &str, cwd: &str, initial: &str) -> Result<(
     let waiter = Arc::clone(&session);
     let wait_tid = tid.clone();
     std::thread::spawn(move || {
-        let process = waiter.process.get().map(SendPtr::raw).unwrap_or(ptr::null_mut());
+        let process = waiter
+            .process
+            .get()
+            .map(SendPtr::raw)
+            .unwrap_or(ptr::null_mut());
         loop {
             let r = unsafe { WaitForSingleObject(process, 1000) };
             if r != WAIT_TIMEOUT {
@@ -813,6 +911,12 @@ pub(crate) fn go_lossy_bytes(bytes: &[u8]) -> String {
 // ── 命令分发（terminal.go:terminalCommand）──────────────────────────────────
 
 fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
+    if command == "get_system_terminal_settings" {
+        return system_terminal_settings(root);
+    }
+    if command == "update_system_terminal_settings" {
+        return update_system_terminal_settings(root, args);
+    }
     let tid = txt(args, "terminalId");
     if command == "get_available_terminal_shells" || command == "probe_terminal_shell_path" {
         return shell_options(root, command, args);
@@ -894,7 +998,9 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
             let mut slot = t.handles.lock().unwrap();
             let pty = slot.as_mut().ok_or("终端不存在")?;
             // Go：写失败返回错误，无返回值。
-            pty.cmd_in.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+            pty.cmd_in
+                .write_all(data.as_bytes())
+                .map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
         "terminal_resize" => {
@@ -906,10 +1012,18 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
             }
             let hpc = t.hpc.get().map(|p| p.raw()).unwrap_or(ptr::null_mut());
             let status = unsafe {
-                ResizePseudoConsole(hpc, Coord { x: cols as i16, y: rows as i16 })
+                ResizePseudoConsole(
+                    hpc,
+                    Coord {
+                        x: cols as i16,
+                        y: rows as i16,
+                    },
+                )
             };
             if status != 0 {
-                return Err(format!("ResizePseudoConsole failed with status 0x{status:x}"));
+                return Err(format!(
+                    "ResizePseudoConsole failed with status 0x{status:x}"
+                ));
             }
             let mut inner = t.inner.lock().unwrap();
             inner.cols = cols;
@@ -942,10 +1056,7 @@ mod tests {
     use serde_json::json;
 
     fn temp_root(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "codepluse-term-{tag}-{}",
-            goformat::hex_id()
-        ));
+        let dir = std::env::temp_dir().join(format!("codepluse-term-{tag}-{}", goformat::hex_id()));
         std::fs::create_dir_all(dir.join(".data")).unwrap();
         dir
     }
@@ -974,7 +1085,8 @@ mod tests {
     #[test]
     fn shell_options_shape() {
         let root = temp_root("opts");
-        let value = shell_options(&root, "get_available_terminal_shells", &json!({"path": ""})).unwrap();
+        let value =
+            shell_options(&root, "get_available_terminal_shells", &json!({"path": ""})).unwrap();
         let options = value["options"].as_array().unwrap();
         assert_eq!(options[0]["id"], json!("default"));
         assert_eq!(options[0]["label_key"], json!("terminalSystemDefault"));
@@ -997,18 +1109,31 @@ mod tests {
         );
         // 不存在的终端 write/resize 报错文案与 Go 一致。
         assert_eq!(
-            run(&root, "terminal_write", &json!({"terminalId": "ghost", "data": "x"})).unwrap_err(),
+            run(
+                &root,
+                "terminal_write",
+                &json!({"terminalId": "ghost", "data": "x"})
+            )
+            .unwrap_err(),
             "终端不存在"
         );
         assert_eq!(
-            run(&root, "terminal_resize", &json!({"terminalId": "ghost", "cols": 80, "rows": 24}))
-                .unwrap_err(),
+            run(
+                &root,
+                "terminal_resize",
+                &json!({"terminalId": "ghost", "cols": 80, "rows": 24})
+            )
+            .unwrap_err(),
             "终端不存在"
         );
         // 尺寸越界：Go 先查会话存在性，missing 终端永远是「终端不存在」。
         assert_eq!(
-            run(&root, "terminal_resize", &json!({"terminalId": "ghost", "cols": 0, "rows": 24}))
-                .unwrap_err(),
+            run(
+                &root,
+                "terminal_resize",
+                &json!({"terminalId": "ghost", "cols": 0, "rows": 24})
+            )
+            .unwrap_err(),
             "终端不存在"
         );
         std::fs::remove_dir_all(root).ok();
@@ -1021,22 +1146,39 @@ mod tests {
         let root = temp_root("pty");
         let cwd = root.to_string_lossy().to_string();
         spawn_session("test-pty".into(), "cmd.exe", &cwd, "").unwrap();
-        run(&root, "terminal_write", &json!({"terminalId": "test-pty", "data": "exit /b 7\r"}))
-            .unwrap();
+        run(
+            &root,
+            "terminal_write",
+            &json!({"terminalId": "test-pty", "data": "exit /b 7\r"}),
+        )
+        .unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
         loop {
-            let snap = run(&root, "terminal_snapshot", &json!({"terminalId": "test-pty"})).unwrap();
+            let snap = run(
+                &root,
+                "terminal_snapshot",
+                &json!({"terminalId": "test-pty"}),
+            )
+            .unwrap();
             if snap["alive"] == json!(false) {
                 assert_eq!(snap["exit_code"], json!(7), "{snap}");
                 assert!(snap["generation"].as_str().is_some(), "{snap}");
                 assert!(snap["seq"].as_i64().unwrap_or(0) >= 1, "{snap}");
                 break;
             }
-            assert!(std::time::Instant::now() < deadline, "PTY did not exit: {snap}");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "PTY did not exit: {snap}"
+            );
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         run(&root, "terminal_kill", &json!({"terminalId": "test-pty"})).unwrap();
-        let snap = run(&root, "terminal_snapshot", &json!({"terminalId": "test-pty"})).unwrap();
+        let snap = run(
+            &root,
+            "terminal_snapshot",
+            &json!({"terminalId": "test-pty"}),
+        )
+        .unwrap();
         assert_eq!(snap["exists"], json!(false));
         std::fs::remove_dir_all(root).ok();
     }

@@ -39,7 +39,16 @@ pub fn handle(root: &Path, command: &str, args: &Value) -> Option<Result<Value, 
 }
 
 /// One FolderCommand row in Go's declared field order.
-fn row(id: i64, folder_id: i64, name: &str, command: &str, sort_order: i64, run_local: bool, created_at: &str, updated_at: &str) -> Value {
+fn row(
+    id: i64,
+    folder_id: i64,
+    name: &str,
+    command: &str,
+    sort_order: i64,
+    run_local: bool,
+    created_at: &str,
+    updated_at: &str,
+) -> Value {
     let mut object = Map::new();
     object.insert("id".into(), json!(id));
     object.insert("folder_id".into(), json!(folder_id));
@@ -218,10 +227,7 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
                 }
                 // Go builds a map id→position, so a duplicated id ends up at
                 // its LAST occurrence.
-                if let Some(pos) = order
-                    .iter()
-                    .rposition(|id| *id == field_number(item, "id"))
-                {
+                if let Some(pos) = order.iter().rposition(|id| *id == field_number(item, "id")) {
                     item["sort_order"] = json!(pos);
                 }
             }
@@ -235,7 +241,11 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
             if !existing.is_empty() {
                 return Ok(Value::Array(existing));
             }
-            let created = bootstrap_from_package_json(&mut rows, folder_id, &folder_path.unwrap_or_default())?;
+            let created = bootstrap_from_package_json(
+                &mut rows,
+                folder_id,
+                &folder_path.unwrap_or_default(),
+            )?;
             save(root, &rows)?;
             Ok(Value::Array(created))
         }
@@ -371,7 +381,11 @@ mod tests {
         let root = temp_root("crud");
         seed_workspace(&root, 1, "E:/ws/a");
         assert_eq!(
-            call(&root, "create_folder_command", json!({"folderId": 1, "name": "  "})),
+            call(
+                &root,
+                "create_folder_command",
+                json!({"folderId": 1, "name": "  "})
+            ),
             Err("请填写命令名称".into())
         );
         let created = call(
@@ -423,11 +437,19 @@ mod tests {
         );
 
         // reorder：按 ids 顺序写 sort_order。
-        call(&root, "reorder_folder_commands", json!({"folderId": 1, "ids": [2, 1]})).unwrap();
+        call(
+            &root,
+            "reorder_folder_commands",
+            json!({"folderId": 1, "ids": [2, 1]}),
+        )
+        .unwrap();
         let list = call(&root, "list_folder_commands", json!({"folderId": 1})).unwrap();
         assert_eq!(list[0]["id"], 2);
 
-        assert_eq!(call(&root, "delete_folder_command", json!({"id": 2})), Ok(Value::Null));
+        assert_eq!(
+            call(&root, "delete_folder_command", json!({"id": 2})),
+            Ok(Value::Null)
+        );
         assert_eq!(
             call(&root, "delete_folder_command", json!({"id": 2})),
             Err("命令不存在".into())
@@ -479,7 +501,11 @@ mod tests {
         assert_eq!(empty, json!([]));
 
         assert_eq!(
-            call(&root, "create_folder_command", json!({"folderId": 77, "name": "x", "command": "y"})),
+            call(
+                &root,
+                "create_folder_command",
+                json!({"folderId": 77, "name": "x", "command": "y"})
+            ),
             Err("项目不存在".into())
         );
     }

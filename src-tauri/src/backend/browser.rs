@@ -118,7 +118,11 @@ async fn run(root: &Path, command: &str, a: &Value) -> Result<Outcome, String> {
         "browser_open_tab" => {
             let browser = ensure_browser(root).await?;
             let raw_url = go_text(&a["url"]);
-            let raw_url = if raw_url.is_empty() { "about:blank" } else { &raw_url };
+            let raw_url = if raw_url.is_empty() {
+                "about:blank"
+            } else {
+                &raw_url
+            };
             let result = browser
                 .call("", "Target.createTarget", json!({ "url": raw_url }))
                 .await?;
@@ -135,7 +139,11 @@ async fn run(root: &Path, command: &str, a: &Value) -> Result<Outcome, String> {
             let browser = ensure_browser(root).await?;
             let tab = browser.tab_by_ref(&go_text(&a["tabId"])).await?;
             browser
-                .call("", "Target.closeTarget", json!({ "targetId": tab.target_id }))
+                .call(
+                    "",
+                    "Target.closeTarget",
+                    json!({ "targetId": tab.target_id }),
+                )
                 .await?;
             Ok(Outcome {
                 result: Value::Null,
@@ -150,7 +158,11 @@ async fn run(root: &Path, command: &str, a: &Value) -> Result<Outcome, String> {
             let mut tab = browser.tab_by_ref(&go_text(&a["tabId"])).await?;
             browser.attach(&mut tab).await?;
             browser
-                .call(&tab.session_id, "Page.navigate", json!({ "url": go_text(&a["url"]) }))
+                .call(
+                    &tab.session_id,
+                    "Page.navigate",
+                    json!({ "url": go_text(&a["url"]) }),
+                )
                 .await?;
             Ok(Outcome {
                 result: Value::Null,
@@ -168,7 +180,11 @@ async fn run(root: &Path, command: &str, a: &Value) -> Result<Outcome, String> {
             let mut tab = browser.tab_by_ref(&go_text(&a["tabId"])).await?;
             browser.attach(&mut tab).await?;
             let result = browser
-                .call(&tab.session_id, "Page.captureScreenshot", json!({ "format": "png" }))
+                .call(
+                    &tab.session_id,
+                    "Page.captureScreenshot",
+                    json!({ "format": "png" }),
+                )
                 .await?;
             Ok(Outcome {
                 result: json!({ "mime_type": "image/png", "base64": result["data"].clone() }),
@@ -209,9 +225,8 @@ async fn run(root: &Path, command: &str, a: &Value) -> Result<Outcome, String> {
             browser.ensure_agent_world(&mut tab, &bundle).await?;
             // Go marshals the request map, so keys come out sorted; canon
             // reproduces that for the embedded JS payload.
-            let payload =
-                serde_json::to_string(&crate::backend::goformat::canon(&a["request"]))
-                    .unwrap_or_default();
+            let payload = serde_json::to_string(&crate::backend::goformat::canon(&a["request"]))
+                .unwrap_or_default();
             let expression = format!(
                 "JSON.stringify(__codegAgent.act({payload}) || {{ok:false,error:'no result'}})"
             );
@@ -265,10 +280,18 @@ async fn run(root: &Path, command: &str, a: &Value) -> Result<Outcome, String> {
             result: json!({ "matches": [] }),
             events: Vec::new(),
         }),
-        "browser_set_bounds" | "browser_freeze_frame" | "browser_pick_element"
-        | "browser_pick_cancel" | "browser_set_host_rules" | "browser_clear_data"
-        | "browser_open_devtools" | "browser_doc_open" | "browser_doc_state"
-        | "browser_doc_set_mode" | "browser_agent_grant" | "browser_agent_capture"
+        "browser_set_bounds"
+        | "browser_freeze_frame"
+        | "browser_pick_element"
+        | "browser_pick_cancel"
+        | "browser_set_host_rules"
+        | "browser_clear_data"
+        | "browser_open_devtools"
+        | "browser_doc_open"
+        | "browser_doc_state"
+        | "browser_doc_set_mode"
+        | "browser_agent_grant"
+        | "browser_agent_capture"
         | "browser_answer_open_request" => Err(format!("浏览器命令 {command} 暂未实现")),
         _ => Err(format!("未知的浏览器命令：{command}")),
     }
@@ -732,7 +755,11 @@ mod tests {
     #[test]
     fn go_text_mirrors_go_type_assertion() {
         assert_eq!(go_text(&json!("abc")), "abc");
-        assert_eq!(go_text(&json!(1234)), "", "CDP 的数字过不了 Go 的 string 断言");
+        assert_eq!(
+            go_text(&json!(1234)),
+            "",
+            "CDP 的数字过不了 Go 的 string 断言"
+        );
         assert_eq!(go_text(&json!(null)), "");
         assert_eq!(go_text(&json!(true)), "");
     }
@@ -743,8 +770,14 @@ mod tests {
             parse_stringified(&json!({"result": {"value": "{\"a\":1}"}})),
             json!({"a":1})
         );
-        assert_eq!(parse_stringified(&json!({"result": {"value": "null"}})), Value::Null);
-        assert_eq!(parse_stringified(&json!({"result": {"value": ""}})), Value::Null);
+        assert_eq!(
+            parse_stringified(&json!({"result": {"value": "null"}})),
+            Value::Null
+        );
+        assert_eq!(
+            parse_stringified(&json!({"result": {"value": ""}})),
+            Value::Null
+        );
         assert_eq!(parse_stringified(&json!({"result": {}})), Value::Null);
     }
 

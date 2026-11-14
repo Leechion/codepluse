@@ -35,7 +35,6 @@ import {
 import { AppTitleBar } from "@/components/layout/app-title-bar"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer"
-import { useSettingsCardMotion } from "./use-settings-card-motion"
 
 interface SettingsNavItem {
   href: string
@@ -164,7 +163,6 @@ export function SettingsShell({
   const normalizedPathname = normalizePath(activeHref ?? pathname)
   const isMobile = useIsMobile()
   const [navOpen, setNavOpen] = useState(false)
-  const cardMotion = useSettingsCardMotion()
 
   useEffect(() => {
     // 浮层里不改主窗口的标题：那是工作区窗口的标题，关掉浮层后没人负责还原它。
@@ -277,8 +275,6 @@ export function SettingsShell({
       data-settings-shell=""
       className="h-screen flex flex-col overflow-hidden bg-background text-foreground"
     >
-      {/* Only settings documents opt into same-origin shared-element navigation. */}
-      <style>{"@view-transition { navigation: auto; }"}</style>
       {/*
         浮层里不再顶一条「设置」标题栏：工作区窗口本来就有自己的 chrome，这条
         栏只是重复的装饰。窄屏仍保留一条极窄的栏，因为抽屉触发器住在里面，但不
@@ -340,7 +336,6 @@ export function SettingsShell({
 
         <section
           className="cp-settings-content flex-1 min-w-0 min-h-0 overflow-hidden"
-          {...cardMotion}
         >
           {children}
         </section>

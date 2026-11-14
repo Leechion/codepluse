@@ -195,7 +195,9 @@ fn run_with_api(api: &str, root: &Path, command: &str, args: &Value) -> Result<V
             // comment before "fixing".
             let (host, _) = folder_remote(&guard, num(args, "folderId"))?;
             if host != "github.com" && !host.ends_with(".github.com") {
-                return Err(format!("Forge 工作台当前仅支持 GitHub（该远程指向 {host}）"));
+                return Err(format!(
+                    "Forge 工作台当前仅支持 GitHub（该远程指向 {host}）"
+                ));
             }
             Err("未知的 Forge 命令：validate_github_token".into())
         }
@@ -233,13 +235,23 @@ fn run_with_api(api: &str, root: &Path, command: &str, args: &Value) -> Result<V
 
         // Everything below resolves the repository first (forgeCommand's
         // fall-through): folder remote → host gate → per-command work.
-        "forge_list_issues" | "forge_tab_count" | "forge_issue_detail"
-        | "forge_list_labels" | "forge_list_comments" | "forge_create_comment"
-        | "forge_set_item_state" | "forge_create_issue" | "forge_change_detail"
-        | "forge_change_files" | "forge_merge_options" | "forge_merge_change" => {
+        "forge_list_issues"
+        | "forge_tab_count"
+        | "forge_issue_detail"
+        | "forge_list_labels"
+        | "forge_list_comments"
+        | "forge_create_comment"
+        | "forge_set_item_state"
+        | "forge_create_issue"
+        | "forge_change_detail"
+        | "forge_change_files"
+        | "forge_merge_options"
+        | "forge_merge_change" => {
             let (host, repo) = folder_remote(&guard, num(args, "folderId"))?;
             if host != "github.com" && !host.ends_with(".github.com") {
-                return Err(format!("Forge 工作台当前仅支持 GitHub（该远程指向 {host}）"));
+                return Err(format!(
+                    "Forge 工作台当前仅支持 GitHub（该远程指向 {host}）"
+                ));
             }
             forge_rest(&guard, api, command, &repo, args)
         }
@@ -261,9 +273,8 @@ fn save_settings(state: &ForgeState) {
         "global": state.global.clone(),
         "settings": Value::Object(state.settings.clone()),
     });
-    let bytes = crate::backend::goformat::marshal_preserve(&crate::backend::goformat::canon(
-        &document,
-    ));
+    let bytes =
+        crate::backend::goformat::marshal_preserve(&crate::backend::goformat::canon(&document));
     let _ = store_file::write_bytes(&settings_path(&state.root), &bytes);
 }
 
@@ -315,7 +326,12 @@ fn update_accounts(
             // parse, anything else stays 0.
             parse_leading_int(&raw_id)
         };
-        next.push(Account { id, name, login, token });
+        next.push(Account {
+            id,
+            name,
+            login,
+            token,
+        });
     }
     guard.accounts = next;
     Ok(Value::Null)
@@ -378,7 +394,9 @@ fn github_request(
             )),
         None => request,
     };
-    let response = request.send().map_err(|e| format!("无法连接 GitHub：{e}"))?;
+    let response = request
+        .send()
+        .map_err(|e| format!("无法连接 GitHub：{e}"))?;
     let status = response.status().as_u16();
     let data = response.bytes().map_err(|e| e.to_string())?;
     if status >= 300 {
@@ -405,7 +423,11 @@ fn forge_row(item: &Value) -> Value {
     if let Some(list) = item.get("labels").and_then(|v| v.as_array()) {
         for label in list {
             let color = text(label.get("color"));
-            let color = if color.is_empty() { color } else { format!("#{color}") };
+            let color = if color.is_empty() {
+                color
+            } else {
+                format!("#{color}")
+            };
             labels.push(json!({"name": text(label.get("name")), "color": color}));
         }
     }
@@ -495,7 +517,11 @@ fn forge_rest(
             let tab = or_text(&query, "tab", "issues");
             let state = or_text(&query, "state", "open");
             let (page, per_page) = page_params(&query, "page", "perPage");
-            let mut terms = vec![format!("repo:{repo}"), format!("is:{tab}"), format!("state:{state}")];
+            let mut terms = vec![
+                format!("repo:{repo}"),
+                format!("is:{tab}"),
+                format!("state:{state}"),
+            ];
             if query.get("assignedMe") == Some(&Value::Bool(true)) {
                 terms.push("assignee:@me".into());
             }
@@ -518,11 +544,24 @@ fn forge_rest(
                 "comments" => endpoint.push_str("&sort=comments&order=desc"),
                 _ => {}
             }
-            let result = github_request(&guard, api, &text(query.get("accountId")), "GET", &endpoint, None)?;
+            let result = github_request(
+                &guard,
+                api,
+                &text(query.get("accountId")),
+                "GET",
+                &endpoint,
+                None,
+            )?;
             let rows: Vec<Value> = result
                 .get("items")
                 .and_then(|v| v.as_array())
-                .map(|items| items.iter().filter(|item| item.is_object()).map(forge_row).collect())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter(|item| item.is_object())
+                        .map(forge_row)
+                        .collect()
+                })
                 .unwrap_or_default();
             let total = opt_number(&result, "total_count");
             let mut reachable = total;
@@ -540,7 +579,11 @@ fn forge_rest(
             let query = args.get("query").cloned().unwrap_or(json!({}));
             let tab = or_text(&query, "tab", "issues");
             let state = or_text(&query, "state", "open");
-            let mut terms = vec![format!("repo:{repo}"), format!("is:{tab}"), format!("state:{state}")];
+            let mut terms = vec![
+                format!("repo:{repo}"),
+                format!("is:{tab}"),
+                format!("state:{state}"),
+            ];
             if query.get("assignedMe") == Some(&Value::Bool(true)) {
                 terms.push("assignee:@me".into());
             }
@@ -548,7 +591,14 @@ fn forge_rest(
                 "/search/issues?q={}&per_page=1",
                 query_escape(&terms.join(" "))
             );
-            let result = github_request(&guard, api, &text(query.get("accountId")), "GET", &endpoint, None)?;
+            let result = github_request(
+                &guard,
+                api,
+                &text(query.get("accountId")),
+                "GET",
+                &endpoint,
+                None,
+            )?;
             Ok(json!({"count": opt_number(&result, "total_count")}))
         }
         "forge_issue_detail" => {
@@ -580,7 +630,11 @@ fn forge_rest(
                     list.iter()
                         .map(|label| {
                             let color = text(label.get("color"));
-                            let color = if color.is_empty() { color } else { format!("#{color}") };
+                            let color = if color.is_empty() {
+                                color
+                            } else {
+                                format!("#{color}")
+                            };
                             json!({"name": text(label.get("name")), "color": color})
                         })
                         .collect()
@@ -622,7 +676,9 @@ fn forge_rest(
                 }));
             }
             let has_next = comments.len() as i64 == per_page;
-            Ok(json!({"comments": comments, "page": page, "per_page": per_page, "has_next": has_next}))
+            Ok(
+                json!({"comments": comments, "page": page, "per_page": per_page, "has_next": has_next}),
+            )
         }
         "forge_create_comment" => {
             let draft = args.get("draft").cloned().unwrap_or(json!({}));
@@ -632,7 +688,10 @@ fn forge_rest(
                 api,
                 &text(draft.get("accountId")),
                 "POST",
-                &format!("/repos/{repo}/issues/{}/comments", opt_number(&draft, "number")),
+                &format!(
+                    "/repos/{repo}/issues/{}/comments",
+                    opt_number(&draft, "number")
+                ),
                 Some(&json!({"body": text(draft.get("body"))})),
             )?;
             Ok(comment_row(&item))
@@ -640,7 +699,11 @@ fn forge_rest(
         "forge_set_item_state" => {
             let request = args.get("request").cloned().unwrap_or(json!({}));
             let number_ = opt_number(&request, "number");
-            let state = if text(request.get("action")) == "reopen" { "open" } else { "closed" };
+            let state = if text(request.get("action")) == "reopen" {
+                "open"
+            } else {
+                "closed"
+            };
             let endpoint = if text(request.get("kind")) == "pr" {
                 format!("/repos/{repo}/pulls/{number_}")
             } else {
@@ -905,7 +968,10 @@ fn git_remote_url(cwd: &str) -> Result<String, String> {
         .output()
         .map_err(|e| e.to_string())?;
     if !output.status.success() {
-        return Err(format!("exit status {}", output.status.code().unwrap_or(-1)));
+        return Err(format!(
+            "exit status {}",
+            output.status.code().unwrap_or(-1)
+        ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
@@ -973,7 +1039,11 @@ fn number(value: Option<&Value>) -> i64 {
 fn num(args: &Value, key: &str) -> i64 {
     args.get(key)
         .and_then(|v| v.as_i64())
-        .or_else(|| args.get(key).and_then(|v| v.as_f64()).map(|f| f.trunc() as i64))
+        .or_else(|| {
+            args.get(key)
+                .and_then(|v| v.as_f64())
+                .map(|f| f.trunc() as i64)
+        })
         .unwrap_or(0)
 }
 
@@ -1047,7 +1117,10 @@ mod tests {
     fn accounts_start_empty_and_settings_default() {
         let root = temp_root("empty");
         seq(&root, |root| {
-            assert_eq!(step("", root, "get_github_accounts", json!({})).unwrap(), json!([]));
+            assert_eq!(
+                step("", root, "get_github_accounts", json!({})).unwrap(),
+                json!([])
+            );
             assert_eq!(
                 step("", root, "forge_settings_get", json!({"folderId": 1})).unwrap(),
                 json!({"global": {}, "folder": Value::Null})
@@ -1065,12 +1138,21 @@ mod tests {
 
     #[test]
     fn update_accounts_validates_and_persists_login() {
-        let api = mock_github(200, r#"{"login":"octocat","name":"Octo","avatar_url":"a.png"}"#);
+        let api = mock_github(
+            200,
+            r#"{"login":"octocat","name":"Octo","avatar_url":"a.png"}"#,
+        );
         let root = temp_root("update");
         seq(&root, |root| {
-            keep(&api, root, "update_github_accounts", json!({"settings": {"accounts": [
-                {"name": " main ", "token": "tok1"}
-            ]}})).unwrap();
+            keep(
+                &api,
+                root,
+                "update_github_accounts",
+                json!({"settings": {"accounts": [
+                    {"name": " main ", "token": "tok1"}
+                ]}}),
+            )
+            .unwrap();
             let accounts = keep(&api, root, "get_github_accounts", json!({})).unwrap();
             assert_eq!(accounts[0]["id"], "1");
             assert_eq!(accounts[0]["login"], "octocat");
@@ -1084,8 +1166,13 @@ mod tests {
                 json!({"username": "octocat", "avatar_url": "a.png"})
             );
             // 空 token 且带旧 id：保留旧账户（token 不重填）。
-            keep(&api, root, "update_github_accounts",
-                json!({"settings": {"accounts": [{"name": "main", "id": "1", "token": ""}]}})).unwrap();
+            keep(
+                &api,
+                root,
+                "update_github_accounts",
+                json!({"settings": {"accounts": [{"name": "main", "id": "1", "token": ""}]}}),
+            )
+            .unwrap();
             assert_eq!(
                 keep(&api, root, "get_github_accounts", json!({})).unwrap()[0]["login"],
                 "octocat"
@@ -1105,18 +1192,37 @@ mod tests {
         let unauthorized = mock_github(401, r#"{"message":"Bad credentials"}"#);
         seq(&root, |root| {
             assert_eq!(
-                step(&unauthorized, root, "update_github_accounts",
-                     json!({"settings": {"accounts": [{"name": "x", "token": "bad"}]}})).unwrap_err(),
+                step(
+                    &unauthorized,
+                    root,
+                    "update_github_accounts",
+                    json!({"settings": {"accounts": [{"name": "x", "token": "bad"}]}})
+                )
+                .unwrap_err(),
                 "token 校验失败：token 无效或已过期"
             );
             assert_eq!(
-                step(&unauthorized, root, "update_github_accounts",
-                     json!({"settings": {"accounts": [{"name": "x", "token": ""}]}})).unwrap_err(),
+                step(
+                    &unauthorized,
+                    root,
+                    "update_github_accounts",
+                    json!({"settings": {"accounts": [{"name": "x", "token": ""}]}})
+                )
+                .unwrap_err(),
                 "账户 x 缺少 token"
             );
             // 非对象/缺失 settings：Go 的类型断言得 nil → 账户清空。
-            step(&unauthorized, root, "update_github_accounts", json!({"settings": "nope"})).unwrap();
-            assert_eq!(step(&unauthorized, root, "get_github_accounts", json!({})).unwrap(), json!([]));
+            step(
+                &unauthorized,
+                root,
+                "update_github_accounts",
+                json!({"settings": "nope"}),
+            )
+            .unwrap();
+            assert_eq!(
+                step(&unauthorized, root, "get_github_accounts", json!({})).unwrap(),
+                json!([])
+            );
         });
     }
 
@@ -1126,8 +1232,13 @@ mod tests {
         let root = temp_root("shapes");
         seq(&root, |root| {
             // update_accounts 是 validate_token 的调用方，用它驱动各状态分支。
-            let err = step(&forbidden, root, "update_github_accounts",
-                json!({"settings": {"accounts": [{"name": "x", "token": "t"}]}})).unwrap_err();
+            let err = step(
+                &forbidden,
+                root,
+                "update_github_accounts",
+                json!({"settings": {"accounts": [{"name": "x", "token": "t"}]}}),
+            )
+            .unwrap_err();
             assert_eq!(err, "token 校验失败：GitHub 返回 403");
         });
     }
@@ -1142,7 +1253,13 @@ mod tests {
                 "项目文件夹不存在"
             );
             assert_eq!(
-                step("", root, "validate_github_token", json!({"token": "t", "folderId": 9})).unwrap_err(),
+                step(
+                    "",
+                    root,
+                    "validate_github_token",
+                    json!({"token": "t", "folderId": 9})
+                )
+                .unwrap_err(),
                 "项目文件夹不存在"
             );
         });
@@ -1158,7 +1275,11 @@ mod tests {
             json!({"next": 2, "folders": [{"id": 1, "name": "p", "path": project.to_string_lossy(), "kind": "regular", "open": true}]}).to_string(),
         ).unwrap();
         let run = |args: &[&str]| {
-            std::process::Command::new("git").args(args).current_dir(&project).output().unwrap()
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .output()
+                .unwrap()
         };
         let _ = run(&["init", "-q"]);
         let _ = run(&["remote", "add", "origin", "git@github.com:acme/widget.git"]);
@@ -1170,20 +1291,42 @@ mod tests {
                 json!({"provider": "github", "server_host": "github.com", "owner_repo": "acme/widget"})
             );
             // 非 GitHub 远程：坐标原样返回。
-            let _ = run(&["remote", "set-url", "origin", "https://gitlab.com/acme/widget.git"]);
+            let _ = run(&[
+                "remote",
+                "set-url",
+                "origin",
+                "https://gitlab.com/acme/widget.git",
+            ]);
             assert_eq!(
                 step("", root, "folder_forge_remote", json!({"folderId": 1})).unwrap(),
                 json!({"provider": "github", "server_host": "gitlab.com", "owner_repo": "acme/widget"})
             );
             // validate 死路径：非 GitHub 远程在 fall-through 检查处被拒。
             assert_eq!(
-                step("", root, "validate_github_token", json!({"token": "t", "folderId": 1})).unwrap_err(),
+                step(
+                    "",
+                    root,
+                    "validate_github_token",
+                    json!({"token": "t", "folderId": 1})
+                )
+                .unwrap_err(),
                 "Forge 工作台当前仅支持 GitHub（该远程指向 gitlab.com）"
             );
             // 死路径完整链：github 远程 → 未知的 Forge 命令。
-            let _ = run(&["remote", "set-url", "origin", "https://github.com/acme/widget.git"]);
+            let _ = run(&[
+                "remote",
+                "set-url",
+                "origin",
+                "https://github.com/acme/widget.git",
+            ]);
             assert_eq!(
-                step("", root, "validate_github_token", json!({"token": "t", "folderId": 1})).unwrap_err(),
+                step(
+                    "",
+                    root,
+                    "validate_github_token",
+                    json!({"token": "t", "folderId": 1})
+                )
+                .unwrap_err(),
                 "未知的 Forge 命令：validate_github_token"
             );
         });
@@ -1211,17 +1354,38 @@ mod tests {
     fn settings_set_roundtrips_and_writes_sorted_file() {
         let root = temp_root("settings");
         seq(&root, |root| {
-            let out = step("", root, "forge_settings_set",
-                           json!({"folderId": 0, "settings": {"pinned": 3}})).unwrap();
+            let out = step(
+                "",
+                root,
+                "forge_settings_set",
+                json!({"folderId": 0, "settings": {"pinned": 3}}),
+            )
+            .unwrap();
             assert_eq!(out["global"]["pinned"], 3);
-            let out = step("", root, "forge_settings_set",
-                           json!({"folderId": 7, "settings": {"z": 1, "a": 2}})).unwrap();
+            let out = step(
+                "",
+                root,
+                "forge_settings_set",
+                json!({"folderId": 7, "settings": {"z": 1, "a": 2}}),
+            )
+            .unwrap();
             assert_eq!(out["folder"]["7"]["a"], 2);
-            let out = step("", root, "forge_settings_set",
-                           json!({"folderId": 7, "settings": Value::Null})).unwrap();
+            let out = step(
+                "",
+                root,
+                "forge_settings_set",
+                json!({"folderId": 7, "settings": Value::Null}),
+            )
+            .unwrap();
             assert!(out["folder"].get("7").is_none(), "folder 设置可删除");
             assert_eq!(
-                step("", root, "forge_settings_set", json!({"folderId": 0, "settings": Value::Null})).unwrap_err(),
+                step(
+                    "",
+                    root,
+                    "forge_settings_set",
+                    json!({"folderId": 0, "settings": Value::Null})
+                )
+                .unwrap_err(),
                 "全局设置不能删除"
             );
         });
@@ -1297,7 +1461,10 @@ mod tests {
     const ISSUE_PAYLOAD: &str = r#"{"number":7,"title":"Fix","body":"b","state":"open","labels":[{"name":"bug","color":"ff0000"}],"user":{"login":"ann","avatar_url":"a.png"},"updated_at":"2026-11-14T00:00:00Z","html_url":"h","comments":2}"#;
     const PR_PAYLOAD: &str = r#"{"number":9,"title":"PR","body":"p","state":"closed","merged_at":"2026-11-14T01:00:00Z","pull_request":{"draft":true},"user":{"login":"bo","avatar_url":"b.png"},"head":{"ref":"h1","sha":"s1","repo":{"full_name":"acme/fork"}},"base":{"ref":"main"},"mergeable":true,"mergeable_state":"clean","updated_at":"u","html_url":"h","comments":0}"#;
 
-    fn rest_fixture(tag: &str, routes: &'static [(&'static str, &'static str, u16, &'static str)]) -> (PathBuf, String, std::sync::Arc<RouteMutex<Vec<String>>>) {
+    fn rest_fixture(
+        tag: &str,
+        routes: &'static [(&'static str, &'static str, u16, &'static str)],
+    ) -> (PathBuf, String, std::sync::Arc<RouteMutex<Vec<String>>>) {
         let root = temp_root(tag);
         let project = root.join("proj");
         std::fs::create_dir_all(&project).unwrap();
@@ -1305,39 +1472,69 @@ mod tests {
             root.join(".data").join("codeg-workspace.json"),
             json!({"next": 2, "folders": [{"id": 1, "name": "p", "path": project.to_string_lossy(), "kind": "regular", "open": true}]}).to_string(),
         ).unwrap();
-        let _ = std::process::Command::new("git").args(["init", "-q"]).current_dir(&project).output();
-        let _ = std::process::Command::new("git").args(["remote", "add", "origin", "https://github.com/acme/widget.git"]).current_dir(&project).output();
+        let _ = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&project)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/acme/widget.git",
+            ])
+            .current_dir(&project)
+            .output();
         let (api, seen) = mock_routes(routes);
         (root, api, seen)
     }
 
     fn setup_account(root: &Path, api: &str) {
-        keep(api, root, "update_github_accounts", json!({"settings": {"accounts": [{"name": "a", "token": "t"}]}})).unwrap();
+        keep(
+            api,
+            root,
+            "update_github_accounts",
+            json!({"settings": {"accounts": [{"name": "a", "token": "t"}]}}),
+        )
+        .unwrap();
     }
 
     #[test]
     fn list_issues_shapes_rows_and_query() {
-        let routes = &[
-            ("GET", "/search/issues", 200, r#"{"total_count": 1200, "items": [ISSUE, PR]}"#),
-        ];
+        let routes = &[(
+            "GET",
+            "/search/issues",
+            200,
+            r#"{"total_count": 1200, "items": [ISSUE, PR]}"#,
+        )];
         // 静态载荷里嵌占位再替换：mock 是 &'static str，用 const 拼。
         let _ = routes;
-        let routes: &'static [(&'static str, &'static str, u16, &'static str)] = &[
-            ("GET", "/search/issues", 200, concat!(
+        let routes: &'static [(&'static str, &'static str, u16, &'static str)] = &[(
+            "GET",
+            "/search/issues",
+            200,
+            concat!(
                 r#"{"total_count": 1200, "items": ["#,
                 r#"{"number":7,"title":"Fix","body":"b","state":"open","labels":[{"name":"bug","color":"ff0000"}],"user":{"login":"ann","avatar_url":"a.png"},"updated_at":"2026-11-14T00:00:00Z","html_url":"h","comments":2},"#,
                 r#"{"number":9,"title":"PR","body":"p","state":"closed","merged_at":"2026-11-14T01:00:00Z","pull_request":{"draft":true},"user":{"login":"bo","avatar_url":"b.png"},"head":{"ref":"h1","sha":"s1","repo":{"full_name":"acme/fork"}},"base":{"ref":"main"},"mergeable":true,"mergeable_state":"clean","updated_at":"u","html_url":"h","comments":0}"#,
-                r#"]}"#)),
-        ];
+                r#"]}"#
+            ),
+        )];
         let (root, api, seen) = rest_fixture("list-issues", routes);
         seq(&root, |root| {
             setup_account(root, &api);
-            let out = keep(&api, root, "forge_list_issues", json!({
-                "folderId": 1,
-                "query": {"tab": "pulls", "state": "all", "page": 2, "perPage": 50,
-                          "assignedMe": true, "labels": ["bug", "ui"], "search": "in:title fix",
-                          "sort": "updated", "accountId": ""}
-            })).unwrap();
+            let out = keep(
+                &api,
+                root,
+                "forge_list_issues",
+                json!({
+                    "folderId": 1,
+                    "query": {"tab": "pulls", "state": "all", "page": 2, "perPage": 50,
+                              "assignedMe": true, "labels": ["bug", "ui"], "search": "in:title fix",
+                              "sort": "updated", "accountId": ""}
+                }),
+            )
+            .unwrap();
             assert_eq!(out["page"], 2);
             assert_eq!(out["per_page"], 50);
             assert_eq!(out["total_count"], 1200);
@@ -1352,7 +1549,10 @@ mod tests {
             assert_eq!(rows[1]["draft"], true);
             // 查询串：标签带引号、空格转 +、sort 追加。
             let requests = seen.lock().unwrap().clone();
-            let search = requests.iter().find(|r| r.contains("/search/issues")).unwrap();
+            let search = requests
+                .iter()
+                .find(|r| r.contains("/search/issues"))
+                .unwrap();
             assert!(search.contains("repo%3Aacme%2Fwidget"), "{search}");
             assert!(search.contains("is%3Apulls"), "{search}");
             assert!(search.contains("assignee%3A%40me"), "{search}");
@@ -1365,101 +1565,240 @@ mod tests {
     #[test]
     fn tab_count_issue_detail_labels_comments_roundtrip() {
         let routes: &'static [(&'static str, &'static str, u16, &'static str)] = &[
-            ("GET", "/repos/acme/widget/issues/7/comments", 200, r#"[{"id":5,"user":{"login":"ann","avatar_url":"a.png"},"body":"hi","created_at":"t","html_url":"h"}]"#),
+            (
+                "GET",
+                "/repos/acme/widget/issues/7/comments",
+                200,
+                r#"[{"id":5,"user":{"login":"ann","avatar_url":"a.png"},"body":"hi","created_at":"t","html_url":"h"}]"#,
+            ),
             ("GET", "/repos/acme/widget/issues/7", 200, ISSUE_PAYLOAD),
-            ("GET", "/repos/acme/widget/labels", 200, r#"[{"name":"bug","color":"ff0000"},{"name":"no-color","color":""}]"#),
+            (
+                "GET",
+                "/repos/acme/widget/labels",
+                200,
+                r#"[{"name":"bug","color":"ff0000"},{"name":"no-color","color":""}]"#,
+            ),
             ("GET", "/search/issues", 200, r#"{"total_count": 41}"#),
         ];
         let (root, api, seen) = rest_fixture("tabs", routes);
         seq(&root, |root| {
             setup_account(root, &api);
-            let out = keep(&api, root, "forge_tab_count", json!({"folderId": 1, "query": {}})).unwrap();
+            let out = keep(
+                &api,
+                root,
+                "forge_tab_count",
+                json!({"folderId": 1, "query": {}}),
+            )
+            .unwrap();
             assert_eq!(out["count"], 41);
-            let detail = keep(&api, root, "forge_issue_detail", json!({"folderId": 1, "query": {"number": 7}})).unwrap();
+            let detail = keep(
+                &api,
+                root,
+                "forge_issue_detail",
+                json!({"folderId": 1, "query": {"number": 7}}),
+            )
+            .unwrap();
             assert_eq!(detail["body"], "b", "detail 不截断 body");
-            let labels = keep(&api, root, "forge_list_labels", json!({"folderId": 1, "accountId": ""})).unwrap();
+            let labels = keep(
+                &api,
+                root,
+                "forge_list_labels",
+                json!({"folderId": 1, "accountId": ""}),
+            )
+            .unwrap();
             assert_eq!(labels["labels"][0]["color"], "#ff0000");
             assert_eq!(labels["labels"][1]["color"], "", "空色保持空");
-            let comments = keep(&api, root, "forge_list_comments", json!({"folderId": 1, "filters": {"number": 7}})).unwrap();
+            let comments = keep(
+                &api,
+                root,
+                "forge_list_comments",
+                json!({"folderId": 1, "filters": {"number": 7}}),
+            )
+            .unwrap();
             assert_eq!(comments["comments"][0]["id"], "5");
             assert_eq!(comments["has_next"], false);
             let requests = seen.lock().unwrap().clone();
-            assert!(requests.iter().any(|r| r.contains("per_page=100") && r.contains("/labels")));
+            assert!(requests
+                .iter()
+                .any(|r| r.contains("per_page=100") && r.contains("/labels")));
         });
     }
 
     #[test]
     fn create_comment_state_issue_and_merge_flow() {
         let routes: &'static [(&'static str, &'static str, u16, &'static str)] = &[
-            ("POST", "/repos/acme/widget/issues/7/comments", 200, r#"{"id":9,"user":{"login":"ann","avatar_url":"a.png"},"body":"c","created_at":"t","html_url":"h"}"#),
+            (
+                "POST",
+                "/repos/acme/widget/issues/7/comments",
+                200,
+                r#"{"id":9,"user":{"login":"ann","avatar_url":"a.png"},"body":"c","created_at":"t","html_url":"h"}"#,
+            ),
             ("PATCH", "/repos/acme/widget/pulls/9", 200, PR_PAYLOAD),
             ("POST", "/repos/acme/widget/issues", 200, ISSUE_PAYLOAD),
-            ("PUT", "/repos/acme/widget/pulls/7/merge", 200, r#"{"merged": true}"#),
+            (
+                "PUT",
+                "/repos/acme/widget/pulls/7/merge",
+                200,
+                r#"{"merged": true}"#,
+            ),
             ("GET", "/repos/acme/widget/pulls/7", 200, PR_PAYLOAD),
         ];
         let (root, api, seen) = rest_fixture("create", routes);
         seq(&root, |root| {
             setup_account(root, &api);
-            let comment = keep(&api, root, "forge_create_comment", json!({"folderId": 1, "draft": {"number": 7, "body": "c"}})).unwrap();
+            let comment = keep(
+                &api,
+                root,
+                "forge_create_comment",
+                json!({"folderId": 1, "draft": {"number": 7, "body": "c"}}),
+            )
+            .unwrap();
             assert_eq!(comment["id"], "9");
-            let state = keep(&api, root, "forge_set_item_state", json!({"folderId": 1, "request": {"kind": "pr", "number": 9, "action": "reopen"}})).unwrap();
+            let state = keep(
+                &api,
+                root,
+                "forge_set_item_state",
+                json!({"folderId": 1, "request": {"kind": "pr", "number": 9, "action": "reopen"}}),
+            )
+            .unwrap();
             assert_eq!(state["is_pr"], true);
-            let issue = keep(&api, root, "forge_create_issue", json!({"folderId": 1, "draft": {"title": "T", "body": "", "labels": []}})).unwrap();
+            let issue = keep(
+                &api,
+                root,
+                "forge_create_issue",
+                json!({"folderId": 1, "draft": {"title": "T", "body": "", "labels": []}}),
+            )
+            .unwrap();
             assert_eq!(issue["number"], 7);
-            let merged = keep(&api, root, "forge_merge_change", json!({"folderId": 1, "request": {"number": 7, "method": "squash"}})).unwrap();
+            let merged = keep(
+                &api,
+                root,
+                "forge_merge_change",
+                json!({"folderId": 1, "request": {"number": 7, "method": "squash"}}),
+            )
+            .unwrap();
             assert_eq!(merged["is_pr"], true, "merged 后回读 PR 行");
             let requests = seen.lock().unwrap().clone();
-            assert!(requests.iter().any(|r| r.starts_with("PATCH /repos/acme/widget/pulls/9")));
-            assert!(requests.iter().any(|r| r.starts_with("PUT /repos/acme/widget/pulls/7/merge")));
+            assert!(requests
+                .iter()
+                .any(|r| r.starts_with("PATCH /repos/acme/widget/pulls/9")));
+            assert!(requests
+                .iter()
+                .any(|r| r.starts_with("PUT /repos/acme/widget/pulls/7/merge")));
             // create_issue：body 为空不带 body 字段；labels 空不带 labels。
-            assert!(requests.iter().any(|r| *r == "POST /repos/acme/widget/issues"), "create_issue 只打 issue 创建端点");
+            assert!(
+                requests
+                    .iter()
+                    .any(|r| *r == "POST /repos/acme/widget/issues"),
+                "create_issue 只打 issue 创建端点"
+            );
         });
     }
 
     #[test]
     fn change_detail_files_merge_options() {
         let routes: &'static [(&'static str, &'static str, u16, &'static str)] = &[
-            ("GET", "/repos/acme/widget/pulls/9/files", 200, r#"[{"filename":"a.go","additions":1,"deletions":2,"changes":3,"status":"modified"}]"#),
-            ("GET", "/repos/acme/widget/commits/s1/check-runs", 200, r#"{"check_runs":[{"name":"ci","conclusion":"success","html_url":"c"},{"name":"build","conclusion":"","status":"in_progress","html_url":"b"}]}"#),
+            (
+                "GET",
+                "/repos/acme/widget/pulls/9/files",
+                200,
+                r#"[{"filename":"a.go","additions":1,"deletions":2,"changes":3,"status":"modified"}]"#,
+            ),
+            (
+                "GET",
+                "/repos/acme/widget/commits/s1/check-runs",
+                200,
+                r#"{"check_runs":[{"name":"ci","conclusion":"success","html_url":"c"},{"name":"build","conclusion":"","status":"in_progress","html_url":"b"}]}"#,
+            ),
             ("GET", "/repos/acme/widget/pulls/9", 200, PR_PAYLOAD),
-            ("GET", "/repos/acme/widget", 200, r#"{"allow_merge_commit": false, "allow_squash_merge": true, "allow_rebase_merge": true}"#),
+            (
+                "GET",
+                "/repos/acme/widget",
+                200,
+                r#"{"allow_merge_commit": false, "allow_squash_merge": true, "allow_rebase_merge": true}"#,
+            ),
         ];
         let (root, api, seen) = rest_fixture("detail", routes);
         seq(&root, |root| {
             setup_account(root, &api);
-            let detail = keep(&api, root, "forge_change_detail", json!({"folderId": 1, "query": {"number": 9}})).unwrap();
+            let detail = keep(
+                &api,
+                root,
+                "forge_change_detail",
+                json!({"folderId": 1, "query": {"number": 9}}),
+            )
+            .unwrap();
             assert_eq!(detail["head_repo"], "acme/fork");
             assert_eq!(detail["head_sha"], "s1");
             let checks = detail["checks"].as_array().unwrap();
             assert_eq!(checks[0]["state"], "success");
             assert_eq!(checks[1]["state"], "in_progress", "conclusion 空 → status");
-            let files = keep(&api, root, "forge_change_files", json!({"folderId": 1, "query": {"number": 9}})).unwrap();
+            let files = keep(
+                &api,
+                root,
+                "forge_change_files",
+                json!({"folderId": 1, "query": {"number": 9}}),
+            )
+            .unwrap();
             assert_eq!(files["files"][0]["file"], "a.go");
             assert_eq!(files["has_next"], false);
-            let options = keep(&api, root, "forge_merge_options", json!({"folderId": 1, "accountId": ""})).unwrap();
+            let options = keep(
+                &api,
+                root,
+                "forge_merge_options",
+                json!({"folderId": 1, "accountId": ""}),
+            )
+            .unwrap();
             assert_eq!(options["methods"], json!(["squash", "rebase"]));
             assert_eq!(options["default_method"], "squash");
             assert_eq!(options["merge_strategy"], "commit");
             // check-runs 请求带 sha。
-            assert!(seen.lock().unwrap().iter().any(|r| r.contains("commits/s1/check-runs")));
+            assert!(seen
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|r| r.contains("commits/s1/check-runs")));
         });
     }
 
     #[test]
     fn merge_not_merged_answers_null_and_non_github_host_rejected() {
-        let routes: &'static [(&'static str, &'static str, u16, &'static str)] = &[
-            ("PUT", "/repos/acme/widget/pulls/7/merge", 200, r#"{"merged": false, "message": "not mergeable"}"#),
-        ];
+        let routes: &'static [(&'static str, &'static str, u16, &'static str)] = &[(
+            "PUT",
+            "/repos/acme/widget/pulls/7/merge",
+            200,
+            r#"{"merged": false, "message": "not mergeable"}"#,
+        )];
         let (root, api, _seen) = rest_fixture("nomerge", routes);
         seq(&root, |root| {
             setup_account(root, &api);
-            let out = keep(&api, root, "forge_merge_change", json!({"folderId": 1, "request": {"number": 7}})).unwrap();
+            let out = keep(
+                &api,
+                root,
+                "forge_merge_change",
+                json!({"folderId": 1, "request": {"number": 7}}),
+            )
+            .unwrap();
             assert_eq!(out, Value::Null);
             // 非 GitHub 远程：fall-through 检查。
             let project = root.join("proj");
-            let _ = std::process::Command::new("git").args(["remote", "set-url", "origin", "https://gitlab.com/acme/widget.git"]).current_dir(&project).output();
+            let _ = std::process::Command::new("git")
+                .args([
+                    "remote",
+                    "set-url",
+                    "origin",
+                    "https://gitlab.com/acme/widget.git",
+                ])
+                .current_dir(&project)
+                .output();
             assert_eq!(
-                keep(&api, root, "forge_list_issues", json!({"folderId": 1, "query": {}})).unwrap_err(),
+                keep(
+                    &api,
+                    root,
+                    "forge_list_issues",
+                    json!({"folderId": 1, "query": {}})
+                )
+                .unwrap_err(),
                 "Forge 工作台当前仅支持 GitHub（该远程指向 gitlab.com）"
             );
         });

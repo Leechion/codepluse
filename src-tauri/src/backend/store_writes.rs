@@ -71,6 +71,8 @@ pub fn owns(command: &str) -> bool {
             // workspace — command_workspace.go
             | "open_folder"
             | "open_folder_in_workspace"
+            | "open_worktree_folder"
+            | "remove_folder_from_history"
             | "update_folder_color"
             | "update_folder_alias"
             | "update_folder_default_agent"
@@ -147,10 +149,7 @@ fn num(args: &Value, key: &str) -> i64 {
 
 /// Go's `text()`: string type assertion, everything else empty.
 fn text(value: Option<&Value>) -> String {
-    value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string()
+    value.and_then(|v| v.as_str()).unwrap_or("").to_string()
 }
 
 fn txt(args: &Value, key: &str) -> String {
@@ -275,9 +274,8 @@ fn run(root: &Path, command: &str, args: &Value) -> Outcome {
     let mut forward = Vec::new();
     // One lock covers the whole read-modify-write: parallel requests from the
     // UI must not lose updates the way two unsynchronised writers would.
-    let result = store_file::lock(&store_path(root)).and_then(|_guard| {
-        run_inner(root, command, args, &mut events, &mut forward)
-    });
+    let result = store_file::lock(&store_path(root))
+        .and_then(|_guard| run_inner(root, command, args, &mut events, &mut forward));
     // Go emits some events before the save; on a failed save its event is
     // already gone while ours is dropped with the outcome — error paths only.
     if result.is_ok() {
@@ -442,7 +440,10 @@ fn run_inner(
             let tid = num(args, "tagId");
             array_mut(&mut doc, "conversationTags").retain(|t| number(t.get("id")) != tid);
             for conversation in array_mut(&mut doc, "conversations").iter_mut() {
-                if let Some(list) = conversation.get_mut("tag_ids").and_then(|v| v.as_array_mut()) {
+                if let Some(list) = conversation
+                    .get_mut("tag_ids")
+                    .and_then(|v| v.as_array_mut())
+                {
                     list.retain(|v| number(Some(v)) != tid);
                 }
             }
@@ -468,10 +469,8 @@ fn run_inner(
                 "color": color,
                 "enabled": args.get("enabled") == Some(&Value::Bool(true)),
             });
-            ensure_object(&mut doc, "settings").insert(
-                "conversation_branch_tag".to_string(),
-                setting.clone(),
-            );
+            ensure_object(&mut doc, "settings")
+                .insert("conversation_branch_tag".to_string(), setting.clone());
             save(root, &doc)?;
             Ok(setting)
         }
@@ -493,6 +492,36 @@ fn run_inner(
             ));
             save(root, &doc)?;
             Ok(folder)
+        }
+        "open_worktree_folder" => {
+            let source_id = num(args, "sourceFolderId");
+            let source = find_by_id(rows(&doc, "folders"), source_id).ok_or("来源项目不存在")?;
+            let parent_id = number(source.get("parent_id"));
+            let root_id = if parent_id > 0 { parent_id } else { source_id };
+            let resolved = git::resolve(root, &txt(args, "path"))?;
+            if !resolved.is_dir() {
+                return Err("工作树目录不存在".into());
+            }
+            let mut folder = open_folder_locked(&mut doc, &resolved.to_string_lossy(), "regular");
+            folder["parent_id"] = json!(root_id);
+            replace_by_id(
+                array_mut(&mut doc, "folders"),
+                number(folder.get("id")),
+                &folder,
+            );
+            events.push((
+                "audit://folder_open".into(),
+                json!({"folder_id":folder.get("id"),"path":resolved.to_string_lossy()}),
+            ));
+            save(root, &doc)?;
+            Ok(folder)
+        }
+        "remove_folder_from_history" => {
+            let path = txt(args, "path");
+            let folder_rows = array_mut(&mut doc, "folders");
+            folder_rows.retain(|row| text(row.get("path")) != path);
+            save(root, &doc)?;
+            Ok(Value::Null)
         }
         "update_folder_color" | "update_folder_alias" | "update_folder_default_agent" => {
             let fid = num(args, "folderId");
@@ -578,7 +607,9 @@ fn run_inner(
                 "folder": folder,
             }))
         }
-        "update_conversation_title" | "update_conversation_status" | "update_conversation_pinned" => {
+        "update_conversation_title"
+        | "update_conversation_status"
+        | "update_conversation_pinned" => {
             let cid = num(args, "conversationId");
             let Some(mut row) = find_by_id(rows(&doc, "conversations"), cid) else {
                 return Err("会话不存在".into());
@@ -613,9 +644,7 @@ fn run_inner(
                 let current: Vec<Value> = rows(&doc, "tabs").to_vec();
                 let tabs = match args.get("items") {
                     Some(Value::Array(list)) => {
-                        let all_rows = list
-                            .iter()
-                            .all(|item| item.is_object() || item.is_null());
+                        let all_rows = list.iter().all(|item| item.is_object() || item.is_null());
                         if all_rows {
                             list.clone()
                         } else {
@@ -1108,7 +1137,9 @@ fn canvas_command(
                 // Largest area first, stable (Go sort.SliceStable).
                 preview.sort_by(|a, b| {
                     let area = |v: &Value| gofloat(v.get("width")) * gofloat(v.get("height"));
-                    area(b).partial_cmp(&area(a)).unwrap_or(std::cmp::Ordering::Equal)
+                    area(b)
+                        .partial_cmp(&area(a))
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 });
                 preview.truncate(32);
                 result.push(json!({
@@ -1183,7 +1214,13 @@ fn canvas_command(
             let board_id = number(node.get("board_id"));
             array_mut(&mut doc, "canvasNodes").push(node.clone());
             touch_board(&mut doc, board_id);
-            let response = commit_canvas(root, &mut doc, events, json!({"kind": "upsert", "node": node.clone()}), &node)?;
+            let response = commit_canvas(
+                root,
+                &mut doc,
+                events,
+                json!({"kind": "upsert", "node": node.clone()}),
+                &node,
+            )?;
             Ok(response)
         }
         "canvas_update_node" => {
@@ -1243,7 +1280,13 @@ fn canvas_command(
             let board_id = number(node.get("board_id"));
             touch_board(&mut doc, board_id);
             replace_by_id(array_mut(&mut doc, "canvasNodes"), nid, &node);
-            let response = commit_canvas(root, &mut doc, events, json!({"kind": "upsert", "node": node.clone()}), &node)?;
+            let response = commit_canvas(
+                root,
+                &mut doc,
+                events,
+                json!({"kind": "upsert", "node": node.clone()}),
+                &node,
+            )?;
             Ok(response)
         }
         "canvas_move_nodes" => {
@@ -1320,11 +1363,7 @@ fn canvas_command(
                 ));
             }
             if command == "canvas_delete_board" {
-                board_event(
-                    events,
-                    "deleted",
-                    &json!({"id": num(args, "boardId")}),
-                );
+                board_event(events, "deleted", &json!({"id": num(args, "boardId")}));
             }
             Ok(response)
         }
@@ -1403,8 +1442,7 @@ fn canvas_command(
             let Some(mut region) = find_by_id(rows(&doc, "canvasNodes"), region_id) else {
                 return Err("区域或成员会话不存在".into());
             };
-            if !region_kind(&text(region.get("kind"))) || !conversation_exists(&doc, conversation)
-            {
+            if !region_kind(&text(region.get("kind"))) || !conversation_exists(&doc, conversation) {
                 return Err("区域或成员会话不存在".into());
             }
             let mut removed = Value::Null;
@@ -1561,7 +1599,11 @@ mod tests {
         .unwrap();
     }
 
-    fn call(root: &Path, command: &str, args: Value) -> (Result<Value, String>, Vec<(String, Value)>) {
+    fn call(
+        root: &Path,
+        command: &str,
+        args: Value,
+    ) -> (Result<Value, String>, Vec<(String, Value)>) {
         let outcome = handle(root, command, &args).expect("命令应被接管");
         (outcome.result, outcome.events)
     }
@@ -1598,11 +1640,25 @@ mod tests {
             "分组不存在"
         );
 
-        assert_eq!(ok(&root, "delete_folder_group", json!({"groupId": 10})), Value::Null);
-        // 删除分组时，属于它的 folder 的 group_id 置空。
-        assert_eq!(ok(&root, "set_folder_group", json!({"folderId": 1, "groupId": Value::Null})), Value::Null);
         assert_eq!(
-            err(&root, "set_folder_group", json!({"folderId": 999, "groupId": 1})),
+            ok(&root, "delete_folder_group", json!({"groupId": 10})),
+            Value::Null
+        );
+        // 删除分组时，属于它的 folder 的 group_id 置空。
+        assert_eq!(
+            ok(
+                &root,
+                "set_folder_group",
+                json!({"folderId": 1, "groupId": Value::Null})
+            ),
+            Value::Null
+        );
+        assert_eq!(
+            err(
+                &root,
+                "set_folder_group",
+                json!({"folderId": 999, "groupId": 1})
+            ),
             "项目不存在"
         );
     }
@@ -1624,7 +1680,10 @@ mod tests {
         );
         assert_eq!(out, json!({"color": "default", "enabled": false}));
         let doc = store_file::read_json(&store_path(&root)).unwrap().unwrap();
-        assert_eq!(doc["settings"]["conversation_branch_tag"]["color"], "default");
+        assert_eq!(
+            doc["settings"]["conversation_branch_tag"]["color"],
+            "default"
+        );
     }
 
     #[test]
@@ -1683,15 +1742,21 @@ mod tests {
         assert_eq!(doc["assistants"].as_array().unwrap().len(), 1);
 
         // reorder 只返回位置变化过的行。
-        seed(&root, json!({"assistants": [
-            {"id": 1, "name": "a", "sort_order": 0, "revision": 1},
-            {"id": 2, "name": "b", "sort_order": 1, "revision": 1}
-        ]}));
+        seed(
+            &root,
+            json!({"assistants": [
+                {"id": 1, "name": "a", "sort_order": 0, "revision": 1},
+                {"id": 2, "name": "b", "sort_order": 1, "revision": 1}
+            ]}),
+        );
         let changed = ok(&root, "assistant_reorder", json!({"ids": [2, 1]}));
         assert_eq!(changed.as_array().unwrap().len(), 2);
         let changed = ok(&root, "assistant_reorder", json!({"ids": [2, 1]}));
         assert_eq!(changed.as_array().unwrap().len(), 0, "幂等时无行返回");
-        assert_eq!(err(&root, "assistant_update", json!({"id": 42, "patch": {}})), "助手不存在");
+        assert_eq!(
+            err(&root, "assistant_update", json!({"id": 42, "patch": {}})),
+            "助手不存在"
+        );
     }
 
     #[test]
@@ -1712,15 +1777,25 @@ mod tests {
         );
         assert_eq!(updated["title"], "t");
         assert_eq!(updated["content"], "new");
-        assert_eq!(err(&root, "quick_messages_update", json!({"id": 99})), "快捷消息不存在");
-        assert_eq!(ok(&root, "quick_messages_delete", json!({"id": 10})), Value::Null);
+        assert_eq!(
+            err(&root, "quick_messages_update", json!({"id": 99})),
+            "快捷消息不存在"
+        );
+        assert_eq!(
+            ok(&root, "quick_messages_delete", json!({"id": 10})),
+            Value::Null
+        );
     }
 
     #[test]
     fn system_settings_merge_is_wholesale() {
         let root = temp_root("settings");
         seed(&root, json!({}));
-        ok(&root, "update_system_settings", json!({"theme": "light", "extra": {"a": 1}}));
+        ok(
+            &root,
+            "update_system_settings",
+            json!({"theme": "light", "extra": {"a": 1}}),
+        );
         ok(&root, "save_system_settings", json!({"theme": "dark"}));
         let doc = store_file::read_json(&store_path(&root)).unwrap().unwrap();
         assert_eq!(doc["settings"]["theme"], "dark");
@@ -1809,7 +1884,11 @@ mod tests {
         assert_eq!(doc["conversations"][0]["title_locked"], true);
 
         assert_eq!(
-            err(&root, "update_conversation_status", json!({"conversationId": 999})),
+            err(
+                &root,
+                "update_conversation_status",
+                json!({"conversationId": 999})
+            ),
             "会话不存在"
         );
     }
@@ -1831,23 +1910,43 @@ mod tests {
         assert_eq!(node["value"]["y"], -5.5);
 
         assert_eq!(
-            err(&root, "canvas_create_node", json!({"input": {"boardId": 2, "kind": "note", "x": 1, "y": 1, "width": 100, "height": 100, "folderId": 1}})),
+            err(
+                &root,
+                "canvas_create_node",
+                json!({"input": {"boardId": 2, "kind": "note", "x": 1, "y": 1, "width": 100, "height": 100, "folderId": 1}})
+            ),
             "note 节点不能绑定 folder_id"
         );
         assert_eq!(
-            err(&root, "canvas_create_node", json!({"input": {"boardId": 2, "kind": "conversation", "x": 1, "y": 1, "width": 100, "height": 100}})),
+            err(
+                &root,
+                "canvas_create_node",
+                json!({"input": {"boardId": 2, "kind": "conversation", "x": 1, "y": 1, "width": 100, "height": 100}})
+            ),
             "conversation 节点需要 conversationId"
         );
         assert_eq!(
-            err(&root, "canvas_create_node", json!({"input": {"boardId": 99, "kind": "note", "x": 1, "y": 1, "width": 100, "height": 100}})),
+            err(
+                &root,
+                "canvas_create_node",
+                json!({"input": {"boardId": 99, "kind": "note", "x": 1, "y": 1, "width": 100, "height": 100}})
+            ),
             "画布不存在"
         );
         assert_eq!(
-            err(&root, "canvas_create_node", json!({"input": {"boardId": 2, "kind": "widget", "x": 1, "y": 1, "width": 100, "height": 100}})),
+            err(
+                &root,
+                "canvas_create_node",
+                json!({"input": {"boardId": 2, "kind": "widget", "x": 1, "y": 1, "width": 100, "height": 100}})
+            ),
             "不支持的画布节点类型"
         );
         assert_eq!(
-            err(&root, "canvas_create_node", json!({"input": {"boardId": 2, "kind": "note", "x": 1, "y": 1, "width": 100}})),
+            err(
+                &root,
+                "canvas_create_node",
+                json!({"input": {"boardId": 2, "kind": "note", "x": 1, "y": 1, "width": 100}})
+            ),
             "缺少节点几何字段 height"
         );
     }
@@ -1874,21 +1973,37 @@ mod tests {
         );
         let note_id = note["value"]["id"].as_i64().unwrap();
         assert_eq!(
-            err(&root, "canvas_update_node", json!({"nodeId": note_id, "patch": {"gridColumns": 3}})),
+            err(
+                &root,
+                "canvas_update_node",
+                json!({"nodeId": note_id, "patch": {"gridColumns": 3}})
+            ),
             "只有区域支持网格设置"
         );
         assert_eq!(
-            err(&root, "canvas_update_node", json!({"nodeId": note_id, "patch": {"memberAdd": 4}})),
+            err(
+                &root,
+                "canvas_update_node",
+                json!({"nodeId": note_id, "patch": {"memberAdd": 4}})
+            ),
             "只有自定义区域可修改成员"
         );
         // collapsed 必须是布尔。
         assert_eq!(
-            err(&root, "canvas_update_node", json!({"nodeId": note_id, "patch": {"collapsed": "yes"}})),
+            err(
+                &root,
+                "canvas_update_node",
+                json!({"nodeId": note_id, "patch": {"collapsed": "yes"}})
+            ),
             "collapsed 必须为布尔值"
         );
         // 成员会话必须存在。
         assert_eq!(
-            err(&root, "canvas_update_node", json!({"nodeId": region_id, "patch": {"memberAdd": 999}})),
+            err(
+                &root,
+                "canvas_update_node",
+                json!({"nodeId": region_id, "patch": {"memberAdd": 999}})
+            ),
             "成员会话不存在"
         );
         // 区域内网格更新成功。
@@ -1904,9 +2019,12 @@ mod tests {
     fn canvas_group_into_region_and_detach() {
         let root = temp_root("canvas-group");
         seed(&root, json!({}));
-        seed(&root, json!({"canvasNodes": [
-            {"id": 6, "board_id": 2, "kind": "conversation", "conversation_id": 4, "x": 1.0, "y": 1.0, "width": 320.0, "height": 220.0, "title": Value::Null, "content": Value::Null, "color": Value::Null, "collapsed": false, "grid_columns": 0, "grid_rows": 0, "member_ids": [], "folder_id": Value::Null, "folder_group_id": Value::Null, "agent_type": Value::Null, "path": Value::Null, "created_at": "t", "updated_at": "t"}
-        ]}));
+        seed(
+            &root,
+            json!({"canvasNodes": [
+                {"id": 6, "board_id": 2, "kind": "conversation", "conversation_id": 4, "x": 1.0, "y": 1.0, "width": 320.0, "height": 220.0, "title": Value::Null, "content": Value::Null, "color": Value::Null, "collapsed": false, "grid_columns": 0, "grid_rows": 0, "member_ids": [], "folder_id": Value::Null, "folder_group_id": Value::Null, "agent_type": Value::Null, "path": Value::Null, "created_at": "t", "updated_at": "t"}
+            ]}),
+        );
         let (result, events) = call(
             &root,
             "canvas_group_into_region",
@@ -1937,7 +2055,11 @@ mod tests {
         assert_eq!(out["value"]["conversation_id"], 4);
 
         assert_eq!(
-            err(&root, "canvas_detach_member", json!({"regionId": region_id, "conversationId": 4, "x": 1, "y": 1})),
+            err(
+                &root,
+                "canvas_detach_member",
+                json!({"regionId": region_id, "conversationId": 4, "x": 1, "y": 1})
+            ),
             "成员已移出区域"
         );
     }
@@ -1945,20 +2067,30 @@ mod tests {
     #[test]
     fn canvas_delete_board_prunes_and_kills_terminals() {
         let root = temp_root("canvas-delete");
-        seed(&root, json!({"canvasNodes": [
-            {"id": 6, "board_id": 2, "kind": "terminal", "path": "p", "x": 0.0, "y": 0.0, "width": 320.0, "height": 220.0, "title": Value::Null, "content": Value::Null, "color": Value::Null, "collapsed": false, "grid_columns": 0, "grid_rows": 0, "member_ids": [], "folder_id": Value::Null, "folder_group_id": Value::Null, "agent_type": Value::Null, "conversation_id": Value::Null, "created_at": "t", "updated_at": "t"}
-        ]}));
+        seed(
+            &root,
+            json!({"canvasNodes": [
+                {"id": 6, "board_id": 2, "kind": "terminal", "path": "p", "x": 0.0, "y": 0.0, "width": 320.0, "height": 220.0, "title": Value::Null, "content": Value::Null, "color": Value::Null, "collapsed": false, "grid_columns": 0, "grid_rows": 0, "member_ids": [], "folder_id": Value::Null, "folder_group_id": Value::Null, "agent_type": Value::Null, "conversation_id": Value::Null, "created_at": "t", "updated_at": "t"}
+            ]}),
+        );
         let outcome = handle(&root, "canvas_delete_board", &json!({"boardId": 2})).unwrap();
         let out = outcome.result.unwrap();
         assert_eq!(out["value"], json!([6]), "板删除连带节点");
-        assert_eq!(outcome.events.len(), 2, "canvas://changed + canvas-board://changed");
+        assert_eq!(
+            outcome.events.len(),
+            2,
+            "canvas://changed + canvas-board://changed"
+        );
         assert_eq!(outcome.events[1].0, "canvas-board://changed");
         assert_eq!(outcome.events[1].1["kind"], "deleted");
         // terminal_kill 转发由 mod.rs 拦截改道本地终端模块（G 组）——
         // store 侧只负责生成「删除节点 → 杀终端」这个语义对。
         assert_eq!(
             outcome.forward,
-            vec![("terminal_kill".to_string(), json!({"terminalId": "canvas-term-6"}))]
+            vec![(
+                "terminal_kill".to_string(),
+                json!({"terminalId": "canvas-term-6"})
+            )]
         );
 
         let doc = store_file::read_json(&store_path(&root)).unwrap().unwrap();
@@ -1984,12 +2116,15 @@ mod tests {
     #[test]
     fn canvas_list_boards_sorts_by_area_and_recency() {
         let root = temp_root("canvas-list");
-        seed(&root, json!({
-            "canvasNodes": [
-                {"id": 1, "board_id": 2, "kind": "terminal", "path": "p", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "title": Value::Null, "content": Value::Null, "color": Value::Null, "collapsed": false, "grid_columns": 0, "grid_rows": 0, "member_ids": [], "folder_id": Value::Null, "folder_group_id": Value::Null, "agent_type": Value::Null, "conversation_id": Value::Null, "created_at": "t", "updated_at": "t"},
-                {"id": 2, "board_id": 2, "kind": "note", "path": Value::Null, "x": 0.0, "y": 0.0, "width": 500.0, "height": 400.0, "title": Value::Null, "content": Value::Null, "color": Value::Null, "collapsed": false, "grid_columns": 0, "grid_rows": 0, "member_ids": [], "folder_id": Value::Null, "folder_group_id": Value::Null, "agent_type": Value::Null, "conversation_id": Value::Null, "created_at": "t", "updated_at": "t"}
-            ]
-        }));
+        seed(
+            &root,
+            json!({
+                "canvasNodes": [
+                    {"id": 1, "board_id": 2, "kind": "terminal", "path": "p", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "title": Value::Null, "content": Value::Null, "color": Value::Null, "collapsed": false, "grid_columns": 0, "grid_rows": 0, "member_ids": [], "folder_id": Value::Null, "folder_group_id": Value::Null, "agent_type": Value::Null, "conversation_id": Value::Null, "created_at": "t", "updated_at": "t"},
+                    {"id": 2, "board_id": 2, "kind": "note", "path": Value::Null, "x": 0.0, "y": 0.0, "width": 500.0, "height": 400.0, "title": Value::Null, "content": Value::Null, "color": Value::Null, "collapsed": false, "grid_columns": 0, "grid_rows": 0, "member_ids": [], "folder_id": Value::Null, "folder_group_id": Value::Null, "agent_type": Value::Null, "conversation_id": Value::Null, "created_at": "t", "updated_at": "t"}
+                ]
+            }),
+        );
         let boards = ok(&root, "canvas_list_boards", json!({}));
         let row = &boards.as_array().unwrap()[0];
         assert_eq!(row["node_count"], 2);
@@ -2021,13 +2156,21 @@ mod tests {
         assert_eq!(doc["settings"]["commit-message:3"]["auto_commit"], true);
 
         assert_eq!(
-            ok(&root, "delete_commit_message_settings", json!({"folderId": 3})),
+            ok(
+                &root,
+                "delete_commit_message_settings",
+                json!({"folderId": 3})
+            ),
             Value::Null
         );
         let doc = store_file::read_json(&store_path(&root)).unwrap().unwrap();
         assert!(doc["settings"].get("commit-message:3").is_none());
         assert_eq!(
-            err(&root, "set_commit_message_settings", json!({"folderId": 3, "settings": "nope"})),
+            err(
+                &root,
+                "set_commit_message_settings",
+                json!({"folderId": 3, "settings": "nope"})
+            ),
             "提交设置必须是对象"
         );
     }
@@ -2036,7 +2179,11 @@ mod tests {
     fn store_file_stays_go_shaped_after_writes() {
         let root = temp_root("shape");
         seed(&root, json!({}));
-        ok(&root, "create_folder_group", json!({"name": "g<b>", "color": ""}));
+        ok(
+            &root,
+            "create_folder_group",
+            json!({"name": "g<b>", "color": ""}),
+        );
         let raw = fs::read(root.join(".data").join(FILE)).unwrap();
         let text = String::from_utf8(raw).unwrap();
         // 紧凑 + HTML 转义 + 顶层字段序。

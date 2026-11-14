@@ -163,7 +163,9 @@ fn running(root: &Path) -> Option<Client> {
     let client = Client {
         // Go 记的是 `http://127.0.0.1:PORT`（无路径）。authority() 带端口，
         // host_str() 不带 —— 少了端口会打到 80 端口去。
-        url: format!("{}://{}", parsed.scheme(), parsed.authority()).trim_end_matches('/').to_string(),
+        url: format!("{}://{}", parsed.scheme(), parsed.authority())
+            .trim_end_matches('/')
+            .to_string(),
         key,
     };
     let probe = Client {
@@ -269,7 +271,8 @@ pub fn ensure(root: &Path) -> Result<Client, String> {
             return Err("账号渠道启动超时".into());
         }
     };
-    let state: Value = serde_json::from_str(line.trim()).map_err(|_| "账号渠道启动响应无效".to_string())?;
+    let state: Value =
+        serde_json::from_str(line.trim()).map_err(|_| "账号渠道启动响应无效".to_string())?;
     let url = state
         .get("url")
         .and_then(|item| item.as_str())
@@ -281,7 +284,9 @@ pub fn ensure(root: &Path) -> Result<Client, String> {
         return Err("账号渠道监听地址无效".into());
     }
     let client = Client {
-        url: format!("{}://{}", parsed.scheme(), parsed.authority()).trim_end_matches('/').to_string(),
+        url: format!("{}://{}", parsed.scheme(), parsed.authority())
+            .trim_end_matches('/')
+            .to_string(),
         key: secret,
     };
     registry().lock().unwrap().insert(
@@ -477,7 +482,9 @@ mod tests {
         assert!(!available(&root));
         std::fs::create_dir_all(root.join("bridges").join("account-channels")).unwrap();
         std::fs::write(
-            root.join("bridges").join("account-channels").join("server.mjs"),
+            root.join("bridges")
+                .join("account-channels")
+                .join("server.mjs"),
             "//",
         )
         .unwrap();

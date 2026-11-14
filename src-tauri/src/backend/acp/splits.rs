@@ -10,9 +10,9 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
+use crate::backend::acp::connections::LayerState;
 use crate::backend::goformat;
 use crate::backend::store_file;
-use crate::backend::acp::connections::LayerState;
 
 /// Go `taskSplit` (split.go:22).
 #[derive(Clone, Debug, Default)]
@@ -50,7 +50,9 @@ pub fn save(root: &Path, rows: &[Value]) -> Result<(), String> {
 /// Go `loadSplits` (split.go:60): pending cards survive restarts, still
 /// waiting.
 pub fn load(root: &Path, splits: &mut HashMap<String, TaskSplit>) {
-    let Ok(Some(data)) = store_file::read_json(&split_file(root)) else { return };
+    let Ok(Some(data)) = store_file::read_json(&split_file(root)) else {
+        return;
+    };
     let Some(rows) = data.as_array() else { return };
     for row in rows {
         let get = |key: &str| crate::backend::acp::wire::text(row.get(key));
@@ -153,10 +155,7 @@ mod tests {
     use std::fs;
 
     fn temp_root(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "acp-splits-{tag}-{}",
-            goformat::hex_id()
-        ));
+        let dir = std::env::temp_dir().join(format!("acp-splits-{tag}-{}", goformat::hex_id()));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -215,9 +214,7 @@ mod tests {
             normalize_confirmed_tasks(&[]).unwrap_err(),
             "tasks 需要 1–8 个子任务"
         );
-        let eight: Vec<Value> = (0..9)
-            .map(|i| json!({"prompt": format!("p{i}")}))
-            .collect();
+        let eight: Vec<Value> = (0..9).map(|i| json!({"prompt": format!("p{i}")})).collect();
         assert!(normalize_confirmed_tasks(&eight).is_err());
         let ok = normalize_confirmed_tasks(&[json!({"prompt": "  do it "})]).unwrap();
         assert_eq!(ok[0]["title"], "do it");

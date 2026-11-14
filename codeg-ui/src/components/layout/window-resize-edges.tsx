@@ -34,7 +34,7 @@ const EDGES = [
 export function WindowResizeEdges() {
   useEffect(() => {
     const host = goDesktopBridge()
-    if (!host?.beginResize) return
+    if (!host?.beginResize || host.nativeWindowChrome) return
     const beginResize = host.beginResize
 
     const strips = EDGES.map(({ dir, className }) => {

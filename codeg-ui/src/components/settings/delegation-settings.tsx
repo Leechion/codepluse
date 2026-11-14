@@ -11,8 +11,9 @@
  *     provider/model. This hosts the relocated `HarnessInstanceSection`; the
  *     per-agent `delegation.agent_defaults` blob it used to edit is now carried
  *     through untouched on save, since the instances cover per-sub-agent staffing.
- *   * "Assistants" — the user's assistants. Each change is written at once,
- *     so the section's save bar does not apply to (and is hidden on) it.
+ *   * "Sub-agent config" — named harness instances and the user's assistants.
+ *     These are presented together in the assistants UI; every change is
+ *     written at once, so the section's save bar does not apply to them.
  *
  * Cancellation is handled out-of-band via MCP `notifications/cancelled`
  * forwarded from the parent agent CLI; there is no broker-side timeout to
@@ -50,7 +51,7 @@ import type { AgentDelegationDefaults, AgentType } from "@/lib/types"
 import { AssistantsPanel } from "./assistants-panel"
 import { HarnessInstanceSection } from "./harness-instance-settings"
 
-type DelegationTab = "general" | "mainAgent" | "agentDefaults" | "assistants"
+type DelegationTab = "general" | "mainAgent" | "agentDefaults"
 
 const DEPTH_MIN = 1
 const DEPTH_MAX = 8
@@ -289,7 +290,6 @@ export function DelegationSettingsSection() {
           <TabsTrigger value="agentDefaults">
             {t("tabAgentDefaults")}
           </TabsTrigger>
-          <TabsTrigger value="assistants">{t("tabAssistants")}</TabsTrigger>
         </TabsList>
 
         {/* The kill switch and the two valves it gates are one decision, so
@@ -376,17 +376,16 @@ export function DelegationSettingsSection() {
         </TabsContent>
 
         <TabsContent value="agentDefaults" className="pt-2">
-          {/* 执行端实例：为 Claude Code / Codex 建立命名副本。 */}
-          <HarnessInstanceSection mode="instances" />
-        </TabsContent>
-
-        <TabsContent value="assistants" className="pt-2">
-          <AssistantsPanel
-            delegationEnabled={persisted ? persisted.enabled : null}
-            unsavedTabs={unsavedTabs}
-            onShowUnsaved={() => setTab("general")}
-            onShowGeneral={() => setTab("general")}
-          />
+          <div className="space-y-4">
+            <AssistantsPanel
+              delegationEnabled={persisted ? persisted.enabled : null}
+              unsavedTabs={unsavedTabs}
+              onShowUnsaved={() => setTab("general")}
+              onShowGeneral={() => setTab("general")}
+            />
+            {/* 具名执行端实例和助手共享“子智能体配置”页。 */}
+            <HarnessInstanceSection mode="instances" />
+          </div>
         </TabsContent>
       </Tabs>
 

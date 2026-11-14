@@ -44,10 +44,29 @@ pub fn owns(command: &str) -> bool {
             | "science_apply_links"
             | "acp_list_agent_skills"
             | "acp_list_agent_runtime_skills"
+            | "acp_read_agent_skill"
+            | "acp_save_agent_skill"
+            | "acp_delete_agent_skill"
             | "experts_list_all_install_statuses"
             | "science_list_all_install_statuses"
             | "experts_get_install_status"
             | "science_get_install_status"
+            | "experts_open_central_dir"
+            | "science_open_central_dir"
+            | "custom_list"
+            | "custom_list_all_install_statuses"
+            | "custom_apply_links"
+            | "custom_read_skill"
+            | "custom_create_skill"
+            | "custom_save_skill"
+            | "custom_duplicate_skill"
+            | "custom_import_skill"
+            | "custom_import_from_agent"
+            | "custom_delete_skills"
+            | "generative_ui_skill_info"
+            | "generative_ui_list_all_install_statuses"
+            | "generative_ui_apply_links"
+            | "generative_ui_read_content"
     )
 }
 
@@ -59,7 +78,10 @@ pub fn handle(root: &Path, command: &str, args: &Value) -> Option<Result<Value, 
 }
 
 fn text(args: &Value, key: &str) -> String {
-    args.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn group_of(command: &str) -> &'static str {
@@ -117,11 +139,21 @@ fn list_agent_skills(home: &Path, root: &Path, args: &Value) -> Result<Value, St
     if !crate::backend::acp::agents::agent_exists(root, &agent_type) {
         return Err("执行端不存在".into());
     }
-    let mut candidates: Vec<(Value, PathBuf)> =
-        vec![(serde_json::json!({"scope": "user"}), native_skill_root(home, &agent_type))];
+    if std::fs::symlink_metadata(native_skill_root(home, &agent_type))
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("技能根目录不能是符号链接".into());
+    }
+    let mut candidates: Vec<(Value, PathBuf)> = vec![(
+        serde_json::json!({"scope": "global"}),
+        native_skill_root(home, &agent_type),
+    )];
     let workspace_path = text(args, "workspacePath");
     if !workspace_path.is_empty() {
-        if let Ok(resolved) = crate::backend::acp::connections::resolve_workdir(root, &workspace_path) {
+        if let Ok(resolved) =
+            crate::backend::acp::connections::resolve_workdir(root, &workspace_path)
+        {
             candidates.push((
                 serde_json::json!({"scope": "project"}),
                 resolved.join(".agents").join("skills"),
@@ -139,16 +171,42 @@ fn list_agent_skills(home: &Path, root: &Path, args: &Value) -> Result<Value, St
         }));
         if let Ok(entries) = std::fs::read_dir(&root_dir) {
             for entry in entries.flatten() {
-                let file = entry.path().join("SKILL.md");
-                if !file.is_file() {
-                    continue;
-                }
                 let name = entry.file_name().to_string_lossy().to_string();
-                items.push(serde_json::json!({
-                    "id": name, "name": name, "scope": scope.get("scope").cloned().unwrap_or(Value::Null),
-                    "layout": "directory", "path": file.to_string_lossy(),
-                    "description": Value::Null, "read_only": true,
-                }));
+                let item_path = if entry
+                    .file_type()
+                    .map(|kind| kind.is_symlink())
+                    .unwrap_or(true)
+                {
+                    continue;
+                } else if entry.path().is_dir() {
+                    let file = entry.path().join("SKILL.md");
+                    if !file.is_file() {
+                        continue;
+                    }
+                    items.push(agent_skill_item(
+                        &name,
+                        scope
+                            .get("scope")
+                            .and_then(Value::as_str)
+                            .unwrap_or("global"),
+                        "skill_directory",
+                        &file,
+                    ));
+                    continue;
+                } else if entry.path().extension().and_then(|ext| ext.to_str()) == Some("md") {
+                    entry.path()
+                } else {
+                    continue;
+                };
+                items.push(agent_skill_item(
+                    name.trim_end_matches(".md"),
+                    scope
+                        .get("scope")
+                        .and_then(Value::as_str)
+                        .unwrap_or("global"),
+                    "markdown_file",
+                    &item_path,
+                ));
             }
         }
     }
@@ -157,13 +215,159 @@ fn list_agent_skills(home: &Path, root: &Path, args: &Value) -> Result<Value, St
     }))
 }
 
+fn agent_skill_item(id: &str, scope: &str, layout: &str, path: &Path) -> Value {
+    json!({
+        "id": id,
+        "name": id,
+        "scope": scope,
+        "layout": layout,
+        "path": path.to_string_lossy(),
+        "description": Value::Null,
+        "read_only": false,
+    })
+}
+
+fn valid_skill_id(id: &str) -> bool {
+    !id.is_empty()
+        && id != "."
+        && id != ".."
+        && !id.contains(['/', '\\', ':', '\0'])
+        && !id.starts_with('.')
+}
+
+fn agent_skill_location(
+    home: &Path,
+    root: &Path,
+    args: &Value,
+) -> Result<(String, PathBuf, String, String), String> {
+    let agent_type = text(args, "agentType");
+    if !crate::backend::acp::agents::agent_exists(root, &agent_type) {
+        return Err("执行端不存在".into());
+    }
+    let requested_scope = text(args, "scope");
+    let scope = if requested_scope == "user" {
+        "global".to_string()
+    } else {
+        requested_scope
+    };
+    let skill_id = text(args, "skillId");
+    if !valid_skill_id(&skill_id) {
+        return Err("技能名称无效".into());
+    }
+    let layout = args
+        .get("layout")
+        .and_then(Value::as_str)
+        .filter(|value| matches!(*value, "markdown_file" | "skill_directory"))
+        .unwrap_or("skill_directory")
+        .to_string();
+    let base = match scope.as_str() {
+        "global" | "user" => native_skill_root(home, &agent_type),
+        "project" => {
+            let workspace = text(args, "workspacePath");
+            if workspace.is_empty() {
+                return Err("项目技能需要指定工作区".into());
+            }
+            crate::backend::acp::connections::resolve_workdir(root, &workspace)?
+                .join(".agents")
+                .join("skills")
+        }
+        _ => return Err("技能范围无效".into()),
+    };
+    if std::fs::symlink_metadata(&base)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("技能根目录不能是符号链接".into());
+    }
+    Ok((scope, base, skill_id, layout))
+}
+
+fn agent_skill_path(base: &Path, id: &str, layout: &str) -> PathBuf {
+    if layout == "markdown_file" {
+        base.join(format!("{id}.md"))
+    } else {
+        base.join(id).join("SKILL.md")
+    }
+}
+
+fn read_agent_skill(home: &Path, root: &Path, args: &Value) -> Result<Value, String> {
+    let (scope, base, id, layout) = agent_skill_location(home, root, args)?;
+    let path = agent_skill_path(&base, &id, &layout);
+    if std::fs::symlink_metadata(&path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("技能文件不能是符号链接".into());
+    }
+    let content = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    Ok(json!({
+        "skill": agent_skill_item(&id, &scope, &layout, &path),
+        "content": content,
+    }))
+}
+
+fn save_agent_skill(home: &Path, root: &Path, args: &Value) -> Result<Value, String> {
+    let (scope, base, id, layout) = agent_skill_location(home, root, args)?;
+    let path = agent_skill_path(&base, &id, &layout);
+    if std::fs::symlink_metadata(&base)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("技能目录不能是符号链接".into());
+    }
+    std::fs::create_dir_all(&base).map_err(|error| error.to_string())?;
+    if layout == "skill_directory" {
+        let dir = base.join(&id);
+        if std::fs::symlink_metadata(&dir)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err("技能目录不能是符号链接".into());
+        }
+        std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    }
+    if std::fs::symlink_metadata(&path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("技能文件不能是符号链接".into());
+    }
+    let content = args
+        .get("content")
+        .and_then(Value::as_str)
+        .ok_or("技能内容无效")?;
+    std::fs::write(&path, content).map_err(|error| error.to_string())?;
+    Ok(agent_skill_item(&id, &scope, &layout, &path))
+}
+
+fn delete_agent_skill(home: &Path, root: &Path, args: &Value) -> Result<Value, String> {
+    let (scope, base, id, layout) = agent_skill_location(home, root, args)?;
+    let path = agent_skill_path(&base, &id, &layout);
+    if layout == "skill_directory" {
+        let dir = base.join(&id);
+        if std::fs::symlink_metadata(&dir)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err("技能目录不能是符号链接".into());
+        }
+        std::fs::remove_dir_all(dir).map_err(|error| error.to_string())?;
+    } else {
+        std::fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    let _ = scope;
+    Ok(Value::Null)
+}
+
 /// Go compares resolved paths with `strings.EqualFold`.
 fn eq_fold(a: &str, b: &str) -> bool {
     a.to_lowercase() == b.to_lowercase()
 }
 
 fn resolved_text(path: &Path) -> String {
-    strip_verbatim(eval_symlinks(path)).to_string_lossy().into_owned()
+    strip_verbatim(eval_symlinks(path))
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn is_symlink(path: &Path) -> bool {
@@ -187,7 +391,10 @@ fn bundled_skills(root: &Path, group: &str) -> Result<Vec<Value>, String> {
             Ok(body) => (true, body),
             Err(_) => (false, Vec::new()),
         };
-        let bundled_hash = meta.get("bundled_hash").and_then(|v| v.as_str()).unwrap_or("");
+        let bundled_hash = meta
+            .get("bundled_hash")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         out.push(json!({
             "metadata": meta,
             "installed_centrally": installed,
@@ -287,8 +494,21 @@ fn skill_link(
     if central.is_empty() {
         return Err(format!("技能不存在：{skill_id}"));
     }
-    let central_path = PathBuf::from(&central);
+    skill_link_to_path(home, skill_id, agent_type, enable, &central)
+}
+
+fn skill_link_to_path(
+    home: &Path,
+    skill_id: &str,
+    agent_type: &str,
+    enable: bool,
+    central: &str,
+) -> Result<Value, String> {
+    let central_path = PathBuf::from(central);
     let root_dir = native_skill_root(home, agent_type);
+    if is_symlink(&root_dir) {
+        return Err("智能体技能目录不能是符号链接".into());
+    }
     let link = root_dir.join(skill_id);
 
     if enable {
@@ -315,7 +535,9 @@ fn skill_link(
             // Windows without Developer Mode: copy the skill instead, which the
             // harness reads exactly like a linked directory.
             if copy_dir(&central_path, &link).is_err() {
-                return Err(format!("创建技能链接失败（可开启 Windows 开发者模式）：{err}"));
+                return Err(format!(
+                    "创建技能链接失败（可开启 Windows 开发者模式）：{err}"
+                ));
             }
             if let Err(mark_err) = std::fs::write(link.join(COPY_MARKER), central.as_bytes()) {
                 let _ = std::fs::remove_dir_all(&link);
@@ -351,6 +573,419 @@ fn skill_link(
     Ok(skill_status(home, skill_id, agent_type, &central))
 }
 
+const GENERATIVE_UI_ID: &str = "ui-render";
+
+fn custom_skill_root(home: &Path) -> PathBuf {
+    home.join(".codeg").join("skills")
+}
+
+fn validate_custom_root(home: &Path) -> Result<PathBuf, String> {
+    let codeg = home.join(".codeg");
+    let base = custom_skill_root(home);
+    if is_symlink(&codeg) || is_symlink(&base) {
+        return Err("自定义技能目录不能是符号链接".into());
+    }
+    Ok(base)
+}
+
+fn builtin_skill_ids(root: &Path) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    for group in ["experts", "science"] {
+        let path = root.join("codeg-assets").join(group).join("manifest.json");
+        if let Ok(bytes) = std::fs::read(path) {
+            if let Ok(rows) = serde_json::from_slice::<Vec<Value>>(&bytes) {
+                ids.extend(
+                    rows.iter()
+                        .filter_map(|row| row.get("id")?.as_str().map(str::to_string)),
+                );
+            }
+        }
+    }
+    ids.insert(GENERATIVE_UI_ID.to_string());
+    ids
+}
+
+fn skill_description(content: &str) -> (String, Option<String>) {
+    let Some(rest) = content.strip_prefix("---") else {
+        return (String::new(), None);
+    };
+    let Some((front, _)) = rest.split_once("\n---") else {
+        return (String::new(), None);
+    };
+    let mut name = String::new();
+    let mut description = None;
+    for line in front.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value.trim().trim_matches(['"', '\'']);
+        match key.trim() {
+            "name" => name = value.to_string(),
+            "description" if !value.is_empty() => description = Some(value.to_string()),
+            _ => {}
+        }
+    }
+    (name, description)
+}
+
+fn custom_skill_item(id: &str, path: &Path) -> Result<Value, String> {
+    let file = path.join("SKILL.md");
+    if is_symlink(&file) {
+        return Err("技能文件不能是符号链接".into());
+    }
+    let content = std::fs::read_to_string(file).map_err(|e| e.to_string())?;
+    let (name, description) = skill_description(&content);
+    Ok(
+        json!({"id":id,"name":if name.is_empty(){id}else{&name},"description":description,"central_path":path.to_string_lossy()}),
+    )
+}
+
+fn custom_location(home: &Path, root: &Path, id: &str) -> Result<PathBuf, String> {
+    if !valid_skill_id(id) || builtin_skill_ids(root).contains(id) {
+        return Err(format!("自定义技能名称无效或与内置技能冲突：{id}"));
+    }
+    let base = validate_custom_root(home)?;
+    let path = base.join(id);
+    if is_symlink(&path) {
+        return Err("技能目录不能是符号链接".into());
+    }
+    Ok(path)
+}
+
+fn custom_skill_list(home: &Path, root: &Path) -> Result<Vec<Value>, String> {
+    let base = validate_custom_root(home)?;
+    let builtin = builtin_skill_ids(root);
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&base) else {
+        return Ok(out);
+    };
+    for entry in entries.flatten() {
+        let id = entry.file_name().to_string_lossy().to_string();
+        let path = entry.path();
+        if !valid_skill_id(&id) || builtin.contains(&id) || is_symlink(&path) || !path.is_dir() {
+            continue;
+        }
+        if let Ok(item) = custom_skill_item(&id, &path) {
+            out.push(item);
+        }
+    }
+    out.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+    Ok(out)
+}
+
+fn secure_copy_dir(source: &Path, destination: &Path) -> Result<(), String> {
+    if is_symlink(source) {
+        return Err("不能导入符号链接目录".into());
+    }
+    std::fs::create_dir_all(destination).map_err(|e| e.to_string())?;
+    for entry in std::fs::read_dir(source).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let from = entry.path();
+        let to = destination.join(entry.file_name());
+        let kind = entry.file_type().map_err(|e| e.to_string())?;
+        if kind.is_symlink() {
+            return Err(format!("导入内容包含符号链接：{}", from.display()));
+        }
+        if kind.is_dir() {
+            secure_copy_dir(&from, &to)?;
+        } else if kind.is_file() {
+            std::fs::copy(from, to).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_skill_dir_clean(source: &Path, destination: &Path) -> Result<(), String> {
+    if let Err(error) = secure_copy_dir(source, destination) {
+        let _ = std::fs::remove_dir_all(destination);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn custom_skill_statuses(home: &Path, root: &Path) -> Result<Vec<Value>, String> {
+    let agents = crate::backend::acp::commands::agents_rows(root);
+    let mut out = Vec::new();
+    for item in custom_skill_list(home, root)? {
+        let id = item["id"].as_str().unwrap_or("");
+        let central = item["central_path"].as_str().unwrap_or("");
+        for agent in &agents {
+            out.push(skill_status(
+                home,
+                id,
+                agent["agent_type"].as_str().unwrap_or(""),
+                central,
+            ));
+        }
+    }
+    Ok(out)
+}
+
+fn custom_link_op(
+    home: &Path,
+    root: &Path,
+    id: &str,
+    agent_type: &str,
+    enable: bool,
+) -> Result<Value, String> {
+    let path = custom_location(home, root, id)?;
+    if !path.join("SKILL.md").is_file() {
+        return Err(format!("自定义技能不存在：{id}"));
+    }
+    skill_link_to_path(home, id, agent_type, enable, &path.to_string_lossy())
+}
+
+fn generative_ui_path(root: &Path) -> PathBuf {
+    root.join("codeg-assets")
+        .join("generative-ui")
+        .join("skills")
+        .join(GENERATIVE_UI_ID)
+}
+
+fn generative_ui_statuses(home: &Path, root: &Path) -> Vec<Value> {
+    let central = generative_ui_path(root).to_string_lossy().to_string();
+    crate::backend::acp::commands::agents_rows(root)
+        .iter()
+        .map(|agent| {
+            skill_status(
+                home,
+                GENERATIVE_UI_ID,
+                agent["agent_type"].as_str().unwrap_or(""),
+                &central,
+            )
+        })
+        .collect()
+}
+
+fn open_directory(path: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(path).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("explorer.exe")
+            .arg(path)
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn custom_command(home: &Path, root: &Path, command: &str, args: &Value) -> Result<Value, String> {
+    let id = text(args, "id");
+    match command {
+        "custom_list" => Ok(Value::Array(custom_skill_list(home, root)?)),
+        "custom_list_all_install_statuses" => Ok(Value::Array(custom_skill_statuses(home, root)?)),
+        "custom_read_skill" => {
+            let path = custom_location(home, root, &id)?.join("SKILL.md");
+            std::fs::read_to_string(path)
+                .map(Value::String)
+                .map_err(|e| e.to_string())
+        }
+        "custom_create_skill" | "custom_save_skill" => {
+            let path = custom_location(home, root, &id)?;
+            let content = args
+                .get("content")
+                .and_then(Value::as_str)
+                .ok_or("技能内容无效")?;
+            if command == "custom_create_skill" {
+                if path.exists() {
+                    return Err(format!("技能已存在：{id}"));
+                }
+                std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+            } else {
+                if !path.is_dir() || !path.join("SKILL.md").is_file() {
+                    return Err(format!("自定义技能不存在：{id}"));
+                }
+            }
+            let file = path.join("SKILL.md");
+            if is_symlink(&file) {
+                return Err("技能文件不能是符号链接".into());
+            }
+            if let Err(error) = std::fs::write(&file, content) {
+                if command == "custom_create_skill" {
+                    let _ = std::fs::remove_dir_all(&path);
+                }
+                return Err(error.to_string());
+            }
+            custom_skill_item(&id, &path)
+        }
+        "custom_duplicate_skill" => {
+            let source_id = text(args, "sourceId");
+            let source = custom_location(home, root, &source_id)?;
+            let target_id = text(args, "newId");
+            let target = custom_location(home, root, &target_id)?;
+            if !source.join("SKILL.md").is_file() {
+                return Err(format!("自定义技能不存在：{source_id}"));
+            }
+            if target.exists() {
+                return Err(format!("技能已存在：{target_id}"));
+            }
+            copy_skill_dir_clean(&source, &target)?;
+            custom_skill_item(&target_id, &target)
+        }
+        "custom_import_skill" => {
+            let source = PathBuf::from(text(args, "sourcePath"));
+            let metadata = std::fs::symlink_metadata(&source).map_err(|e| e.to_string())?;
+            if metadata.file_type().is_symlink() {
+                return Err("不能导入符号链接".into());
+            }
+            let source_dir = if metadata.is_dir() {
+                source.clone()
+            } else if metadata.is_file()
+                && source.file_name().and_then(|n| n.to_str()) == Some("SKILL.md")
+            {
+                source.parent().ok_or("技能路径无效")?.to_path_buf()
+            } else {
+                return Err("导入路径必须是技能目录或 SKILL.md 文件".into());
+            };
+            let target_id = args
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .or_else(|| {
+                    source_dir
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                })
+                .ok_or("技能名称无效")?;
+            let target = custom_location(home, root, &target_id)?;
+            if target.exists() {
+                return Err(format!("技能已存在：{target_id}"));
+            }
+            copy_skill_dir_clean(&source_dir, &target)?;
+            if !target.join("SKILL.md").is_file() {
+                let _ = std::fs::remove_dir_all(&target);
+                return Err("导入目录缺少 SKILL.md".into());
+            }
+            custom_skill_item(&target_id, &target)
+        }
+        "custom_import_from_agent" => {
+            let agent_type = text(args, "agentType");
+            if !crate::backend::acp::agents::agent_exists(root, &agent_type) {
+                return Err("执行端不存在".into());
+            }
+            let source_root = native_skill_root(home, &agent_type);
+            if is_symlink(&source_root) {
+                return Err("智能体技能目录不能是符号链接".into());
+            }
+            let mut out = Vec::new();
+            for value in args
+                .get("ids")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let id = value.as_str().unwrap_or("");
+                if !valid_skill_id(id) {
+                    out.push(json!({"id":id,"name":id,"ok":false,"skipped":false,"error":"技能名称无效"}));
+                    continue;
+                }
+                let source = source_root.join(id);
+                let mut skipped = false;
+                let result = (|| -> Result<(), String> {
+                    let target = custom_location(home, root, id)?;
+                    if target.exists() {
+                        skipped = true;
+                        return Ok(());
+                    }
+                    if is_symlink(&source) {
+                        return Err("技能来源是符号链接".into());
+                    }
+                    if !source.join("SKILL.md").is_file() {
+                        return Err(format!("技能不存在：{id}"));
+                    }
+                    copy_skill_dir_clean(&source, &target)?;
+                    Ok(())
+                })();
+                let name = custom_location(home, root, id)
+                    .ok()
+                    .and_then(|path| custom_skill_item(id, &path).ok())
+                    .and_then(|item| item["name"].as_str().map(str::to_string))
+                    .unwrap_or_else(|| id.to_string());
+                let mut row = json!({"id":id,"name":name,"ok":result.is_ok(),"skipped":skipped,"error":Value::Null});
+                if let Err(error) = result {
+                    row["error"] = json!(error);
+                }
+                out.push(row);
+            }
+            Ok(Value::Array(out))
+        }
+        "custom_apply_links" => {
+            let mut out = Vec::new();
+            for op in args
+                .get("ops")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let id = op.get("expertId").and_then(Value::as_str).unwrap_or("");
+                let agent_type = op.get("agentType").and_then(Value::as_str).unwrap_or("");
+                let enable = op.get("enable").and_then(Value::as_bool).unwrap_or(false);
+                let result = custom_link_op(home, root, id, agent_type, enable);
+                let mut row = json!({"expertId":id,"agentType":agent_type,"ok":result.is_ok(),"status":Value::Null,"error":Value::Null});
+                match result {
+                    Ok(status) if enable => row["status"] = status,
+                    Err(error) => row["error"] = json!(error),
+                    _ => {}
+                }
+                out.push(row);
+            }
+            Ok(Value::Array(out))
+        }
+        "custom_delete_skills" => {
+            let agents = crate::backend::acp::commands::agents_rows(root);
+            let mut out = Vec::new();
+            for value in args
+                .get("ids")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let id = value.as_str().unwrap_or("");
+                let result = (|| -> Result<(), String> {
+                    let path = custom_location(home, root, id)?;
+                    if !path.is_dir() {
+                        return Err(format!("自定义技能不存在：{id}"));
+                    }
+                    for agent in &agents {
+                        custom_link_op(
+                            home,
+                            root,
+                            id,
+                            agent["agent_type"].as_str().unwrap_or(""),
+                            false,
+                        )?;
+                    }
+                    std::fs::remove_dir_all(path).map_err(|e| e.to_string())
+                })();
+                let mut row = json!({"id":id,"ok":result.is_ok(),"error":Value::Null});
+                if let Err(error) = result {
+                    row["error"] = json!(error);
+                }
+                out.push(row);
+            }
+            Ok(Value::Array(out))
+        }
+        _ => Err(format!("未知自定义技能命令：{command}")),
+    }
+}
+
 fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
     run_with_home(&home_dir(), root, command, args)
 }
@@ -359,9 +994,73 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
 /// linking writes into `%USERPROFILE%\.claude\skills`, which a test must never
 /// touch for real.
 fn run_with_home(home: &Path, root: &Path, command: &str, args: &Value) -> Result<Value, String> {
+    if command.starts_with("custom_") {
+        return custom_command(home, root, command, args);
+    }
+    if command.starts_with("generative_ui_") {
+        let skill_file = generative_ui_path(root).join("SKILL.md");
+        if !skill_file.is_file() {
+            return Err(format!("UI 渲染技能资源缺失：{}", skill_file.display()));
+        }
+        let conflict = custom_skill_root(home).join(GENERATIVE_UI_ID).exists();
+        return match command {
+            "generative_ui_skill_info" => Ok(json!({"id":GENERATIVE_UI_ID,"conflict":conflict})),
+            "generative_ui_read_content" => std::fs::read_to_string(skill_file)
+                .map(Value::String)
+                .map_err(|e| e.to_string()),
+            "generative_ui_list_all_install_statuses" => {
+                Ok(Value::Array(generative_ui_statuses(home, root)))
+            }
+            "generative_ui_apply_links" => {
+                let central = generative_ui_path(root).to_string_lossy().to_string();
+                let mut out = Vec::new();
+                for op in args
+                    .get("ops")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    let id = op.get("expertId").and_then(Value::as_str).unwrap_or("");
+                    let agent_type = op.get("agentType").and_then(Value::as_str).unwrap_or("");
+                    let enable = op.get("enable").and_then(Value::as_bool).unwrap_or(false);
+                    let result = if id != GENERATIVE_UI_ID {
+                        Err("UI 渲染技能 ID 无效".to_string())
+                    } else if enable && conflict {
+                        Err("技能名称已被自定义技能占用".to_string())
+                    } else {
+                        skill_link_to_path(home, GENERATIVE_UI_ID, agent_type, enable, &central)
+                    };
+                    let mut row = json!({"expertId":id,"agentType":agent_type,"ok":result.is_ok(),"status":Value::Null,"error":Value::Null});
+                    match result {
+                        Ok(status) if enable => row["status"] = status,
+                        Err(error) => row["error"] = json!(error),
+                        _ => {}
+                    }
+                    out.push(row);
+                }
+                Ok(Value::Array(out))
+            }
+            _ => Err(format!("未知 UI 渲染技能命令：{command}")),
+        };
+    }
+    if command == "experts_open_central_dir" || command == "science_open_central_dir" {
+        let group = group_of(command);
+        let path = root.join("codeg-assets").join(group);
+        open_directory(&path)?;
+        return Ok(Value::String(path.to_string_lossy().into_owned()));
+    }
     let group = group_of(command);
     if command == "acp_list_agent_runtime_skills" || command == "acp_list_agent_skills" {
         return list_agent_skills(home, root, args);
+    }
+    if command == "acp_read_agent_skill" {
+        return read_agent_skill(home, root, args);
+    }
+    if command == "acp_save_agent_skill" {
+        return save_agent_skill(home, root, args);
+    }
+    if command == "acp_delete_agent_skill" {
+        return delete_agent_skill(home, root, args);
     }
     // 安装状态（skills.go:236-262）：每个技能 × 每个已注册执行端一行。
     if command.ends_with("_list_all_install_statuses") {
@@ -406,8 +1105,8 @@ fn run_with_home(home: &Path, root: &Path, command: &str, args: &Value) -> Resul
             let list = bundled_skills(root, group)?;
             for item in list {
                 if item["metadata"]["id"].as_str() == Some(name.as_str()) {
-                    let file = PathBuf::from(item["central_path"].as_str().unwrap_or(""))
-                        .join("SKILL.md");
+                    let file =
+                        PathBuf::from(item["central_path"].as_str().unwrap_or("")).join("SKILL.md");
                     let body = std::fs::read(&file).map_err(|e| e.to_string())?;
                     return Ok(Value::String(String::from_utf8_lossy(&body).into_owned()));
                 }
@@ -432,7 +1131,11 @@ fn run_with_home(home: &Path, root: &Path, command: &str, args: &Value) -> Resul
         ),
         "experts_apply_links" | "science_apply_links" => {
             let mut out = Vec::new();
-            let ops = args.get("ops").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let ops = args
+                .get("ops")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
             for op in ops {
                 let enable = op.get("enable").and_then(|v| v.as_bool()).unwrap_or(false);
                 let expert_id = op.get("expertId").and_then(|v| v.as_str()).unwrap_or("");
@@ -513,10 +1216,11 @@ mod tests {
         assert_eq!(out[0]["metadata"]["id"], "one");
         assert_eq!(out[0]["installed_centrally"], true);
         assert_eq!(out[0]["user_modified"], false);
-        assert!(out[0]["central_path"]
-            .as_str()
-            .unwrap()
-            .ends_with(&format!("experts{}skills{}one", std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR)));
+        assert!(out[0]["central_path"].as_str().unwrap().ends_with(&format!(
+            "experts{}skills{}one",
+            std::path::MAIN_SEPARATOR,
+            std::path::MAIN_SEPARATOR
+        )));
 
         // Editing the file flips user_modified; deleting it flips both flags.
         fs::write(
@@ -538,19 +1242,39 @@ mod tests {
         let f = fixture("read");
         seed(&f.root, "science");
         assert_eq!(
-            call(&f, "science_read_content", serde_json::json!({"expertId": "one"})).unwrap(),
+            call(
+                &f,
+                "science_read_content",
+                serde_json::json!({"expertId": "one"})
+            )
+            .unwrap(),
             "# one\n"
         );
         assert_eq!(
-            call(&f, "science_read_content", serde_json::json!({"skillId": "one"})).unwrap(),
+            call(
+                &f,
+                "science_read_content",
+                serde_json::json!({"skillId": "one"})
+            )
+            .unwrap(),
             "# one\n"
         );
         assert_eq!(
-            call(&f, "science_read_content", serde_json::json!({"expertId": "nope"})).unwrap_err(),
+            call(
+                &f,
+                "science_read_content",
+                serde_json::json!({"expertId": "nope"})
+            )
+            .unwrap_err(),
             "技能不存在"
         );
         // Groups do not bleed into each other: `experts` has no manifest here.
-        assert!(call(&f, "experts_read_content", serde_json::json!({"expertId": "one"})).is_err());
+        assert!(call(
+            &f,
+            "experts_read_content",
+            serde_json::json!({"expertId": "one"})
+        )
+        .is_err());
     }
 
     #[test]
@@ -568,9 +1292,12 @@ mod tests {
         assert_eq!(status["state"], "linked_to_codeg", "{status}");
         assert_eq!(status["expertId"], "one");
         assert_eq!(status["agentType"], "claude");
-        assert_eq!(status["copyMode"], !fs::symlink_metadata(native_skill_root(&f.home, "claude").join("one"))
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false));
+        assert_eq!(
+            status["copyMode"],
+            !fs::symlink_metadata(native_skill_root(&f.home, "claude").join("one"))
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false)
+        );
         let link = native_skill_root(&f.home, "claude").join("one");
         assert!(link.exists());
 

@@ -110,7 +110,9 @@ fn sscanf_int(s: &str) -> Option<(i64, &str)> {
         _ => (1, 0),
     };
     let digits: &str = &rest[digits_start..];
-    let end = digits.find(|c: char| !c.is_ascii_digit()).unwrap_or(digits.len());
+    let end = digits
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(digits.len());
     if end == 0 {
         return None;
     }
@@ -548,10 +550,16 @@ fn config_value(config: &AutomationConfig) -> Value {
     if let Some(action) = &config.action {
         out.insert("action".into(), json!(action));
     }
-    out.insert("prompt_blocks".into(), goformat::canon(&config.prompt_blocks));
+    out.insert(
+        "prompt_blocks".into(),
+        goformat::canon(&config.prompt_blocks),
+    );
     out.insert("display_text".into(), json!(config.display_text));
     out.insert("mode_id".into(), option_string(&config.mode_id));
-    out.insert("config_values".into(), goformat::canon(&config.config_values));
+    out.insert(
+        "config_values".into(),
+        goformat::canon(&config.config_values),
+    );
     // label_snapshot 带 omitempty：空对象/空值省略。
     match &config.label_snapshot {
         Value::Null => {}
@@ -586,7 +594,10 @@ fn automation_value(a: &Automation) -> Value {
     );
     out.insert("last_run_at".into(), option_string(&a.last_run_at));
     out.insert("last_run_status".into(), option_string(&a.last_run_status));
-    out.insert("last_run_conversation_id".into(), option_i64(&a.last_run_conversation_id));
+    out.insert(
+        "last_run_conversation_id".into(),
+        option_i64(&a.last_run_conversation_id),
+    );
     out.insert("unseen_failures".into(), json!(a.unseen_failures));
     out.insert("created_at".into(), json!(a.created_at));
     out.insert("updated_at".into(), json!(a.updated_at));
@@ -603,7 +614,10 @@ fn run_value(r: &AutomationRun) -> Value {
     out.insert("started_at".into(), option_string(&r.started_at));
     out.insert("ended_at".into(), option_string(&r.ended_at));
     out.insert("conversation_id".into(), option_i64(&r.conversation_id));
-    out.insert("worktree_folder_id".into(), option_i64(&r.worktree_folder_id));
+    out.insert(
+        "worktree_folder_id".into(),
+        option_i64(&r.worktree_folder_id),
+    );
     out.insert("stop_reason".into(), option_string(&r.stop_reason));
     out.insert("error".into(), option_string(&r.error));
     out.insert("summary".into(), option_string(&r.summary));
@@ -617,37 +631,96 @@ fn automation_from_value(v: &Value) -> Option<Automation> {
     let obj = v.as_object()?;
     let config = obj.get("config").and_then(|c| {
         c.as_object().map(|raw| AutomationConfig {
-            action: raw.get("action").and_then(|s| s.as_str()).map(|s| s.to_string()),
+            action: raw
+                .get("action")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string()),
             prompt_blocks: raw.get("prompt_blocks").cloned().unwrap_or(Value::Null),
-            display_text: raw.get("display_text").and_then(|s| s.as_str()).unwrap_or("").into(),
-            mode_id: raw.get("mode_id").and_then(|s| s.as_str()).map(|s| s.to_string()),
+            display_text: raw
+                .get("display_text")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .into(),
+            mode_id: raw
+                .get("mode_id")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string()),
             config_values: raw.get("config_values").cloned().unwrap_or(json!({})),
             label_snapshot: raw.get("label_snapshot").cloned().unwrap_or(Value::Null),
         })
     });
     Some(Automation {
         id: obj.get("id").and_then(|n| n.as_i64()).unwrap_or(0),
-        name: obj.get("name").and_then(|s| s.as_str()).unwrap_or("").into(),
-        enabled: obj.get("enabled").and_then(|b| b.as_bool()).unwrap_or(false),
-        trigger_kind: obj.get("trigger_kind").and_then(|s| s.as_str()).unwrap_or("").into(),
-        cron: obj.get("cron").and_then(|s| s.as_str()).map(|s| s.to_string()),
-        timezone: obj.get("timezone").and_then(|s| s.as_str()).unwrap_or("").into(),
-        next_run_at: obj.get("next_run_at").and_then(|s| s.as_str()).map(|s| s.to_string()),
-        agent_type: obj.get("agent_type").and_then(|s| s.as_str()).unwrap_or("").into(),
+        name: obj
+            .get("name")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .into(),
+        enabled: obj
+            .get("enabled")
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false),
+        trigger_kind: obj
+            .get("trigger_kind")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .into(),
+        cron: obj
+            .get("cron")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string()),
+        timezone: obj
+            .get("timezone")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .into(),
+        next_run_at: obj
+            .get("next_run_at")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string()),
+        agent_type: obj
+            .get("agent_type")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .into(),
         root_folder_id: obj.get("root_folder_id").and_then(|n| n.as_i64()),
-        isolation: obj.get("isolation").and_then(|s| s.as_str()).unwrap_or("").into(),
-        branch: obj.get("branch").and_then(|s| s.as_str()).map(|s| s.to_string()),
-        is_remote_branch: obj.get("is_remote_branch").and_then(|b| b.as_bool()).unwrap_or(false),
+        isolation: obj
+            .get("isolation")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .into(),
+        branch: obj
+            .get("branch")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string()),
+        is_remote_branch: obj
+            .get("is_remote_branch")
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false),
         config,
-        last_run_at: obj.get("last_run_at").and_then(|s| s.as_str()).map(|s| s.to_string()),
+        last_run_at: obj
+            .get("last_run_at")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string()),
         last_run_status: obj
             .get("last_run_status")
             .and_then(|s| s.as_str())
             .map(|s| s.to_string()),
         last_run_conversation_id: obj.get("last_run_conversation_id").and_then(|n| n.as_i64()),
-        unseen_failures: obj.get("unseen_failures").and_then(|n| n.as_i64()).unwrap_or(0),
-        created_at: obj.get("created_at").and_then(|s| s.as_str()).unwrap_or("").into(),
-        updated_at: obj.get("updated_at").and_then(|s| s.as_str()).unwrap_or("").into(),
+        unseen_failures: obj
+            .get("unseen_failures")
+            .and_then(|n| n.as_i64())
+            .unwrap_or(0),
+        created_at: obj
+            .get("created_at")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .into(),
+        updated_at: obj
+            .get("updated_at")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .into(),
         next_run_ms: 0,
         last_minute_key: 0,
     })
@@ -657,18 +730,51 @@ fn run_from_value(v: &Value) -> Option<AutomationRun> {
     let obj = v.as_object()?;
     Some(AutomationRun {
         id: obj.get("id").and_then(|n| n.as_i64()).unwrap_or(0),
-        automation_id: obj.get("automation_id").and_then(|n| n.as_i64()).unwrap_or(0),
-        status: obj.get("status").and_then(|s| s.as_str()).unwrap_or("").into(),
-        trigger: obj.get("trigger").and_then(|s| s.as_str()).unwrap_or("").into(),
-        scheduled_for: obj.get("scheduled_for").and_then(|s| s.as_str()).map(|s| s.to_string()),
-        started_at: obj.get("started_at").and_then(|s| s.as_str()).map(|s| s.to_string()),
-        ended_at: obj.get("ended_at").and_then(|s| s.as_str()).map(|s| s.to_string()),
+        automation_id: obj
+            .get("automation_id")
+            .and_then(|n| n.as_i64())
+            .unwrap_or(0),
+        status: obj
+            .get("status")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .into(),
+        trigger: obj
+            .get("trigger")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .into(),
+        scheduled_for: obj
+            .get("scheduled_for")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string()),
+        started_at: obj
+            .get("started_at")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string()),
+        ended_at: obj
+            .get("ended_at")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string()),
         conversation_id: obj.get("conversation_id").and_then(|n| n.as_i64()),
         worktree_folder_id: obj.get("worktree_folder_id").and_then(|n| n.as_i64()),
-        stop_reason: obj.get("stop_reason").and_then(|s| s.as_str()).map(|s| s.to_string()),
-        error: obj.get("error").and_then(|s| s.as_str()).map(|s| s.to_string()),
-        summary: obj.get("summary").and_then(|s| s.as_str()).map(|s| s.to_string()),
-        created_at: obj.get("created_at").and_then(|s| s.as_str()).unwrap_or("").into(),
+        stop_reason: obj
+            .get("stop_reason")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string()),
+        error: obj
+            .get("error")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string()),
+        summary: obj
+            .get("summary")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string()),
+        created_at: obj
+            .get("created_at")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .into(),
         connection_id: String::new(),
     })
 }
@@ -707,12 +813,17 @@ fn go_sprint(v: &Value) -> String {
 // ── parseDraft ──────────────────────────────────────────────────────────────
 
 fn parse_draft(a: &mut Automation, draft: &Value, creating: bool) -> Result<(), String> {
-    let name = value_text(draft.get("name").unwrap_or(&Value::Null)).trim().to_string();
+    let name = value_text(draft.get("name").unwrap_or(&Value::Null))
+        .trim()
+        .to_string();
     if name.is_empty() {
         return Err("请填写定时任务名称".into());
     }
     a.name = name;
-    a.enabled = draft.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+    a.enabled = draft
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
     let mut trigger = txt(draft, "trigger_kind");
     if trigger.is_empty() {
         trigger = "schedule".into();
@@ -739,7 +850,11 @@ fn parse_draft(a: &mut Automation, draft: &Value, creating: bool) -> Result<(), 
         return Err("worktree 隔离暂未接通，请使用 shared_in_root".into());
     }
     if let Some(v) = draft.get("root_folder_id") {
-        a.root_folder_id = if v.is_null() { None } else { Some(number_value(v)) };
+        a.root_folder_id = if v.is_null() {
+            None
+        } else {
+            Some(number_value(v))
+        };
     } else if creating {
         a.root_folder_id = None;
     }
@@ -838,7 +953,11 @@ pub(crate) fn set_bridge(bridge: Bridge) {
 }
 
 fn bridge() -> Option<Arc<Bridge>> {
-    BRIDGE.get_or_init(|| Mutex::new(None)).lock().unwrap().clone()
+    BRIDGE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap()
+        .clone()
 }
 
 impl Bridge {
@@ -903,13 +1022,19 @@ fn folder_for(root: &Path, root_folder_id: Option<i64>) -> Result<(i64, String),
                 .cloned()
         })
         .ok_or("项目文件夹不存在")?;
-    let path = folder.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
+    let path = folder
+        .get("path")
+        .and_then(|p| p.as_str())
+        .unwrap_or("")
+        .to_string();
     Ok((id, path))
 }
 
 /// 运行提示词（Go `runPrompt`）。
 fn run_prompt(config: Option<&AutomationConfig>) -> String {
-    let Some(config) = config else { return String::new() };
+    let Some(config) = config else {
+        return String::new();
+    };
     if !config.display_text.is_empty() {
         return config.display_text.clone();
     }
@@ -1014,13 +1139,17 @@ fn run(
             let id = num(args, "id");
             {
                 let item = st.find(id).ok_or("定时任务不存在")?;
-                item.enabled = args.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+                item.enabled = args
+                    .get("enabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 if item.enabled && item.trigger_kind == "schedule" {
                     if let Some(cron) = item.cron.clone() {
                         if let Ok(parsed) = parse_cron(&cron) {
                             if let Ok(now) = local_now() {
                                 if let Ok(next) = next_run(&parsed, now) {
-                                    item.next_run_ms = (next.unix_timestamp_nanos() / 1_000_000) as i64;
+                                    item.next_run_ms =
+                                        (next.unix_timestamp_nanos() / 1_000_000) as i64;
                                 }
                             }
                         }
@@ -1130,12 +1259,7 @@ fn run(
     }
 }
 
-fn spawn_finish(
-    runtime: &tokio::runtime::Handle,
-    root: &Path,
-    automation_id: i64,
-    run_id: i64,
-) {
+fn spawn_finish(runtime: &tokio::runtime::Handle, root: &Path, automation_id: i64, run_id: i64) {
     let Some(bridge) = bridge() else { return };
     let root = root.to_path_buf();
     runtime.spawn(async move {
@@ -1183,7 +1307,9 @@ async fn tick() {
             if !item.enabled || item.trigger_kind != "schedule" {
                 continue;
             }
-            let Some(cron) = item.cron.clone() else { continue };
+            let Some(cron) = item.cron.clone() else {
+                continue;
+            };
             let parsed = match parse_cron(&cron) {
                 Ok(p) => p,
                 Err(err) => {
@@ -1250,7 +1376,13 @@ async fn tick() {
 }
 
 /// Go `completeAutomationRun`。
-fn complete_automation_run(root: &Path, automation_id: i64, run_id: i64, status: &str, err_msg: &str) {
+fn complete_automation_run(
+    root: &Path,
+    automation_id: i64,
+    run_id: i64,
+    status: &str,
+    err_msg: &str,
+) {
     let state = state(root);
     let mut st = state.lock().unwrap();
     let item_exists = st.automations.iter().any(|a| a.id == automation_id);
@@ -1296,14 +1428,26 @@ fn auto_touch(root: &Path, id: i64) {
 }
 
 /// Go `finishAutomationRun`：连接 → 建会话 → 发提示词 → 轮询会话状态。
-async fn finish_automation_run(bridge: Arc<Bridge>, root: PathBuf, automation_id: i64, run_id: i64) {
+async fn finish_automation_run(
+    bridge: Arc<Bridge>,
+    root: PathBuf,
+    automation_id: i64,
+    run_id: i64,
+) {
     let snapshot = {
         let st = state(&root);
         let st = st.lock().unwrap();
         st.automations
             .iter()
             .find(|a| a.id == automation_id)
-            .map(|a| (a.agent_type.clone(), a.root_folder_id, a.config.clone(), a.name.clone()))
+            .map(|a| {
+                (
+                    a.agent_type.clone(),
+                    a.root_folder_id,
+                    a.config.clone(),
+                    a.name.clone(),
+                )
+            })
     };
     let Some((agent_type, root_folder_id, config, name)) = snapshot else {
         return;
@@ -1327,9 +1471,15 @@ async fn finish_automation_run(bridge: Arc<Bridge>, root: PathBuf, automation_id
         if let Some(mode_id) = &config.mode_id {
             connect_args.insert("preferredModeId".into(), json!(mode_id));
         }
-        connect_args.insert("preferredConfigValues".into(), goformat::canon(&config.config_values));
+        connect_args.insert(
+            "preferredConfigValues".into(),
+            goformat::canon(&config.config_values),
+        );
     }
-    let cid = match bridge.call("acp_connect", Value::Object(connect_args)).await {
+    let cid = match bridge
+        .call("acp_connect", Value::Object(connect_args))
+        .await
+    {
         Ok(Value::String(cid)) if !cid.is_empty() => cid,
         Ok(_) => {
             complete_automation_run(&root, automation_id, run_id, "failed", "连接执行端失败");
@@ -1362,28 +1512,39 @@ async fn finish_automation_run(bridge: Arc<Bridge>, root: PathBuf, automation_id
         // conversation://changed（与手工新建会话的 UI 行为一致）。
         let root_for_store = root.clone();
         let args = json!({"folderId": folder_id, "agentType": agent_type, "title": title});
-        let outcome =
-            tokio::task::spawn_blocking(move || {
-                store_writes::handle(&root_for_store, "create_conversation", &args)
-            })
-            .await;
+        let outcome = tokio::task::spawn_blocking(move || {
+            store_writes::handle(&root_for_store, "create_conversation", &args)
+        })
+        .await;
         match outcome {
             Ok(Some(outcome)) => match outcome.result {
                 Ok(id_value) => id_value.as_i64().unwrap_or(0),
                 Err(message) => {
-                    let _ = bridge.call("acp_disconnect", json!({"connectionId": cid})).await;
+                    let _ = bridge
+                        .call("acp_disconnect", json!({"connectionId": cid}))
+                        .await;
                     complete_automation_run(&root, automation_id, run_id, "failed", &message);
                     return;
                 }
             },
             Ok(None) => {
-                let _ = bridge.call("acp_disconnect", json!({"connectionId": cid})).await;
+                let _ = bridge
+                    .call("acp_disconnect", json!({"connectionId": cid}))
+                    .await;
                 complete_automation_run(&root, automation_id, run_id, "failed", "会话创建不可用");
                 return;
             }
             Err(join) => {
-                let _ = bridge.call("acp_disconnect", json!({"connectionId": cid})).await;
-                complete_automation_run(&root, automation_id, run_id, "failed", &format!("会话创建失败：{join}"));
+                let _ = bridge
+                    .call("acp_disconnect", json!({"connectionId": cid}))
+                    .await;
+                complete_automation_run(
+                    &root,
+                    automation_id,
+                    run_id,
+                    "failed",
+                    &format!("会话创建失败：{join}"),
+                );
                 return;
             }
         }
@@ -1408,7 +1569,9 @@ async fn finish_automation_run(bridge: Arc<Bridge>, root: PathBuf, automation_id
         "blocks": [{"type": "text", "text": text}],
     });
     if let Err(message) = bridge.call("acp_prompt", prompt_args).await {
-        let _ = bridge.call("acp_disconnect", json!({"connectionId": cid})).await;
+        let _ = bridge
+            .call("acp_disconnect", json!({"connectionId": cid}))
+            .await;
         complete_automation_run(&root, automation_id, run_id, "failed", &message);
         return;
     }
@@ -1428,7 +1591,11 @@ async fn finish_automation_run(bridge: Arc<Bridge>, root: PathBuf, automation_id
                                 .find(|c| c.get("id").and_then(|n| n.as_i64()) == Some(conv_id))
                                 .cloned()
                         })
-                        .and_then(|c| c.get("status").and_then(|s| s.as_str()).map(|s| s.to_string()))
+                        .and_then(|c| {
+                            c.get("status")
+                                .and_then(|s| s.as_str())
+                                .map(|s| s.to_string())
+                        })
                 })
             }
         })
@@ -1436,21 +1603,41 @@ async fn finish_automation_run(bridge: Arc<Bridge>, root: PathBuf, automation_id
         .unwrap_or(None);
         match status.as_deref() {
             Some("pending_review") => {
-                let _ = bridge.call("acp_disconnect", json!({"connectionId": cid})).await;
+                let _ = bridge
+                    .call("acp_disconnect", json!({"connectionId": cid}))
+                    .await;
                 complete_automation_run(&root, automation_id, run_id, "succeeded", "");
                 return;
             }
             Some("cancelled") | Some("failed") => {
-                let _ = bridge.call("acp_disconnect", json!({"connectionId": cid})).await;
-                complete_automation_run(&root, automation_id, run_id, "failed", "会话执行失败或被取消");
+                let _ = bridge
+                    .call("acp_disconnect", json!({"connectionId": cid}))
+                    .await;
+                complete_automation_run(
+                    &root,
+                    automation_id,
+                    run_id,
+                    "failed",
+                    "会话执行失败或被取消",
+                );
                 return;
             }
             _ => {}
         }
         if std::time::Instant::now() > deadline {
-            let _ = bridge.call("acp_cancel", json!({"connectionId": cid})).await;
-            let _ = bridge.call("acp_disconnect", json!({"connectionId": cid})).await;
-            complete_automation_run(&root, automation_id, run_id, "failed", "运行超过 24 小时上限");
+            let _ = bridge
+                .call("acp_cancel", json!({"connectionId": cid}))
+                .await;
+            let _ = bridge
+                .call("acp_disconnect", json!({"connectionId": cid}))
+                .await;
+            complete_automation_run(
+                &root,
+                automation_id,
+                run_id,
+                "failed",
+                "运行超过 24 小时上限",
+            );
             return;
         }
     }
@@ -1480,10 +1667,7 @@ mod tests {
     use std::fs;
 
     fn temp_root(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "codepluse-auto-{tag}-{}",
-            goformat::hex_id()
-        ));
+        let dir = std::env::temp_dir().join(format!("codepluse-auto-{tag}-{}", goformat::hex_id()));
         fs::create_dir_all(dir.join(".data")).unwrap();
         dir
     }
@@ -1496,7 +1680,10 @@ mod tests {
             Some("cron 需要 5 个字段：分 时 日 月 周")
         );
         // 范围越界。
-        assert!(parse_cron("60 * * * *").err().unwrap().contains("cron 取值无效"));
+        assert!(parse_cron("60 * * * *")
+            .err()
+            .unwrap()
+            .contains("cron 取值无效"));
         // 步长非法。
         assert_eq!(
             parse_cron("*/0 * * * *").err().as_deref(),
@@ -1569,15 +1756,26 @@ mod tests {
                 "label_snapshot": {"agent": "Codex"},
             },
         });
-        let created = handle(&root, "automation_create", &json!({"draft": draft}), &runtime)
-            .unwrap()
-            .unwrap();
+        let created = handle(
+            &root,
+            "automation_create",
+            &json!({"draft": draft}),
+            &runtime,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(created["id"], json!(1));
         assert_eq!(created["enabled"], json!(true));
         assert_eq!(created["trigger_kind"], json!("schedule"));
         // schedule 草稿在 create 时就算出 next_run_ms，wire 后回线（文件里的
         // next_run_at 仍是 null——save 发生在 wire 之前，与 Go 一致）。
-        assert!(created["next_run_at"].as_str().unwrap_or("").contains("T09:00:00"), "{created}");
+        assert!(
+            created["next_run_at"]
+                .as_str()
+                .unwrap_or("")
+                .contains("T09:00:00"),
+            "{created}"
+        );
         // config_values 的值经 fmt.Sprint 转字符串。
         assert_eq!(created["config"]["config_values"]["depth"], json!("3"));
         assert_eq!(created["config"]["config_values"]["flag"], json!("true"));
@@ -1629,9 +1827,14 @@ mod tests {
             "agent_type": "codex",
             "config": {"prompt_blocks": [], "display_text": "go", "config_values": {}},
         });
-        handle(&root, "automation_create", &json!({"draft": draft}), &runtime)
-            .unwrap()
-            .unwrap();
+        handle(
+            &root,
+            "automation_create",
+            &json!({"draft": draft}),
+            &runtime,
+        )
+        .unwrap()
+        .unwrap();
 
         // 新进程语义：同一个 root 的状态从文件恢复（id 续号）。
         let created = handle(

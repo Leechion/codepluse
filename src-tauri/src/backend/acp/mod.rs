@@ -21,9 +21,13 @@
 pub mod agents;
 pub mod commands;
 pub mod connections;
-pub mod delegation;
 pub mod custom_install;
+pub mod delegation;
+pub mod diagnostics;
 pub mod launch;
+pub mod native_commands;
+pub mod pi_config;
+pub mod pi_trust;
 pub mod providers_core;
 pub mod question;
 pub mod runtime;

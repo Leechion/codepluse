@@ -21,38 +21,44 @@ use crate::backend::store_file;
 
 /// The group-C commands this module answers (skills queries live in experts).
 pub fn owns(command: &str) -> bool {
-    matches!(
-        command,
-        "acp_connect"
-            | "acp_disconnect"
-            | "acp_prompt"
-            | "acp_cancel"
-            | "acp_fork"
-            | "acp_get_session_snapshot"
-            | "acp_get_session_snapshot_by_conversation"
-            | "acp_find_connection_for_conversation"
-            | "acp_respond_permission"
-            | "acp_respond_task_split"
-            | "acp_set_mode"
-            | "acp_set_config_option"
-            | "acp_stop_async_task"
-            | "acp_touch_connection"
-            | "acp_preflight"
-            | "acp_list_connections"
-            | "acp_list_agents"
-            | "acp_get_agent_status"
-            | "acp_goal_control"
-            | "acp_describe_agent_options"
-            | "acp_detect_agent_local_version"
-            | "acp_update_agent_config"
-            | "acp_update_agent_env"
-            | "acp_answer_question"
-            | "submit_session_feedback"
-            | "acp_prepare_npx_agent"
-            | "acp_uninstall_agent"
-            | "acp_clear_binary_cache"
-            | "acp_download_agent_binary"
-    )
+    crate::backend::acp::pi_trust::owns(command)
+        || crate::backend::acp::pi_config::owns(command)
+        || crate::backend::acp::diagnostics::owns(command)
+        || crate::backend::acp::native_commands::owns(command)
+        || matches!(
+            command,
+            "acp_connect"
+                | "acp_disconnect"
+                | "acp_prompt"
+                | "acp_cancel"
+                | "acp_fork"
+                | "acp_get_session_snapshot"
+                | "acp_get_session_snapshot_by_conversation"
+                | "acp_find_connection_for_conversation"
+                | "acp_respond_permission"
+                | "acp_respond_task_split"
+                | "acp_set_mode"
+                | "acp_set_config_option"
+                | "acp_stop_async_task"
+                | "acp_touch_connection"
+                | "acp_preflight"
+                | "acp_list_connections"
+                | "acp_list_agents"
+                | "acp_get_agent_status"
+                | "acp_goal_control"
+                | "acp_describe_agent_options"
+                | "acp_detect_agent_local_version"
+                | "acp_update_agent_config"
+                | "acp_update_agent_preferences"
+                | "acp_reorder_agents"
+                | "acp_update_agent_env"
+                | "acp_answer_question"
+                | "submit_session_feedback"
+                | "acp_prepare_npx_agent"
+                | "acp_uninstall_agent"
+                | "acp_clear_binary_cache"
+                | "acp_download_agent_binary"
+        )
 }
 
 static LAYER: OnceLock<Arc<Layer>> = OnceLock::new();
@@ -67,9 +73,7 @@ pub fn layer_if_ready() -> Option<Arc<Layer>> {
 /// 直接调 connect/prompt/cancel，不能等某个 acp 命令先把层建出来。
 pub fn init_shared_layer(root: PathBuf, base_url: String, sink: EmitSink) {
     let _ = LAYER.set(crate::backend::acp::connections::init_layer(
-        root,
-        base_url,
-        sink,
+        root, base_url, sink,
     ));
 }
 
@@ -82,7 +86,28 @@ pub async fn dispatch(
     command: &str,
     args: &Value,
 ) -> Result<Value, String> {
-    let layer = LAYER.get_or_init(|| crate::backend::acp::connections::init_layer(root, base_url, sink));
+    let layer =
+        LAYER.get_or_init(|| crate::backend::acp::connections::init_layer(root, base_url, sink));
+    if let Some(result) = crate::backend::acp::pi_trust::handle(&layer.root, command, args) {
+        return result;
+    }
+    if let Some(result) = crate::backend::acp::pi_config::handle(&layer.root, command, args) {
+        return result;
+    }
+    if let Some(result) = crate::backend::acp::diagnostics::handle(&layer.root, command, args) {
+        return result;
+    }
+    if crate::backend::acp::native_commands::owns(command) {
+        let root = layer.root.clone();
+        let command = command.to_string();
+        let args = args.clone();
+        return tokio::task::spawn_blocking(move || {
+            crate::backend::acp::native_commands::handle(&root, &command, &args)
+                .unwrap_or_else(|| Err("ACP 本地命令未注册".into()))
+        })
+        .await
+        .map_err(|e| format!("ACP 本地命令失败：{e}"))?;
+    }
     match command {
         "acp_connect" => Ok(json!(layer.connect(args).await?)),
         "acp_disconnect" => {
@@ -99,7 +124,9 @@ pub async fn dispatch(
         }
         "acp_touch_connection" => {
             let state = layer.state.lock().unwrap();
-            Ok(json!(state.connections.contains_key(&text(args.get("connectionId")))))
+            Ok(json!(state
+                .connections
+                .contains_key(&text(args.get("connectionId")))))
         }
         "acp_list_connections" => Ok(json!(layer.connection_list())),
         "acp_get_session_snapshot" => Ok(layer.snapshot(&text(args.get("connectionId"))).await),
@@ -114,7 +141,12 @@ pub async fn dispatch(
             let cid = layer.find_connection_for_conversation(number(args.get("conversationId")));
             match cid {
                 Some(cid) => {
-                    let event_seq = layer.snapshot(&cid).await.get("event_seq").cloned().unwrap_or(Value::Null);
+                    let event_seq = layer
+                        .snapshot(&cid)
+                        .await
+                        .get("event_seq")
+                        .cloned()
+                        .unwrap_or(Value::Null);
                     Ok(json!({"connection_id": cid, "event_seq": event_seq}))
                 }
                 None => Ok(Value::Null),
@@ -188,6 +220,10 @@ pub async fn dispatch(
                 .await?)
         }
         "acp_list_agents" => Ok(json!(agents_rows(&layer.root))),
+        "acp_reorder_agents" => {
+            reorder_agents(&layer.root, args)?;
+            Ok(Value::Null)
+        }
         "acp_get_agent_status" => {
             let want = text(args.get("agentType"));
             for row in agents_rows(&layer.root) {
@@ -200,10 +236,12 @@ pub async fn dispatch(
                 "installed_version": Value::Null, "is_acp_adapter": true,
             }))
         }
-        "acp_detect_agent_local_version" => match agents::pick(&layer.root, &text(args.get("agentType"))) {
-            Some(agent) => Ok(json!(agents::installed_version(&layer.root, &agent))),
-            None => Ok(Value::Null),
-        },
+        "acp_detect_agent_local_version" => {
+            match agents::pick(&layer.root, &text(args.get("agentType"))) {
+                Some(agent) => Ok(json!(agents::installed_version(&layer.root, &agent))),
+                None => Ok(Value::Null),
+            }
+        }
         "acp_preflight" => preflight(&layer.root, &text(args.get("agentType"))),
         "acp_describe_agent_options" => describe_agent_options(&layer, args).await,
         "acp_update_agent_env" => {
@@ -212,6 +250,15 @@ pub async fn dispatch(
         }
         "acp_update_agent_config" => {
             let live = update_agent_settings(&layer.root, &layer, args, false)?;
+            Ok(json!(live))
+        }
+        "acp_update_agent_preferences" => {
+            // Settings UI saves env, enablement and provider selection together
+            // with optional provider-specific config. Persist both halves
+            // through the same overlay writer, then report the active-session
+            // count once (the value is stable across these two writes).
+            let live = update_agent_settings(&layer.root, &layer, args, true)?;
+            update_agent_settings(&layer.root, &layer, args, false)?;
             Ok(json!(live))
         }
         "acp_prepare_npx_agent"
@@ -248,10 +295,9 @@ fn merge_agent_overlay(overlay: &Value, wire: &str, row: &mut Value) {
     }
 }
 
-
 /// Go `agents()` (server.go:148): the settings-page agent list, overlay-merged.
 pub fn agents_rows(root: &Path) -> Vec<Value> {
-    let doc = store_file::read_json(&root.join("codeg-workspace.json"))
+    let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
         .ok()
         .flatten()
         .unwrap_or(Value::Null);
@@ -302,7 +348,8 @@ pub fn agents_rows(root: &Path) -> Vec<Value> {
         row["auth_mode"] = json!(agent.auth_mode);
         row["base_agent_type"] = json!(agent.base_agent_type);
         if let Some(d) = agents::custom_def_for_agent(root, &agent) {
-            let (available, _) = agents::custom_agent_available(root, &agent).unwrap_or((false, true));
+            let (available, _) =
+                agents::custom_agent_available(root, &agent).unwrap_or((false, true));
             row["available"] = json!(available);
             row["instance"] = json!(agent.wire.starts_with("inst_"));
             row["description"] = json!(d.description);
@@ -321,13 +368,61 @@ pub fn agents_rows(root: &Path) -> Vec<Value> {
         }
         out.push(row);
     }
+    let order = doc
+        .get("settings")
+        .and_then(|settings| settings.get("acp_agent_order"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .enumerate()
+                .map(|(index, item)| (item.to_string(), index))
+                .collect::<std::collections::HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+    out.sort_by_key(|row| {
+        let wire = text(row.get("agent_type"));
+        order.get(&wire).copied().unwrap_or(usize::MAX)
+    });
+    for (index, row) in out.iter_mut().enumerate() {
+        row["sort_order"] = json!(index);
+    }
     out
+}
+
+fn reorder_agents(root: &Path, args: &Value) -> Result<(), String> {
+    let items = args
+        .get("agentTypes")
+        .and_then(Value::as_array)
+        .ok_or("智能体排序必须是数组")?;
+    let mut seen = std::collections::HashSet::new();
+    let mut order = Vec::with_capacity(items.len());
+    for item in items {
+        let value = item.as_str().ok_or("智能体类型必须是文本")?;
+        if value.trim().is_empty() || !seen.insert(value.to_string()) {
+            return Err("智能体排序包含空值或重复项".into());
+        }
+        order.push(value.to_string());
+    }
+    let path = root.join(".data").join("codeg-workspace.json");
+    let _guard = store_file::lock(&path)?;
+    let mut doc = store_file::read_json(&path)?.unwrap_or_else(|| json!({}));
+    let object = doc.as_object_mut().ok_or("工作区存储格式无效")?;
+    let settings = object.entry("settings").or_insert_with(|| json!({}));
+    settings
+        .as_object_mut()
+        .ok_or("工作区设置格式无效")?
+        .insert("acp_agent_order".into(), json!(order));
+    store_file::write_bytes(&path, &crate::backend::goformat::marshal_store(&doc))
 }
 
 // ----------------------------- preflight -----------------------------
 
 /// Go `adapterIdentity` (preflight.go:98).
-fn adapter_identity(real_tool: &str) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
+fn adapter_identity(
+    real_tool: &str,
+) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
     match real_tool {
         "claude" => Some((
             "claude-agent-acp",
@@ -354,7 +449,11 @@ fn adapter_lookup(root: &Path, real_tool: &str) -> Option<(String, PathBuf)> {
         _ => return None,
     };
     for base in [
-        agents::home_dir().join("AppData").join("Roaming").join("npm").join("node_modules"),
+        agents::home_dir()
+            .join("AppData")
+            .join("Roaming")
+            .join("npm")
+            .join("node_modules"),
         root.join("node_modules"),
     ] {
         let pkg_dir = base.join("@agentclientprotocol").join(name);
@@ -469,10 +568,16 @@ pub fn preflight(root: &Path, agent_type: &str) -> Result<Value, String> {
 /// Go `acp_describe_agent_options` (server.go:519): connect a probe session
 /// and report its modes/config options/prompt capabilities.
 async fn describe_agent_options(layer: &Arc<Layer>, args: &Value) -> Result<Value, String> {
-    let agent = agents::pick(&layer.root, &text(args.get("agentType")))
-        .ok_or("执行端不可用")?;
-    let cwd = crate::backend::acp::connections::resolve_workdir(&layer.root, &text(args.get("workingDir")))?;
-    let permission = if agent.real_tool == "dsh" { "workspace" } else { "readonly" };
+    let agent = agents::pick(&layer.root, &text(args.get("agentType"))).ok_or("执行端不可用")?;
+    let cwd = crate::backend::acp::connections::resolve_workdir(
+        &layer.root,
+        &text(args.get("workingDir")),
+    )?;
+    let permission = if agent.real_tool == "dsh" {
+        "workspace"
+    } else {
+        "readonly"
+    };
     let rid = layer
         .runtime()
         .connect(
@@ -508,7 +613,7 @@ fn update_agent_settings(
         .ok_or_else(|| format!("智能体不存在：{agent_type}"))?;
     let wire = agents::wire_agent(&ag);
 
-    let path = root.join("codeg-workspace.json");
+    let path = root.join(".data").join("codeg-workspace.json");
     let guard = store_file::lock(&path)?;
     let mut doc = store_file::read_json(&path)?.unwrap_or(json!({}));
     let agents_map = doc
@@ -553,7 +658,10 @@ fn update_agent_settings(
             ("codexConfigToml", "codex_config_toml"),
             ("codexModelCatalog", "codex_model_catalog"),
             ("systemInstructionsContent", "system_instructions_content"),
-            ("systemInstructionsFilePath", "system_instructions_file_path"),
+            (
+                "systemInstructionsFilePath",
+                "system_instructions_file_path",
+            ),
         ] {
             if let Some(v) = args.get(payload) {
                 ov.insert(key.into(), json!(text(Some(v))));
@@ -606,13 +714,18 @@ async fn custom_install_command(
         let command = command.to_string();
         move || {
             if !text(args.get("version")).is_empty() && text(args.get("version")) != d.version {
-                return Err("自定义智能体的版本由发行版 spec 固定，请先编辑配置中的包版本或下载地址".into());
+                return Err(
+                    "自定义智能体的版本由发行版 spec 固定，请先编辑配置中的包版本或下载地址".into(),
+                );
             }
             // Go: `command == uninstall || command == clear_binary_cache || a["cleanFirst"] == true`
             // ——下载链路只在显式 cleanFirst 时清缓存。
             let clean = command != "acp_download_agent_binary"
                 && (command == "acp_prepare_npx_agent"
-                    || args.get("cleanFirst").and_then(Value::as_bool).unwrap_or(false));
+                    || args
+                        .get("cleanFirst")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false));
             if command == "acp_uninstall_agent" || command == "acp_clear_binary_cache" || clean {
                 // disconnect the agent's connections first; a busy one blocks
                 let mut cids: Vec<String> = Vec::new();

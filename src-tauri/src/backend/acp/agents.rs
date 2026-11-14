@@ -64,7 +64,9 @@ impl Agent {
 
 /// Go `real_enabled` (state.go:29): `HARNESS_HUB_REAL` != "0".
 pub fn real_enabled() -> bool {
-    std::env::var("HARNESS_HUB_REAL").map(|v| v != "0").unwrap_or(true)
+    std::env::var("HARNESS_HUB_REAL")
+        .map(|v| v != "0")
+        .unwrap_or(true)
 }
 
 /// Go `wireAgent` (server.go:130).
@@ -155,7 +157,12 @@ fn json_string_map(value: Option<&Value>) -> std::collections::BTreeMap<String, 
 
 fn agent_from_json(raw: &Value) -> Agent {
     let map = raw.as_object().cloned().unwrap_or_default();
-    let get = |key: &str| map.get(key).and_then(Value::as_str).unwrap_or("").to_string();
+    let get = |key: &str| {
+        map.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
     Agent {
         id: get("id"),
         agent_type: get("type"),
@@ -215,7 +222,8 @@ fn custom_acp_agents(root: &Path) -> Vec<Agent> {
 /// Go `loadCustomAgents` + `registerCustomAgent` (custom_agents.go:216-227):
 /// `Store.CustomAgents` entries become `custom:<registryId>` wire agents.
 fn custom_store_agents(root: &Path) -> Vec<Agent> {
-    let Ok(Some(doc)) = store_file::read_json(&root.join("codeg-workspace.json")) else {
+    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    else {
         return Vec::new();
     };
     let Some(defs) = doc.get("customAgents").and_then(Value::as_object) else {
@@ -268,9 +276,9 @@ fn profile_base<'a>(agents: &'a [Arc<Agent>], tool: &str, base: &str) -> Option<
             wire
         }
     };
-    agents.iter().find(|a| {
-        a.enabled && a.real && (wire_agent(a) == want || a.id == want)
-    })
+    agents
+        .iter()
+        .find(|a| a.enabled && a.real && (wire_agent(a) == want || a.id == want))
 }
 
 /// Go `loadInstances` + `instanceAgent` (instances.go:40-120): named copies of
@@ -362,7 +370,8 @@ fn builtin_agents(root: &Path) -> Vec<Agent> {
 /// Go `applyEnabledOverrides` (agentconfig.go:102): the settings-page
 /// enable/disable choices re-applied onto the registry.
 fn apply_enabled_overrides(root: &Path, agents: &mut [Arc<Agent>]) {
-    let Ok(Some(doc)) = store_file::read_json(&root.join("codeg-workspace.json")) else {
+    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    else {
         return;
     };
     let Some(overlays) = doc.get("agents").and_then(Value::as_object) else {
@@ -401,16 +410,16 @@ pub fn registry(root: &Path) -> Vec<Arc<Agent>> {
 /// Go `pick` (server.go:121): first enabled real agent matching the wire or
 /// the registry id.
 pub fn pick(root: &Path, agent_type: &str) -> Option<Arc<Agent>> {
-    registry(root).into_iter().find(|a| {
-        a.enabled && a.real && (wire_agent(a) == agent_type || a.id == agent_type)
-    })
+    registry(root)
+        .into_iter()
+        .find(|a| a.enabled && a.real && (wire_agent(a) == agent_type || a.id == agent_type))
 }
 
 /// Go `agentByType` (agentconfig.go:91): same match ignoring `enabled`.
 pub fn agent_by_type(root: &Path, agent_type: &str) -> Option<Arc<Agent>> {
-    registry(root).into_iter().find(|a| {
-        a.real && (wire_agent(a) == agent_type || a.id == agent_type)
-    })
+    registry(root)
+        .into_iter()
+        .find(|a| a.real && (wire_agent(a) == agent_type || a.id == agent_type))
 }
 
 /// Registry lookup for other modules (`experts.rs` skills guard).
@@ -432,15 +441,22 @@ pub fn installed_version(root: &Path, a: &Agent) -> String {
     }
     let home = home_dir();
     for base in [
-        home.join("AppData").join("Roaming").join("npm").join("node_modules"),
+        home.join("AppData")
+            .join("Roaming")
+            .join("npm")
+            .join("node_modules"),
         root.join("node_modules"),
     ] {
         let path = base
             .join("@agentclientprotocol")
             .join(name)
             .join("package.json");
-        let Ok(body) = std::fs::read(&path) else { continue };
-        let Ok(pkg) = serde_json::from_slice::<Value>(&body) else { continue };
+        let Ok(body) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(pkg) = serde_json::from_slice::<Value>(&body) else {
+            continue;
+        };
         if let Some(v) = pkg.get("version").and_then(Value::as_str) {
             if !v.is_empty() {
                 return v.to_string();
@@ -474,7 +490,9 @@ pub fn custom_def_for_agent(root: &Path, a: &Agent) -> Option<CustomAgentDef> {
 /// flag — the agent is available only when its backing launch actually exists.
 pub fn agent_available(root: &Path, a: &Agent) -> bool {
     if custom_def_for_agent(root, a).is_some() {
-        return custom_agent_available(root, a).map(|(available, _)| available).unwrap_or(false);
+        return custom_agent_available(root, a)
+            .map(|(available, _)| available)
+            .unwrap_or(false);
     }
     // custom ACP command instances (acp-agents.json): command must still exist
     let wire = wire_agent(a);
@@ -538,7 +556,11 @@ mod tests {
 
     fn write_store(root: &Path, custom_agents: Value, overlays: Value) {
         let doc = json!({"customAgents": custom_agents, "agents": overlays, "next": 1});
-        fs::write(root.join("codeg-workspace.json"), doc.to_string()).unwrap();
+        fs::write(
+            root.join(".data").join("codeg-workspace.json"),
+            doc.to_string(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -569,13 +591,22 @@ mod tests {
         // Only the tools installed on this machine appear; every present one
         // carries the CreateAgent defaults and the ACP endpoint shape.
         for a in &agents {
-            if a.id.starts_with("agt_") && !a.id.starts_with("agt_custom") && !a.id.starts_with("agt_inst") {
+            if a.id.starts_with("agt_")
+                && !a.id.starts_with("agt_custom")
+                && !a.id.starts_with("agt_inst")
+            {
                 assert!(a.enabled && a.real && a.status == "online");
                 assert_eq!(a.endpoint, format!("acp://{}", a.real_tool));
                 assert_eq!(a.adapter_kind, "ACP");
                 if a.real_tool == "workbuddy" {
-                    assert_eq!(a.acp_modes.get("readonly").map(String::as_str), Some("plan"));
-                    assert_eq!(a.acp_modes.get("workspace").map(String::as_str), Some("default"));
+                    assert_eq!(
+                        a.acp_modes.get("readonly").map(String::as_str),
+                        Some("plan")
+                    );
+                    assert_eq!(
+                        a.acp_modes.get("workspace").map(String::as_str),
+                        Some("default")
+                    );
                 }
             }
         }
@@ -636,15 +667,27 @@ mod tests {
         // custom ACP command entry
         if let Some(acp) = find(&|a: &Agent| a.id == "agt_acp_x") {
             assert!(acp.real);
-            assert_eq!(acp.acp_modes.get("workspace").map(String::as_str), Some("workspace-write"));
-            assert_eq!(acp.acp_modes.get("readonly").map(String::as_str), Some("plan"));
+            assert_eq!(
+                acp.acp_modes.get("workspace").map(String::as_str),
+                Some("workspace-write")
+            );
+            assert_eq!(
+                acp.acp_modes.get("readonly").map(String::as_str),
+                Some("plan")
+            );
         }
 
         // enabled overlay flips the codex built-in
         if let Some(codex) = find(&|a: &Agent| a.real_tool == "codex") {
-            assert!(!codex.enabled, "overlay enabled=false must flip the built-in");
+            assert!(
+                !codex.enabled,
+                "overlay enabled=false must flip the built-in"
+            );
             assert!(pick(&root, "codex").is_none());
-            assert!(agent_by_type(&root, "codex").is_some(), "agentByType ignores enabled");
+            assert!(
+                agent_by_type(&root, "codex").is_some(),
+                "agentByType ignores enabled"
+            );
         }
         fs::remove_dir_all(root).ok();
     }
@@ -679,7 +722,10 @@ mod tests {
         assert_eq!(seeded[0].wire, "account_buddy");
         assert_eq!(seeded[0].auth_mode, "subscription");
         assert_eq!(seeded[0].endpoint, "acp://account:buddy");
-        assert_eq!(seeded[0].acp_modes.get("shell").map(|s| s.as_str()), Some("readonly"));
+        assert_eq!(
+            seeded[0].acp_modes.get("shell").map(|s| s.as_str()),
+            Some("readonly")
+        );
         assert_eq!(
             seeded.iter().map(|a| a.wire.clone()).collect::<Vec<_>>(),
             vec![
