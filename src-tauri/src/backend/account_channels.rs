@@ -179,44 +179,37 @@ fn running(root: &Path) -> Option<Client> {
 pub fn ensure(root: &Path) -> Result<Client, String> {
     let root = absolute(root)?;
     let key = root.to_string_lossy().to_string();
-    let mut clients = registry().lock().unwrap();
-
+    // 查缓存：锁只用来读写这张表，启动协议进程时不持有它 —— 否则一次最长
+    // 30 秒的等待会把所有并发调用者一起堵住。
     let mut reuse: Option<Client> = None;
     let mut stale = false;
-    if let Some(entry) = clients.get_mut(&key) {
-        match entry.child {
-            None => {
-                // 共享实例：再确认一次它还活着。
-                stale = true;
-            }
-            Some(_) => {
-                if entry_alive(entry) {
-                    reuse = Some(entry.client.clone());
-                } else {
+    {
+        let mut clients = registry().lock().unwrap();
+        if let Some(entry) = clients.get_mut(&key) {
+            match entry.child {
+                None => {
+                    // 共享实例：再确认一次它还活着。
                     stale = true;
                 }
+                Some(_) => {
+                    if entry_alive(entry) {
+                        reuse = Some(entry.client.clone());
+                    } else {
+                        stale = true;
+                    }
+                }
             }
+        }
+        if stale {
+            clients.remove(&key);
         }
     }
     if let Some(client) = reuse {
         return Ok(client);
     }
-    if stale {
-        if let Some(shared) = running(&root) {
-            clients.insert(
-                key.clone(),
-                Entry {
-                    client: shared.clone(),
-                    child: None,
-                    stdin: None,
-                },
-            );
-            return Ok(shared);
-        }
-        clients.remove(&key);
-    }
+    // 共享实例（同一个工作区里别的 Codepluse 后台起的进程）。
     if let Some(shared) = running(&root) {
-        clients.insert(
+        registry().lock().unwrap().insert(
             key.clone(),
             Entry {
                 client: shared.clone(),
@@ -291,7 +284,7 @@ pub fn ensure(root: &Path) -> Result<Client, String> {
         url: format!("{}://{}", parsed.scheme(), parsed.authority()).trim_end_matches('/').to_string(),
         key: secret,
     };
-    clients.insert(
+    registry().lock().unwrap().insert(
         key,
         Entry {
             client: client.clone(),

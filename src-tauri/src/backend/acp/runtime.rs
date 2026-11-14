@@ -964,7 +964,19 @@ impl Runtime {
     }
 
     async fn start_driver(&self, agent: &Agent, permission: &str, cwd: &str) -> Result<Arc<Driver>, String> {
-        let launch = self.options.resolver.launch(agent, permission, cwd)?;
+        // The resolver does blocking work (file probes, and for the account
+        // harnesses a round trip to the local protocol process), so it must
+        // not run on an async worker: a few parallel warm-ups would starve
+        // the runtime and the HTTP server would stop answering.
+        let resolver = self.options.resolver.clone();
+        let agent_for_launch = agent.clone();
+        let permission_for_launch = permission.to_string();
+        let cwd_for_launch = cwd.to_string();
+        let launch = tokio::task::spawn_blocking(move || {
+            resolver.launch(&agent_for_launch, &permission_for_launch, &cwd_for_launch)
+        })
+        .await
+        .map_err(|error| format!("准备 ACP 启动失败：{error}"))??;
         if launch.command.is_empty() {
             return Err("尚未安装此 Harness 的 ACP 适配器".into());
         }
