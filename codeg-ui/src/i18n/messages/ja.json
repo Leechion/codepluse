@@ -2047,7 +2047,8 @@
     "helpText": "トークンはデスクトップアプリの 設定 → Web サービス で取得できます",
     "invalidToken": "トークンが無効です。確認して再度お試しください",
     "connectionFailed": "接続失敗 (HTTP {status})",
-    "networkError": "サーバーに接続できません"
+    "networkError": "サーバーに接続できません",
+    "storageUnavailable": "ブラウザーがトークンを保存できませんでした。サイトのストレージを許可するか、プライベートモードを終了してください。"
   },
   "CommitPage": {
     "title": "コミット",
@@ -7737,6 +7738,15 @@
     "loginRequired": "No native sign-in found. Sign in with the native client first.",
     "accountHint": "Uses this harness’s official sign-in without an API provider URL or API key.",
     "copyLogin": "Copy sign-in command",
+    "manageAccount": "アカウントを管理",
+    "manageAccountHint": "ログインは製品公式のサイトで行います。Codepluse はアカウント情報とモデル一覧のみ保存します。",
+    "accountLoginWaiting": "開いたブラウザでログインを完了してください。",
+    "accountLoginDone": "アカウントにログインしました。",
+    "accountLoginCancelled": "ログインをキャンセルしました。",
+    "accountLoginFailed": "ログインに失敗しました: {message}",
+    "cancelAccountLogin": "ログインをキャンセル",
+    "logoutAccount": "ログアウト",
+    "accountLoggedOut": "ログアウトしました。",
     "copied": "Sign-in command copied",
     "noSubscription": "This harness has no supported official subscription connection. Use its native API configuration.",
     "claudeSource": "Providers are read from CC Switch.",

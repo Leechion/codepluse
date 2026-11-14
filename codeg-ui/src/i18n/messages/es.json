@@ -2047,7 +2047,8 @@
     "helpText": "Encuentra tu token en la aplicación de escritorio en Configuración → Servicio web",
     "invalidToken": "Token no válido. Por favor, comprueba e inténtalo de nuevo.",
     "connectionFailed": "Error de conexión (HTTP {status})",
-    "networkError": "No se puede conectar al servidor"
+    "networkError": "No se puede conectar al servidor",
+    "storageUnavailable": "El navegador no pudo guardar el token. Permite el almacenamiento del sitio o sal del modo privado."
   },
   "CommitPage": {
     "title": "Confirmación",
@@ -7737,6 +7738,15 @@
     "loginRequired": "No native sign-in found. Sign in with the native client first.",
     "accountHint": "Uses this harness’s official sign-in without an API provider URL or API key.",
     "copyLogin": "Copy sign-in command",
+    "manageAccount": "Gestionar cuenta",
+    "manageAccountHint": "El inicio de sesión se hace en el sitio web del producto; Codepluse solo guarda los datos de la cuenta y la lista de modelos.",
+    "accountLoginWaiting": "Completa el inicio de sesión en la ventana del navegador abierta.",
+    "accountLoginDone": "Sesión iniciada.",
+    "accountLoginCancelled": "Inicio de sesión cancelado.",
+    "accountLoginFailed": "Error de inicio de sesión: {message}",
+    "cancelAccountLogin": "Cancelar inicio de sesión",
+    "logoutAccount": "Cerrar sesión",
+    "accountLoggedOut": "Sesión cerrada.",
     "copied": "Sign-in command copied",
     "noSubscription": "This harness has no supported official subscription connection. Use its native API configuration.",
     "claudeSource": "Providers are read from CC Switch.",

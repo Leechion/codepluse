@@ -2047,7 +2047,8 @@
     "helpText": "يمكنك الحصول على الرمز من تطبيق سطح المكتب عبر الإعدادات → خدمة الويب",
     "invalidToken": "رمز غير صالح. يرجى التحقق والمحاولة مرة أخرى.",
     "connectionFailed": "فشل الاتصال (HTTP {status})",
-    "networkError": "تعذر الاتصال بالخادم"
+    "networkError": "تعذر الاتصال بالخادم",
+    "storageUnavailable": "تعذر حفظ الرمز في هذا المتصفح. اسمح بتخزين الموقع أو اخرج من الوضع الخاص."
   },
   "CommitPage": {
     "title": "التزام",
@@ -7737,6 +7738,15 @@
     "loginRequired": "No native sign-in found. Sign in with the native client first.",
     "accountHint": "Uses this harness’s official sign-in without an API provider URL or API key.",
     "copyLogin": "Copy sign-in command",
+    "manageAccount": "إدارة الحساب",
+    "manageAccountHint": "يتم تسجيل الدخول على موقع المنتج نفسه؛ يحفظ Codepluse بيانات الحساب وقائمة النماذج فقط.",
+    "accountLoginWaiting": "أكمل تسجيل الدخول في نافذة المتصفح المفتوحة.",
+    "accountLoginDone": "تم تسجيل الدخول.",
+    "accountLoginCancelled": "تم إلغاء تسجيل الدخول.",
+    "accountLoginFailed": "فشل تسجيل الدخول: {message}",
+    "cancelAccountLogin": "إلغاء تسجيل الدخول",
+    "logoutAccount": "تسجيل الخروج",
+    "accountLoggedOut": "تم تسجيل الخروج.",
     "copied": "Sign-in command copied",
     "noSubscription": "This harness has no supported official subscription connection. Use its native API configuration.",
     "claudeSource": "Providers are read from CC Switch.",

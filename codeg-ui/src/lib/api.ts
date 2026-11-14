@@ -1,6 +1,7 @@
 import { goDesktopBridge } from "@/lib/go-desktop"
 import {
   getActiveRemoteConnectionId,
+  getServerBaseUrl,
   getShellTransport,
   getTransport,
   isDesktop,
@@ -597,6 +598,63 @@ export async function listHarnessConnections(): Promise<
 > {
   return getTransport().call("codepluse_connection_catalog", {})
 }
+/** 账号渠道（独立账号 WorkBuddy / Qoder）——协议进程给出的渠道状态。 */
+export interface AccountChannelModel {
+  id: string
+  name?: string
+}
+export interface AccountChannelAccount {
+  id?: string
+  /** 协议进程给的是 nickname（账号昵称）。 */
+  nickname?: string
+  name?: string
+  enabled?: boolean
+  expiresAt?: string
+  [key: string]: unknown
+}
+export interface AccountChannel {
+  id: string
+  name: string
+  configured: boolean
+  accounts: AccountChannelAccount[]
+  models: AccountChannelModel[]
+}
+/** 一次官网登录的状态：pending → complete / failed / cancelled。 */
+export interface AccountChannelLogin {
+  id: string
+  provider: string
+  state: string
+  url?: string
+  error?: string
+}
+export async function listAccountChannels(): Promise<AccountChannel[]> {
+  return getTransport().call("codepluse_channel_status", {})
+}
+export async function startAccountChannelLogin(
+  provider: string
+): Promise<AccountChannelLogin> {
+  return getTransport().call("codepluse_channel_login", { provider })
+}
+export async function getAccountChannelLoginStatus(
+  id: string
+): Promise<AccountChannelLogin> {
+  return getTransport().call("codepluse_channel_login_status", { id })
+}
+export async function cancelAccountChannelLogin(
+  id: string
+): Promise<AccountChannelLogin> {
+  return getTransport().call("codepluse_channel_cancel", { id })
+}
+export async function logoutAccountChannel(
+  provider: string,
+  accountId: string
+): Promise<unknown> {
+  return getTransport().call("codepluse_channel_logout", {
+    provider,
+    accountId,
+  })
+}
+
 export async function saveHarnessConnection(params: {
   agentType: string
   authMode: HarnessAuthMode
@@ -4713,7 +4771,7 @@ export async function uploadAttachment(
   form.append("file", file, file.name)
   if (sessionId) form.append("session_id", sessionId)
 
-  const res = await fetch(`${window.location.origin}/api/upload_attachment`, {
+  const res = await fetch(`${getServerBaseUrl()}/api/upload_attachment`, {
     method: "POST",
     headers: codegAuthHeaders(token),
     body: form,
@@ -4815,7 +4873,7 @@ async function workspaceFileFetch(
   if (!isMultipart) {
     headers["Content-Type"] = "application/json"
   }
-  const res = await fetch(`${window.location.origin}/api/${endpoint}`, {
+  const res = await fetch(`${getServerBaseUrl()}/api/${endpoint}`, {
     method: "POST",
     headers,
     body,
@@ -4880,7 +4938,7 @@ export async function uploadWorkspaceFile(
   return new Promise<UploadWorkspaceFileResult>((resolve, reject) => {
     const token = getCodegToken()
     const xhr = new XMLHttpRequest()
-    xhr.open("POST", `${window.location.origin}/api/upload_workspace_file`)
+    xhr.open("POST", `${getServerBaseUrl()}/api/upload_workspace_file`)
     for (const [name, value] of Object.entries(codegAuthHeaders(token))) {
       xhr.setRequestHeader(name, value)
     }
@@ -6233,7 +6291,7 @@ export async function exportBackupWeb(
     { timeoutMs: BACKUP_LONG_CALL_TIMEOUT_MS }
   )
   const a = document.createElement("a")
-  a.href = `${window.location.origin}${ticket.url}`
+  a.href = `${getServerBaseUrl()}${ticket.url}`
   a.download = ticket.filename
   document.body.appendChild(a)
   a.click()
@@ -6249,7 +6307,7 @@ export async function uploadBackupWeb(
   return new Promise<string>((resolve, reject) => {
     const token = getCodegToken()
     const xhr = new XMLHttpRequest()
-    xhr.open("POST", `${window.location.origin}/api/backup_upload`)
+    xhr.open("POST", `${getServerBaseUrl()}/api/backup_upload`)
     for (const [name, value] of Object.entries(codegAuthHeaders(token))) {
       xhr.setRequestHeader(name, value)
     }

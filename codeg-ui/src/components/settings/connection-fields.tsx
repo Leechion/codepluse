@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { AccountChannelPanel } from "./account-channel-panel"
 import { ProviderModelPicker } from "./provider-model-picker"
 import type { AcpAgentInfo } from "@/lib/types"
 import type {
@@ -133,6 +134,10 @@ export function AccountConnection({
     )
   const StatusIcon = account.configured ? CircleCheck : CircleHelp
   const models = account.models || []
+  // 独立账号（account:<id>）的登录在产品自己的网页上完成。
+  const channelId = source?.tool?.startsWith("account:")
+    ? source.tool.slice("account:".length)
+    : ""
   return (
     <div className="space-y-5">
       <div className="cp-account-card rounded-2xl border p-5">
@@ -183,6 +188,9 @@ export function AccountConnection({
           </div>
         )}
       </div>
+      {channelId && (
+        <AccountChannelPanel channelId={channelId} onChanged={onRefresh} />
+      )}
       <div className="space-y-1.5">
         <Label>{t("model")}</Label>
         <Select

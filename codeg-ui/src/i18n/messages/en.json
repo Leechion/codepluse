@@ -2047,7 +2047,8 @@
     "helpText": "Find your token in the desktop app under Settings → Web Service",
     "invalidToken": "Invalid token. Please check and try again.",
     "connectionFailed": "Connection failed (HTTP {status})",
-    "networkError": "Unable to connect to the server"
+    "networkError": "Unable to connect to the server",
+    "storageUnavailable": "This browser refused to store the token. Allow site storage or leave private mode."
   },
   "CommitPage": {
     "title": "Commit",
@@ -7737,6 +7738,15 @@
     "loginRequired": "No native sign-in found. Sign in with the native client first.",
     "accountHint": "Uses this harness’s official sign-in without an API provider URL or API key.",
     "copyLogin": "Copy sign-in command",
+    "manageAccount": "Manage account",
+    "manageAccountHint": "The login happens on the product's own website; Codepluse only stores the account details and the model list.",
+    "accountLoginWaiting": "Finish the login in the browser window that just opened.",
+    "accountLoginDone": "Account signed in.",
+    "accountLoginCancelled": "Login cancelled.",
+    "accountLoginFailed": "Login failed: {message}",
+    "cancelAccountLogin": "Cancel login",
+    "logoutAccount": "Sign out",
+    "accountLoggedOut": "Signed out.",
     "copied": "Sign-in command copied",
     "noSubscription": "This harness has no supported official subscription connection. Use its native API configuration.",
     "claudeSource": "Providers are read from CC Switch.",

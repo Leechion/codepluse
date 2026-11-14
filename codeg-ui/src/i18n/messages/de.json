@@ -2047,7 +2047,8 @@
     "helpText": "Das Token findest du in der Desktop-App unter Einstellungen → Webdienst",
     "invalidToken": "Ungültiges Token. Bitte überprüfe es und versuche es erneut.",
     "connectionFailed": "Verbindung fehlgeschlagen (HTTP {status})",
-    "networkError": "Verbindung zum Server nicht möglich"
+    "networkError": "Verbindung zum Server nicht möglich",
+    "storageUnavailable": "Der Token konnte in diesem Browser nicht gespeichert werden. Erlauben Sie die Speicherung oder verlassen Sie den privaten Modus."
   },
   "CommitPage": {
     "title": "Einchecken",
@@ -7737,6 +7738,15 @@
     "loginRequired": "No native sign-in found. Sign in with the native client first.",
     "accountHint": "Uses this harness’s official sign-in without an API provider URL or API key.",
     "copyLogin": "Copy sign-in command",
+    "manageAccount": "Konto verwalten",
+    "manageAccountHint": "Die Anmeldung erfolgt auf der Website des Produkts; Codepluse speichert nur Kontodetails und Modellliste.",
+    "accountLoginWaiting": "Schließen Sie die Anmeldung im geöffneten Browserfenster ab.",
+    "accountLoginDone": "Konto angemeldet.",
+    "accountLoginCancelled": "Anmeldung abgebrochen.",
+    "accountLoginFailed": "Anmeldung fehlgeschlagen: {message}",
+    "cancelAccountLogin": "Anmeldung abbrechen",
+    "logoutAccount": "Abmelden",
+    "accountLoggedOut": "Abgemeldet.",
     "copied": "Sign-in command copied",
     "noSubscription": "This harness has no supported official subscription connection. Use its native API configuration.",
     "claudeSource": "Providers are read from CC Switch.",

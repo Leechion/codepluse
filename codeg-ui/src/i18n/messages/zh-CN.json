@@ -2047,7 +2047,8 @@
     "helpText": "Token 可在桌面端 设置 → Web 服务 中获取",
     "invalidToken": "Token 无效，请检查后重试",
     "connectionFailed": "连接失败 (HTTP {status})",
-    "networkError": "无法连接到服务器"
+    "networkError": "无法连接到服务器",
+    "storageUnavailable": "浏览器拒绝了本地存储，无法保存令牌。请允许本站存储或退出隐私模式。"
   },
   "CommitPage": {
     "title": "提交代码",
@@ -7737,6 +7738,15 @@
     "loginRequired": "未读取到官网登录，请先在原生客户端登录",
     "accountHint": "直接使用该智能体的官网登录状态，不使用 API 供应商的地址和密钥。",
     "copyLogin": "复制登录命令",
+    "manageAccount": "管理官网账号",
+    "manageAccountHint": "登录在产品自己的官网完成，Codepluse 只保存账号元信息与模型列表。",
+    "accountLoginWaiting": "请在刚打开的浏览器窗口里完成登录。",
+    "accountLoginDone": "账号已登录。",
+    "accountLoginCancelled": "已取消登录。",
+    "accountLoginFailed": "登录失败：{message}",
+    "cancelAccountLogin": "取消登录",
+    "logoutAccount": "退出登录",
+    "accountLoggedOut": "已退出登录。",
     "copied": "登录命令已复制",
     "noSubscription": "该执行端暂未提供可接入的官网订阅，请使用它的原生 API 配置。",
     "claudeSource": "供应商从 CC Switch 读取。",

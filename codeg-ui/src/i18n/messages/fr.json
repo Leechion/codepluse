@@ -2047,7 +2047,8 @@
     "helpText": "Vous trouverez votre jeton dans l'application de bureau sous Paramètres → Service Web",
     "invalidToken": "Jeton invalide. Veuillez vérifier et réessayer.",
     "connectionFailed": "Échec de la connexion (HTTP {status})",
-    "networkError": "Impossible de se connecter au serveur"
+    "networkError": "Impossible de se connecter au serveur",
+    "storageUnavailable": "Le navigateur n'a pas pu enregistrer le jeton. Autorisez le stockage du site ou quittez le mode privé."
   },
   "CommitPage": {
     "title": "Valider",
@@ -7737,6 +7738,15 @@
     "loginRequired": "No native sign-in found. Sign in with the native client first.",
     "accountHint": "Uses this harness’s official sign-in without an API provider URL or API key.",
     "copyLogin": "Copy sign-in command",
+    "manageAccount": "Gérer le compte",
+    "manageAccountHint": "La connexion se fait sur le site du produit ; Codepluse ne conserve que les informations de compte et la liste des modèles.",
+    "accountLoginWaiting": "Terminez la connexion dans la fenêtre de navigateur ouverte.",
+    "accountLoginDone": "Compte connecté.",
+    "accountLoginCancelled": "Connexion annulée.",
+    "accountLoginFailed": "Échec de la connexion : {message}",
+    "cancelAccountLogin": "Annuler la connexion",
+    "logoutAccount": "Se déconnecter",
+    "accountLoggedOut": "Déconnecté.",
     "copied": "Sign-in command copied",
     "noSubscription": "This harness has no supported official subscription connection. Use its native API configuration.",
     "claudeSource": "Providers are read from CC Switch.",
