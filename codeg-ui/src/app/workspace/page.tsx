@@ -1,5 +1,5 @@
-import ZCodeWorkspacePage from "@/zcode/pages/ZCodeWorkspacePage"
+import WorkspacePage from "@/components/workspace/workspace-page"
 
-export default function WorkspacePage() {
-  return <ZCodeWorkspacePage />
+export default function Page() {
+  return <WorkspacePage />
 }

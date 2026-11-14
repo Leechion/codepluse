@@ -35,9 +35,14 @@ export default function LoginPage() {
     }
   }, [router])
 
-  // Desktop users skip login entirely
+  // Desktop users skip login entirely. Navigation is a side effect and must
+  // not run during render (React 19 may render twice and warn about updating
+  // a component while rendering).
+  useEffect(() => {
+    if (isDesktop()) router.replace("/workspace")
+  }, [router])
+
   if (isDesktop()) {
-    router.replace("/workspace")
     return null
   }
 
@@ -58,7 +63,15 @@ export default function LoginPage() {
       })
 
       if (res.ok) {
-        localStorage.setItem("codeg_token", token)
+        // Storage can fail (private mode, blocked third-party storage). That
+        // is not a network error, and reporting it as one made logging in
+        // impossible with no useful message.
+        try {
+          localStorage.setItem("codeg_token", token)
+        } catch {
+          setError(t("storageUnavailable"))
+          return
+        }
         router.replace("/workspace")
       } else if (
         res.status === 401 &&

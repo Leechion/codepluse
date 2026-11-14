@@ -24,17 +24,7 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"],
-      "@zcode/shared": ["./src/zcode/shared/index.ts"],
-      "@zcode/shared/*": ["./src/zcode/shared/*"],
-      "@zcode/services": ["./src/zcode/services/index.ts"],
-      "@zcode/provider": ["./src/zcode/provider/index.ts"],
-      "@zcode/rpc": ["./src/zcode/rpc/index.ts"],
-      "@zcode/model-option-map": ["./src/zcode/model-option-map/index.ts"],
-      "@zcode/zcode-cua/broker/ports": ["./src/zcode/zcode-cua/broker-ports.js"],
-      "@zcode/zcode-cua/pip-session": ["./src/zcode/zcode-cua/pip-session.d.ts"],
-      "@zcode/zcode-cua": ["./src/zcode/zcode-cua/index.d.ts"],
-      "@zcode/zcode-cua/*": ["./src/zcode/zcode-cua/*"]
+      "@/*": ["./src/*"]
     },
     "types": ["vitest/globals", "@testing-library/jest-dom"]
   },

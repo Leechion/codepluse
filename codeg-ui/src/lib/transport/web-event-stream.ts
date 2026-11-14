@@ -126,21 +126,42 @@ export class WebEventStream implements EventStream {
 
     switch (frame.type) {
       case "snapshot":
-        sub.lastAppliedSeq = frame.event_seq
         safeInvoke("onSnapshot", () =>
           sub.handlers.onSnapshot(frame.snapshot, frame.event_seq)
         )
+        // The snapshot is authoritative: it replaces local state, so the
+        // cursor resets to it even when it moves backwards. Advancing after
+        // the handler keeps a throwing consumer from skipping the replay.
+        sub.lastAppliedSeq = frame.event_seq
         break
-      case "replay":
-        sub.lastAppliedSeq = frame.high_water_seq
-        safeInvoke("onReplay", () =>
+      case "replay": {
+        try {
           sub.handlers.onReplay(frame.events, frame.high_water_seq)
-        )
+        } catch (err) {
+          console.error("[WebEventStream] onReplay handler threw:", err)
+          break
+        }
+        // Same authority as a snapshot: the replay covers everything up to
+        // high_water_seq.
+        sub.lastAppliedSeq = frame.high_water_seq
         break
-      case "event":
-        sub.lastAppliedSeq = frame.envelope.seq
-        safeInvoke("onEvent", () => sub.handlers.onEvent(frame.envelope))
+      }
+      case "event": {
+        const seq = frame.envelope.seq
+        if (seq <= (sub.lastAppliedSeq ?? 0)) {
+          // A replay that crossed an in-flight event must not be applied
+          // twice (duplicated assistant text / tool cards).
+          break
+        }
+        try {
+          sub.handlers.onEvent(frame.envelope)
+        } catch (err) {
+          console.error("[WebEventStream] onEvent handler threw:", err)
+          break
+        }
+        sub.lastAppliedSeq = seq
         break
+      }
       case "detached":
         // Server unilaterally ended the sub. Remove from local map BEFORE
         // calling the user handler so any synchronous re-attach inside the

@@ -368,7 +368,9 @@ export class WebTransport implements Transport {
       // subscribe has run), trigger the connect now so attach frames sent
       // by the consumer have a place to land. With none, ask the server
       // whether a proxy in front of it admits this browser.
-      if (!this.ws) {
+      // A destroyed transport must not open a socket nobody will tear down:
+      // the component that asked for it may already be unmounted.
+      if (!this.destroyed && !this.ws) {
         if (hasCodegCredentials()) this.connectWs()
         else void this.discoverProxyAuth()
       }
@@ -433,6 +435,7 @@ export class WebTransport implements Transport {
   // surface that — probeHealth treats it as unauthorized rather than a silent
   // dead-end). Returns true once a socket has been created.
   private connectWs(): boolean {
+    if (this.destroyed) return false
     if (!hasCodegCredentials()) return false
     // Empty when a proxy signed this browser in: the socket then carries only
     // the event protocol, and the proxy's assertion rides on the upgrade.
@@ -470,60 +473,74 @@ export class WebTransport implements Transport {
     }
 
     this.ws.onmessage = (msg) => {
+      let parsed: unknown
       try {
-        const parsed = JSON.parse(msg.data) as unknown
-        // Attach-protocol frames carry a `type` discriminator; legacy
-        // global-broadcast frames carry a `channel` discriminator. Routing
-        // by which field is present lets the two coexist on the same WS.
-        if (
-          parsed &&
-          typeof parsed === "object" &&
-          "type" in (parsed as object)
-        ) {
+        parsed = JSON.parse(msg.data) as unknown
+      } catch {
+        // Malformed frame: nothing to route.
+        return
+      }
+      // Attach-protocol frames carry a `type` discriminator; legacy
+      // global-broadcast frames carry a `channel` discriminator. Routing
+      // by which field is present lets the two coexist on the same WS.
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        "type" in (parsed as object)
+      ) {
+        try {
           this.eventStreamInstance?.handleServerFrame(parsed)
-          return
+        } catch (err) {
+          console.error("[WebTransport] attach frame handler threw:", err)
         }
-        const event = parsed as WebEvent
-        if (event.channel === WS_READY_CHANNEL) {
-          this.readyResolve()
-          // Application-level ready: the link is fully usable again. Reset the
-          // backoff counter and clear the reconnect dialog. Reset happens here
-          // (not in onopen) so a socket that opens then drops before `__ready__`
-          // keeps growing its backoff instead of restarting from 1s.
-          this.wsFailCount = 0
-          this.setConnState("connected")
-          for (const cb of this.readyCallbacks) {
+        return
+      }
+      const event = parsed as WebEvent
+      if (event.channel === WS_READY_CHANNEL) {
+        this.readyResolve()
+        // Application-level ready: the link is fully usable again. Reset the
+        // backoff counter and clear the reconnect dialog. Reset happens here
+        // (not in onopen) so a socket that opens then drops before `__ready__`
+        // keeps growing its backoff instead of restarting from 1s.
+        this.wsFailCount = 0
+        this.setConnState("connected")
+        for (const cb of this.readyCallbacks) {
+          try {
+            cb()
+          } catch (err) {
+            console.error("[WebTransport] ready callback threw:", err)
+          }
+        }
+        if (this.hasReadiedOnce) {
+          // Reconnect path: server-side receiver_count was 0 during the
+          // disconnect window, so any event fired in that gap was dropped.
+          // Notify consumers to recover state (e.g. refetch snapshots).
+          // Errors in user callbacks must not break sibling callbacks.
+          for (const cb of this.reconnectCallbacks) {
             try {
               cb()
             } catch (err) {
-              console.error("[WebTransport] ready callback threw:", err)
+              console.error("[WebTransport] reconnect callback threw:", err)
             }
           }
-          if (this.hasReadiedOnce) {
-            // Reconnect path: server-side receiver_count was 0 during the
-            // disconnect window, so any event fired in that gap was dropped.
-            // Notify consumers to recover state (e.g. refetch snapshots).
-            // Errors in user callbacks must not break sibling callbacks.
-            for (const cb of this.reconnectCallbacks) {
-              try {
-                cb()
-              } catch (err) {
-                console.error("[WebTransport] reconnect callback threw:", err)
-              }
-            }
-          } else {
-            this.hasReadiedOnce = true
-          }
-          return
+        } else {
+          this.hasReadiedOnce = true
         }
-        const handlers = this.handlers.get(event.channel)
-        if (handlers) {
-          for (const h of handlers) {
-            h(event.payload)
-          }
+        return
+      }
+      const handlers = this.handlers.get(event.channel)
+      if (!handlers) return
+      for (const h of handlers) {
+        // One subscriber throwing must not starve the others in this frame.
+        try {
+          h(event.payload)
+        } catch (err) {
+          console.error(
+            "[WebTransport] event handler threw:",
+            event.channel,
+            err
+          )
         }
-      } catch {
-        // ignore malformed messages
       }
     }
 

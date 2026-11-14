@@ -83,7 +83,9 @@ let backendVersion = 0
 
 function emit(next: ComputerStoreState) {
   state = next
-  for (const listener of listeners) listener()
+  // Snapshot: a listener that unsubscribes during notification mutates the
+  // live Set and can make the loop skip the next listener.
+  for (const listener of [...listeners]) listener()
 }
 
 /** The shared windows — and the applications shared as a whole and the

@@ -134,7 +134,7 @@ function row(): HTMLElement {
 
 /** The header button that opens the row's panel, when it has one. */
 function toggle(): HTMLElement | null {
-  return row().querySelector(":scope > button")
+  return row().querySelector(":scope > button, :scope > [role=\"button\"]")
 }
 
 const isResumeRow = () =>

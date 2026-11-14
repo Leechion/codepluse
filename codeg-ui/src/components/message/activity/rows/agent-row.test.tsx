@@ -81,13 +81,13 @@ function header(): HTMLElement {
 
 /** Open the row's panel (a failure is already open). */
 function open() {
-  const button = row().querySelector(":scope > button")
+  const button = row().querySelector(":scope > button, :scope > [role=\"button\"]")
   if (!button) throw new Error("the row has no panel to open")
   if (button.getAttribute("aria-expanded") === "false") fireEvent.click(button)
 }
 
 function hasPanel(): boolean {
-  return row().querySelector(":scope > button") !== null
+  return row().querySelector(":scope > button, :scope > [role=\"button\"]") !== null
 }
 
 describe("sub-agent row: model and effort", () => {

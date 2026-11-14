@@ -874,7 +874,14 @@ function MermaidBlockImpl({ source }: { source: string }) {
   // `MessageResponse` and the one around Streamdown itself, neither of which
   // compares anything theme-shaped.
   const config = useMemo<MermaidConfig>(
-    () => ({ theme: isDarkMode ? "dark" : "default" }),
+    () => ({
+      theme: isDarkMode ? "dark" : "default",
+      // Pin the safe mode explicitly. The output is injected with
+      // dangerouslySetInnerHTML, so relying on the library's default would
+      // let a future theme/label option silently re-enable raw HTML and
+      // click handlers in model-authored diagrams.
+      securityLevel: "strict",
+    }),
     [isDarkMode]
   )
   const render = useMermaidRenderer(config)

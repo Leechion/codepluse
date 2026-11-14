@@ -56,7 +56,7 @@ export function useFoldRow() {
       foldBack({
         head: row,
         control,
-        toggle: row?.querySelector<HTMLElement>(":scope > button") ?? null,
+        toggle: row?.querySelector<HTMLElement>(":scope > button, :scope > [role=\"button\"]") ?? null,
         fold,
       })
     },

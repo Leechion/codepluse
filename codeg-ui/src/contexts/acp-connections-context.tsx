@@ -5684,12 +5684,6 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           // event is mostly a confirmation; we log it for visibility. Phase 3b
           // will use this to drive UI mapping when the frontend stops creating
           // rows itself.
-          console.log("[acp-context] conversation_linked", {
-            contextKey,
-            connectionId: e.connection_id,
-            conversationId: e.conversation_id,
-            folderId: e.folder_id,
-          })
           // Same reason as session_started: a reconnect needs the conversation
           // id to be able to attach as a viewer to a surviving owner.
           if (e.conversation_id > 0) {

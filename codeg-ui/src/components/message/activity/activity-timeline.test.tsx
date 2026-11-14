@@ -1140,7 +1140,7 @@ describe("activity timeline: where the rail ends", () => {
       return tw[name]!
     }
     const ringOf = (foot: HTMLElement) =>
-      foot.querySelector(":scope > button > span")!
+      foot.querySelector(":scope > button > span, :scope > [role=\"button\"] > span")!
     const lower =
       remOf(
         globalsDecl(
@@ -1454,7 +1454,7 @@ describe("activity timeline: commands", () => {
     restoreMetrics = mockTruncateLayout(600, 200)
     renderSettled(partsOf(RUN))
     const row = screen.getByTitle(LONG).closest("li")!
-    const line = row.querySelector(":scope > button .truncate")!
+    const line = row.querySelector(":scope > button .truncate, :scope > [role=\"button\"] .truncate")!
     // After the fixed label, which stands for the prompt sign on the row.
     expect(line.textContent).toBe(LONG)
     expect(line.previousElementSibling?.textContent).toBe("Command")
