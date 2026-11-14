@@ -95,6 +95,25 @@ $resources = Join-Path $tauriDir 'resources'
 New-Item -ItemType Directory -Path $resources -Force | Out-Null
 @{ root = ($root -replace '\\', '/') } | ConvertTo-Json |
     Set-Content -LiteralPath (Join-Path $resources 'workspace.json') -Encoding utf8
+# 开发/发布构建直接运行时，仓库根也要在旁边（安装包走 resources/）。
+$profileDir = if ($DebugBuild) { 'target\debug' } else { 'target\release' }
+$profileDir = Join-Path $tauriDir $profileDir
+if (Test-Path -LiteralPath $profileDir) {
+    @{ root = ($root -replace '\\', '/') } | ConvertTo-Json |
+        Set-Content -LiteralPath (Join-Path $profileDir 'workspace.json') -Encoding utf8
+}
+# 桌面快捷方式指向 dist\codepluse\codepluse.exe（旧的 Go WebView2 外壳在
+# Phase 4 删掉了，那个位置现在是本仓库的启动入口）——每次构建都同步一份，
+# 免得快捷方式还停在旧版本上。
+$launcherDir = Join-Path $root 'dist\codepluse'
+if (Test-Path -LiteralPath $launcherDir) {
+    $builtExe = Join-Path $profileDir 'codepluse.exe'
+    if (Test-Path -LiteralPath $builtExe) {
+        Copy-Item -LiteralPath $builtExe -Destination (Join-Path $launcherDir 'codepluse.exe') -Force
+    }
+    @{ root = ($root -replace '\\', '/') } | ConvertTo-Json |
+        Set-Content -LiteralPath (Join-Path $launcherDir 'workspace.json') -Encoding utf8
+}
 
 # Run the CLI from the repository root so it finds ./src-tauri.
 Push-Location $root
