@@ -85,8 +85,8 @@ fn port_open(port: u16) -> bool {
     TcpStream::connect(("127.0.0.1", port)).is_ok()
 }
 
-/// The one port this process serves. The migration used to add one (the
-/// proxy in front of the sidecar); a single process needs a single port.
+/// The one port this process serves. The migration used to add one (a proxy
+/// in front of the Go sidecar); a single process needs a single port.
 fn backend_port() -> u16 {
     std::env::var("CODEPLUSE_PORT")
         .ok()
