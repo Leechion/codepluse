@@ -50,6 +50,7 @@ pub mod provider_catalog;
 pub mod providers;
 pub mod provider_writeback;
 pub mod mcp_companion;
+pub mod account_channels;
 pub mod office;
 pub mod automations;
 pub mod custom_agents;
@@ -547,6 +548,23 @@ async fn api_dispatch(
             Ok(Some(Err(message))) => fail(message),
             Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
             Err(join) => fail(format!("git 任务执行失败：{join}")),
+        };
+    }
+
+    // 账号渠道（WorkBuddy / Qoder 独立账号）：命令直接转发给本地协议进程，
+    // 响应保持它自己的键序（Go 侧返回的是原始字节）。
+    if command.starts_with("codepluse_channel_") {
+        let root = st.root.clone();
+        let owned = command.clone();
+        let owned_args = args.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            account_channels::command(&root, &owned, &owned_args)
+        })
+        .await;
+        return match outcome {
+            Ok(Ok(value)) => go_json_struct(value),
+            Ok(Err(message)) => fail(message),
+            Err(join) => fail(format!("账号渠道命令执行失败：{join}")),
         };
     }
 

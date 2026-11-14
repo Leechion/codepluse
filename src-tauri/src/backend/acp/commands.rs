@@ -288,7 +288,9 @@ pub fn agents_rows(root: &Path) -> Vec<Value> {
             "system_instructions_file_path": Value::Null,
             "model_provider_id": Value::Null,
             "host_tools_agent_mode": true,
-            "instance": !agent.wire.is_empty(),
+            // 实例只认 `inst_` 前缀：账号智能体的 wire 是 account_<id>，
+            // 它不是实例（上游 server.go 的同一处改动）。
+            "instance": agent.wire.starts_with("inst_"),
             "real_tool": agent.real_tool,
             "provider_id": agent.provider_id,
             "default_model": agent.default_model,

@@ -84,6 +84,9 @@ pub fn native_home(tool: &str) -> String {
 }
 
 pub fn supports_subscription(tool: &str) -> bool {
+    if let Some(rest) = tool.strip_prefix("account:") {
+        return crate::backend::account_channels::supported(rest);
+    }
     matches!(tool, "claude" | "codex" | "workbuddy" | "qoder" | "custom:qoder")
 }
 
@@ -874,5 +877,13 @@ mod tests {
             std::env::remove_var("CODEX_HOME");
         }
         let _ = home;
+    }
+
+    #[test]
+    fn account_channels_count_as_subscription_harnesses() {
+        assert!(supports_subscription("account:workbuddy"));
+        assert!(supports_subscription("account:qodercn"));
+        assert!(!supports_subscription("account:unknown"));
+        assert!(supports_subscription("claude"));
     }
 }

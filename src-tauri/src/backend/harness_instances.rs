@@ -364,8 +364,11 @@ fn run(root: &Path, command: &str, args: &Value, events: &mut Vec<(String, Value
                 use sha2::{Digest, Sha256};
                 let digest = Sha256::digest(identity.as_bytes());
                 let digest = digest.iter().map(|b| format!("{b:02x}")).collect::<String>();
-                let spec_id = format!("main_{}_{}", base.real_tool, digest);
-                let main_wire = format!("inst_main_{}_{}", base.real_tool, digest);
+                // 账号执行端的 real_tool 带 ':'（account:workbuddy），
+                // 实例 id 里要换成 '_'（上游 main_bot.go 的 toolKey）。
+                let tool_key = base.real_tool.replace(':', "_");
+                let spec_id = format!("main_{}_{}", tool_key, digest);
+                let main_wire = format!("inst_main_{}_{}", tool_key, digest);
                 let spec = InstanceSpec {
                     id: spec_id,
                     wire: main_wire.clone(),

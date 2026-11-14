@@ -118,10 +118,28 @@ fn connection_catalog(root: &Path) -> Result<Value, String> {
                 picked
             }
         };
+        let mut account = providers_core::account(&tool);
+        // 账号渠道由协议进程托管：来源是本地账号目录，登录状态与模型
+        // 列表来自协议进程（上游 harness_connections.go 的同一段）。
+        if let Some(channel_id) = tool.strip_prefix("account:") {
+            account["managed"] = json!(true);
+            account["source"] = json!(crate::backend::account_channels::data_dir(root).to_string_lossy());
+            if let Ok((channels, _)) = crate::backend::account_channels::list(root) {
+                if let Some(channel) = channels.iter().find(|item| item.id == channel_id) {
+                    account["configured"] = json!(channel.configured);
+                    let models: Vec<Value> = channel
+                        .models
+                        .iter()
+                        .map(|model| json!({"id": model.id, "name": model.name}))
+                        .collect();
+                    account["models"] = Value::Array(models);
+                }
+            }
+        }
         rows.push(json!({
             "agent_type": wire,
             "tool": tool,
-            "account": providers_core::account(&tool),
+            "account": account,
             "defaults": defaults,
         }));
     }

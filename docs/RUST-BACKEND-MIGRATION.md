@@ -633,3 +633,47 @@ tokio 异步锁；定时器 15s（Go 在主循环内）。
 - `cargo test`：**256 个全绿**（基线 239 + 新增 17）
 - 单进程烟测（无 Go）：health 200 / `GET /workspace` 200（441,601 B，与迁移前一致）/
   `list_folders` 真实数据 / `/ws/events` 收到 `__ready__`
+
+---
+
+## 账号智能体（独立账号）—— 上游新功能的 Rust 移植（2026-11-13 23:30）
+
+上游 `origin/main` 推了两个新提交（`8e0b230 codepluse: add independent WorkBuddy
+and Qoder agents`、`9e42280 fix: show independent account agents in settings`），
+引入**独立账号智能体**：设置 → 智能体 → 选择独立账号 → 「管理官网账号」会在系统
+浏览器里打开该产品的官网登录；登录后选择器里多出四个独立 ACP 智能体
+（`account_buddy` / `account_workbuddy` / `account_qoder` / `account_qodercn`），
+各自有独立的会话历史、模型与工具循环。
+
+设计说明见 `docs/design/CODEPLUSE-ACCOUNT-AGENTS.md`（上游原文），Node 侧协议
+进程见 `bridges/account-channels/`。
+
+### 上游改了什么（Go 侧）
+
+| 文件 | 改动 |
+|---|---|
+| `internal/accountchannels/`（新增） | 管理本地协议进程：随机密钥、共享实例（`runtime.json`）、Bearer 调用 |
+| `internal/codeg/account_channels.go`（新增） | 5 条 `codepluse_channel_*` 命令的转发 |
+| `internal/codeg/harness_connections.go` | 连接目录里的账号块（managed / source / configured / models） |
+| `internal/codeg/main_bot.go` | 主智能体实例 id 的 `toolKey`（`:` → `_`） |
+| `internal/acp/runtime.go` | `account:<id>` 的公开名 `account_<id>` |
+| `internal/providers/auth.go` | `SupportsSubscription("account:<id>")` |
+| `cmd/serve/wiring.go` | 播种四个账号智能体 + `account:<id>` 的启动链 |
+| `cmd/desktop/main_windows.go` | `__codegGoOpenExternal`（只允许 https） |
+
+### Rust 侧对应实现
+
+| 上游 | 本仓 |
+|---|---|
+| `internal/accountchannels/channels.go` | `src-tauri/src/backend/account_channels.rs`（`supported` / `available` / `ensure` / `call` / `list`） |
+| `internal/codeg/account_channels.go` | `backend/mod.rs` 的 `codepluse_channel_*` 分支（响应保持协议进程自己的键序） |
+| `cmd/serve/wiring.go` 的播种 | `acp/agents.rs::account_agents` + `registry` |
+| `cmd/serve/wiring.go` 的启动链 | `acp/launch.rs::launch_fn` 的 `account:<id>` 分支（`acp-agent.mjs` + `CODEPLUSE_CHANNEL_*` 环境） |
+| `internal/providers/auth.go` | `acp/providers_core.rs::supports_subscription` + `acp/launch.rs::clear_api_environment` |
+| `internal/codeg/harness_connections.go` | `harness_connections.rs::connection_catalog` 的账号块 |
+| `internal/codeg/main_bot.go` | `harness_instances.rs` 的 `tool_key` |
+| `cmd/desktop/main_windows.go` | `main.rs` 的 `open_external` 命令 + 初始化脚本注入 `window.__codegGoOpenExternal` |
+
+协议进程契约与上游一致：数据目录 `.data/account-channels`、随机 32 字节密钥经
+`CODEPLUSE_CHANNEL_KEY` 传入、首行 stdout 是 `{"url":"http://127.0.0.1:PORT"}`、
+共享实例写 `runtime.json`（`{url, key, pid}`）。

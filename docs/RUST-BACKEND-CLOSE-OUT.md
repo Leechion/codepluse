@@ -180,3 +180,25 @@
 | ACP 有状态命令用 Go 的 fixture 测试验收，未走真实 harness 双跑 | 无状态命令已双跑 |
 | dev 代理不隧道 HMR 的 WebSocket | 前端热更新需浏览器直连 `next dev` |
 | `resolveExistingPath` 怪癖保留 | 见 §B5 |
+
+---
+
+## 附：账号智能体（独立账号）—— 上游新功能的移植状态（2026-11-13 23:30）
+
+上游 `origin/main` 的两个新提交已移植到 Rust（详见
+`docs/RUST-BACKEND-MIGRATION.md` 的同名章节）：
+
+- [x] `account_channels.rs`：协议进程的启动/复用/调用（随机密钥、共享实例、
+      Bearer 鉴权、45s 超时、8MB 上限）
+- [x] 5 条 `codepluse_channel_*` 命令（status / login / login_status / cancel / logout）
+- [x] 四个账号智能体的播种与公开名（`account_<id>`）
+- [x] `account:<id>` 的 ACP 启动链（`acp-agent.mjs` + `CODEPLUSE_CHANNEL_*` 环境 +
+      渠道模型校验）
+- [x] 连接目录的账号块（managed / source / configured / models）
+- [x] 主智能体实例 id 的 `toolKey`（`:` → `_`）
+- [x] Tauri 外壳的 `open_external`（只允许 https，与 Go 桌面壳同契约）
+
+已知限制：
+
+- 账号登录/推理需要用户在浏览器里完成真实授权，仓库内的检查不消耗任何额度；
+- 协议进程需要 Node.js 22.19+（本仓前端与 bridge 都用它）。

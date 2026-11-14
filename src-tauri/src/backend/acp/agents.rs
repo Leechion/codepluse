@@ -77,8 +77,57 @@ pub fn wire_agent(a: &Agent) -> String {
         "workbuddy" => "custom:workbuddy".into(),
         "claude" => "claude_code".into(),
         "codex" => "codex".into(),
-        _ => format!("custom:{}", a.id),
+        _ => {
+            // 账号智能体（account:<id>）的公开名是 account_<id>。
+            if let Some(rest) = a.real_tool.strip_prefix("account:") {
+                return format!("account_{rest}");
+            }
+            format!("custom:{}", a.id)
+        }
     }
+}
+
+/// 账号渠道的产品与显示名（上游 wiring.go 的播种表）。
+pub const ACCOUNT_CHANNELS: [(&str, &str); 4] = [
+    ("buddy", "WorkBuddy 国内版"),
+    ("workbuddy", "WorkBuddy 国际版"),
+    ("qoder", "Qoder"),
+    ("qodercn", "Qoder CN"),
+];
+
+/// 账号智能体（上游 wiring.go）：协议进程与 ACP 适配器都在仓库内，
+/// 装好 `bridges/account-channels` 才会出现在选择器里。
+fn account_agents(root: &Path) -> Vec<Agent> {
+    let mut out = Vec::new();
+    for (channel_id, name) in ACCOUNT_CHANNELS {
+        let tool = format!("account:{channel_id}");
+        if launch::acp_installed_rooted(root, &tool).is_empty() {
+            continue;
+        }
+        out.push(
+            Agent {
+                id: format!("agt_account_{channel_id}"),
+                agent_type: "account-agent".into(),
+                name: name.into(),
+                enabled: true,
+                real: true,
+                real_tool: tool.clone(),
+                wire: format!("account_{channel_id}"),
+                auth_mode: "subscription".into(),
+                communication: "acp".into(),
+                endpoint: format!("acp://{tool}"),
+                adapter_kind: "ACP".into(),
+                acp_modes: std::collections::BTreeMap::from([
+                    ("readonly".into(), "readonly".into()),
+                    ("workspace".into(), "workspace".into()),
+                    ("shell".into(), "readonly".into()),
+                ]),
+                ..Agent::default()
+            }
+            .with_defaults(),
+        );
+    }
+    out
 }
 
 /// Go `baseWire` (split.go:158): the public wire name of a built-in tool.
@@ -339,6 +388,7 @@ fn apply_enabled_overrides(root: &Path, agents: &mut [Arc<Agent>]) {
 pub fn registry(root: &Path) -> Vec<Arc<Agent>> {
     let mut agents: Vec<Arc<Agent>> = builtin_agents(root)
         .into_iter()
+        .chain(account_agents(root))
         .map(Arc::new)
         .collect();
     agents.extend(custom_acp_agents(root).into_iter().map(Arc::new));
@@ -435,7 +485,9 @@ pub fn agent_available(root: &Path, a: &Agent) -> bool {
     if a.real_tool.is_empty() {
         return false;
     }
-    !launch::acp_installed(&a.real_tool).is_empty()
+    // 探测要带工作区根：账号智能体的适配器在仓库的 bridges/ 下，npm 全局包
+    // 也可能只装在工作区里（与 Go 的 acpInstalled 一致）。
+    !launch::acp_installed_rooted(root, &a.real_tool).is_empty()
 }
 
 /// One `.data/acp-agents.json` entry, consumed by the launch path.
@@ -611,5 +663,41 @@ mod tests {
         a.acp_version = "9.9.9".into();
         assert_eq!(installed_version(&root, &a), "9.9.9");
         fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn account_agents_are_seeded_when_the_bridge_is_installed() {
+        let root = temp_root("account-agents");
+        // 没装协议进程 → 选择器里没有账号智能体。
+        assert!(account_agents(&root).is_empty());
+        let dir = root.join("bridges").join("account-channels");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("acp-agent.mjs"), "//").unwrap();
+        let seeded = account_agents(&root);
+        assert_eq!(seeded.len(), 4);
+        assert_eq!(seeded[0].real_tool, "account:buddy");
+        assert_eq!(seeded[0].wire, "account_buddy");
+        assert_eq!(seeded[0].auth_mode, "subscription");
+        assert_eq!(seeded[0].endpoint, "acp://account:buddy");
+        assert_eq!(seeded[0].acp_modes.get("shell").map(|s| s.as_str()), Some("readonly"));
+        assert_eq!(
+            seeded.iter().map(|a| a.wire.clone()).collect::<Vec<_>>(),
+            vec![
+                "account_buddy",
+                "account_workbuddy",
+                "account_qoder",
+                "account_qodercn"
+            ]
+        );
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn account_tools_map_to_their_public_wire() {
+        let mut a = Agent::default();
+        a.real_tool = "account:workbuddy".into();
+        assert_eq!(wire_agent(&a), "account_workbuddy");
+        a.wire = "inst_main_account_workbuddy_abc".into();
+        assert_eq!(wire_agent(&a), "inst_main_account_workbuddy_abc");
     }
 }

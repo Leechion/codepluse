@@ -299,6 +299,15 @@ pub fn acp_installed(tool: &str) -> String {
 
 /// Root-aware variant of `acp_installed` (dsh honours harness-paths.json).
 pub fn acp_installed_rooted(root: &Path, tool: &str) -> String {
+    if let Some(rest) = tool.strip_prefix("account:") {
+        // 账号智能体的 ACP 适配器在仓库内（上游 wiring.go）。
+        let file = crate::backend::account_channels::acp_adapter(root);
+        return if file.is_file() {
+            file.to_string_lossy().to_string()
+        } else {
+            String::new()
+        };
+    }
     if tool == "workbuddy" {
         return work_buddy_entry(root);
     }
@@ -332,6 +341,28 @@ pub fn acp_installed_rooted(root: &Path, tool: &str) -> String {
 // ----------------------------- env plumbing -----------------------------
 
 /// Go `dropEnvKey` (cli.go:295): a later append becomes the single value.
+/// Go `ClearAPIEnvironment`（providers/auth.go:101）：账号智能体不继承任何
+/// API 供应商的凭据 —— 它只用自己的协议进程与账号。
+pub fn clear_api_environment(env: &[String]) -> Vec<String> {
+    const BLOCKED: [&str; 8] = [
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "CODEX_API_KEY",
+        "CODEPLUSE_CODEX_API_KEY",
+        "CODEPLUSE_DSH_API_KEY",
+        "CODEBUDDY_API_KEY",
+        "CODEBUDDY_BASE_URL",
+    ];
+    env.iter()
+        .filter(|entry| {
+            let key = entry.split('=').next().unwrap_or_default().to_uppercase();
+            !key.starts_with("ANTHROPIC_") && !BLOCKED.contains(&key.as_str())
+        })
+        .cloned()
+        .collect()
+}
+
 pub fn drop_env_key(env: &[String], key: &str) -> Vec<String> {
     let prefix = format!("{key}=");
     env.iter().filter(|e| !e.starts_with(&prefix)).cloned().collect()
@@ -936,6 +967,45 @@ pub fn launch_fn(root: &Path, agent: &Agent, permission: &str, cwd: &str) -> Res
     if pkg.is_empty() {
         return Ok(Launch::default());
     }
+    // 账号智能体：模型必须属于该渠道，且凭据只通过协议进程传递。
+    if let Some(channel_id) = tool.strip_prefix("account:") {
+        let channel_id = channel_id.to_string();
+        let (channels, client) = crate::backend::account_channels::list(root)?;
+        let Some(channel) = channels.iter().find(|item| item.id == channel_id) else {
+            return Err("账号智能体不存在".into());
+        };
+        if !channel.configured || channel.models.is_empty() {
+            return Err(format!("请先在智能体设置中登录 {}", channel.name));
+        }
+        let mut model = agent.default_model.clone();
+        if model.is_empty() {
+            model = channel.models[0].id.clone();
+        }
+        if !channel.models.iter().any(|item| item.id == model) {
+            return Err(format!("{} 不提供模型 {}", channel.name, model));
+        }
+        let node = which("node").map_err(|_| "未找到 node，无法启动 ACP 适配器".to_string())?;
+        let current: Vec<String> = std::env::vars()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect();
+        let mut env = clear_api_environment(&current);
+        env.push(format!("CODEPLUSE_CHANNEL_URL={}", client.url));
+        env.push(format!("CODEPLUSE_CHANNEL_KEY={}", client.key));
+        env.push(format!("CODEPLUSE_CHANNEL_MODEL={model}"));
+        env.push(format!("CODEPLUSE_CHANNEL_PERMISSION={permission}"));
+        return Ok(Launch {
+            command: node,
+            args: vec![
+                pkg,
+                channel_id,
+                crate::backend::account_channels::data_dir(root)
+                    .join("sessions")
+                    .to_string_lossy()
+                    .to_string(),
+            ],
+            env: Some(env),
+        });
+    }
     let node = which("node").map_err(|_| "未找到 node，无法启动 ACP 适配器".to_string())?;
     let mut env = build_env(root, agent)?;
     // Layer the settings-page overlay onto the launch environment and
@@ -1146,5 +1216,51 @@ mod tests {
         }
         let codex_pkg = acp_package_candidates("codex");
         assert_eq!(codex_pkg.len(), 2);
+    }
+
+    #[test]
+    fn account_launch_needs_the_adapter_inside_the_repo() {
+        let root = temp_root("account-launch");
+        assert!(acp_installed_rooted(&root, "account:workbuddy").is_empty());
+        let dir = root.join("bridges").join("account-channels");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("acp-agent.mjs"), "//").unwrap();
+        assert!(acp_installed_rooted(&root, "account:workbuddy").ends_with("acp-agent.mjs"));
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn clear_api_environment_drops_provider_credentials() {
+        let env = vec![
+            "PATH=C:\\bin".to_string(),
+            "ANTHROPIC_API_KEY=secret".to_string(),
+            "ANTHROPIC_BASE_URL=https://x".to_string(),
+            "CLAUDE_CODE_SUBAGENT_MODEL=haiku".to_string(),
+            "OPENAI_API_KEY=secret".to_string(),
+            "OPENAI_BASE_URL=https://y".to_string(),
+            "CODEX_API_KEY=secret".to_string(),
+            "CODEPLUSE_CODEX_API_KEY=secret".to_string(),
+            "CODEPLUSE_DSH_API_KEY=secret".to_string(),
+            "CODEBUDDY_API_KEY=secret".to_string(),
+            "CODEBUDDY_BASE_URL=https://z".to_string(),
+            "HOME=C:\\Users\\me".to_string(),
+        ];
+        let kept = clear_api_environment(&env);
+        assert!(kept.contains(&"PATH=C:\\bin".to_string()));
+        assert!(kept.contains(&"HOME=C:\\Users\\me".to_string()));
+        for dropped in [
+            "ANTHROPIC_API_KEY=secret",
+            "ANTHROPIC_BASE_URL=https://x",
+            "CLAUDE_CODE_SUBAGENT_MODEL=haiku",
+            "OPENAI_API_KEY=secret",
+            "OPENAI_BASE_URL=https://y",
+            "CODEX_API_KEY=secret",
+            "CODEPLUSE_CODEX_API_KEY=secret",
+            "CODEPLUSE_DSH_API_KEY=secret",
+            "CODEBUDDY_API_KEY=secret",
+            "CODEBUDDY_BASE_URL=https://z",
+        ] {
+            assert!(!kept.contains(&dropped.to_string()), "{dropped} 未被清除");
+        }
     }
 }

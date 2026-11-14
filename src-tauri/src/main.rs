@@ -28,7 +28,8 @@ use tauri::{Manager, RunEvent, State, Url, WebviewUrl, WebviewWindow, WebviewWin
 
 mod backend;
 
-const SHELL_MARKER: &str = "window.__CODEG_SHELL__='tauri-shell';window.__CODEG_TAURI_SHELL__=true;";
+const SHELL_MARKER: &str = "window.__CODEG_SHELL__='tauri-shell';window.__CODEG_TAURI_SHELL__=true;\
+window.__codegGoOpenExternal=function(u){return window.__TAURI_INTERNALS__.invoke('open_external',{url:u})};";
 const DEFAULT_PORT: u16 = 8840;
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -190,6 +191,54 @@ fn window_begin_drag(window: WebviewWindow) -> Result<(), String> {
     window.start_dragging().map_err(|e| e.to_string())
 }
 
+/// Opens a login page in the system browser.
+///
+/// The account-agent flow needs the product's own web login, and the page
+/// itself must never navigate away from the app. Only HTTPS URLs without
+/// userinfo are accepted — the same contract the Go desktop shell enforced
+/// (cmd/desktop/main_windows.go).
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    let invalid = "只能打开有效的 HTTPS 登录页面".to_string();
+    if url.contains('\r') || url.contains('\n') {
+        return Err(invalid);
+    }
+    let parsed = url::Url::parse(&url).map_err(|_| invalid.clone())?;
+    if parsed.scheme() != "https"
+        || parsed.host_str().unwrap_or_default().is_empty()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err(invalid);
+    }
+    open_in_system_browser(parsed.as_str())
+}
+
+/// Hands the URL to the OS' default handler.
+fn open_in_system_browser(target: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut command = std::process::Command::new("rundll32.exe");
+        command.arg("url.dll,FileProtocolHandler").arg(target);
+        // CREATE_NO_WINDOW: no console window for the browser handoff.
+        command.creation_flags(0x0800_0000);
+        command
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        std::process::Command::new(opener)
+            .arg(target)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+}
+
 #[tauri::command]
 fn window_open(app: tauri::AppHandle, state: State<'_, Backend>, path: String) -> Result<(), String> {
     let index = state.next_window.fetch_add(1, Ordering::SeqCst) + 1;
@@ -212,7 +261,8 @@ fn main() {
             window_minimize,
             window_toggle_maximize,
             window_begin_drag,
-            window_open
+            window_open,
+            open_external
         ])
         .setup(|app| {
             let port = backend_port();
