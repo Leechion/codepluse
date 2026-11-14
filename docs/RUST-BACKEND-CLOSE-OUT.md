@@ -197,6 +197,8 @@
 - [x] 连接目录的账号块（managed / source / configured / models）
 - [x] 主智能体实例 id 的 `toolKey`（`:` → `_`）
 - [x] Tauri 外壳的 `open_external`（只允许 https，与 Go 桌面壳同契约）
+- [x] 设置页的「管理官网账号」入口（发起登录 → 系统浏览器 → 轮询 → 刷新；
+      已登录时列出账号并可退出）——`components/settings/account-channel-panel.tsx`
 
 已知限制：
 

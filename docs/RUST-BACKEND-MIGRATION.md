@@ -677,3 +677,17 @@ and Qoder agents`、`9e42280 fix: show independent account agents in settings`�
 协议进程契约与上游一致：数据目录 `.data/account-channels`、随机 32 字节密钥经
 `CODEPLUSE_CHANNEL_KEY` 传入、首行 stdout 是 `{"url":"http://127.0.0.1:PORT"}`、
 共享实例写 `runtime.json`（`{url, key, pid}`）。
+
+### 前端（上游未做，这里补齐）
+
+上游只做了后端与桌面壳，UI 的「管理官网账号」入口没有落地。本仓补上：
+
+| 位置 | 作用 |
+|---|---|
+| `components/settings/account-channel-panel.tsx` | 管理面板：发起登录 → 把登录地址交给系统浏览器 → 每 2s 轮询状态（可取消）→ 刷新；已登录时列出账号并可逐个退出 |
+| `components/settings/connection-fields.tsx` | 账号类执行端（`tool` 以 `account:` 开头）渲染该面板 |
+| `lib/open-external.ts` | 外链打开：桌面壳注入的 `__codegGoOpenExternal` 优先，浏览器标签页回退 `window.open` |
+| `lib/api.ts` | 5 条 `codepluse_channel_*` 的接口与类型 |
+| `i18n/messages/*.json` | 10 种语言补齐 9 个新文案（`en.json` 为准，键位一致性测试强制对齐） |
+
+登录地址由产品自己的网页承载：Codepluse 只拿到账号元信息与模型列表，凭据不经过前端。
