@@ -17,23 +17,21 @@
 //! `handle` dispatch, then delete the Go handler.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use axum::{
     body::Bytes,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
+        ws::WebSocketUpgrade,
         Path, Request, State,
     },
     http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
     response::{IntoResponse, Response},
-    routing::{any, get, post},
-    Json, Router,
+    routing::{any, get},
+    Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
 
 pub mod acp;
 pub mod turn_store;
@@ -50,6 +48,8 @@ pub mod goformat;
 pub mod net;
 pub mod provider_catalog;
 pub mod providers;
+pub mod provider_writeback;
+pub mod mcp_companion;
 pub mod office;
 pub mod automations;
 pub mod custom_agents;
@@ -64,33 +64,26 @@ pub mod browser;
 pub mod computer;
 pub mod worktask;
 pub mod worktask_engine;
+pub mod events_ws;
+pub mod webapp;
 
 pub struct Config {
     /// Port the webview connects to (this server).
     pub listen_port: u16,
     /// Port the Go sidecar listens on.
-    pub upstream_port: u16,
+    /// Port of the Go sidecar — `None` once the sidecar is gone (Phase 4).
+    pub upstream_port: Option<u16>,
     /// Workspace root, shared with the sidecar (`.data/` lives here).
     pub root: PathBuf,
 }
 
 struct ProxyState {
     client: reqwest::Client,
-    upstream_http: String,
-    upstream_ws: String,
+    /// The sidecar's address, if one is still around.
+    upstream_http: Option<String>,
     root: PathBuf,
-    /// The sidecar's port — the codeg-mcp companion endpoint lives here.
-    upstream_port: u16,
-    /// Sinks for frames this server synthesises. Ported commands that used to
-    /// call Go's `emit` hand their events here (`emit_events`), and the relay
-    /// forwards them into the client socket next to the upstream frames.
-    sinks: Mutex<SinkBook>,
-}
-
-#[derive(Default)]
-struct SinkBook {
-    next_id: u64,
-    list: Vec<(u64, mpsc::UnboundedSender<Message>)>,
+    /// The port this server listens on — the guard compares it with `Origin`.
+    listen_port: u16,
 }
 
 /// Sends one frame to every connected WebSocket client. Closed sinks are
@@ -99,16 +92,9 @@ struct SinkBook {
 /// it stays connected for. The payload is canonicalised the way Go's
 /// `json.Marshal` renders the same row (sorted keys, whole floats collapsed),
 /// so the frame bytes match the sidecar's too.
-fn emit_events(state: &ProxyState, events: &[(String, Value)]) {
-    if events.is_empty() {
-        return;
-    }
-    let mut book = state.sinks.lock().unwrap();
+fn emit_events(_state: &ProxyState, events: &[(String, Value)]) {
     for (channel, payload) in events {
-        let frame = Message::text(
-            json!({"channel": channel, "payload": goformat::canon(payload)}).to_string(),
-        );
-        book.list.retain(|(_, sink)| sink.send(frame.clone()).is_ok());
+        events_ws::broadcast(channel, goformat::canon(payload));
     }
 }
 
@@ -139,7 +125,12 @@ async fn forward_commands(state: &ProxyState, forwards: &[(String, Value)]) {
             continue;
         }
         let client = state.client.clone();
-        let url = format!("{}/api/{command}", state.upstream_http);
+        let base = match state.upstream_http.as_deref() {
+            Some(base) => base,
+            // No sidecar: the command must be owned by Rust.
+            None => continue,
+        };
+        let url = format!("{base}/api/{command}");
         let body = serde_json::to_vec(args).unwrap_or_default();
         let request = async {
             let _ = client
@@ -157,18 +148,19 @@ async fn forward_commands(state: &ProxyState, forwards: &[(String, Value)]) {
 pub async fn serve(cfg: Config) -> std::io::Result<()> {
     // The work task engine still lives in the sidecar; its handlers learn the
     // upstream address here so Rust-owned commands can hand work back to it.
-    worktask::set_upstream(format!("http://127.0.0.1:{}", cfg.upstream_port));
+    let upstream_http = cfg.upstream_port.map(|port| format!("http://127.0.0.1:{port}"));
+    if let Some(base) = upstream_http.clone() {
+        worktask::set_upstream(base);
+    }
     worktask::set_board_root(cfg.root.clone());
     let state = Arc::new(ProxyState {
         client: reqwest::Client::builder()
             .no_proxy()
             .build()
             .map_err(std::io::Error::other)?,
-        upstream_http: format!("http://127.0.0.1:{}", cfg.upstream_port),
-        upstream_ws: format!("ws://127.0.0.1:{}/ws/events", cfg.upstream_port),
+        upstream_http,
         root: cfg.root.clone(),
-        upstream_port: cfg.upstream_port,
-        sinks: Mutex::new(SinkBook::default()),
+        listen_port: cfg.listen_port,
     });
 
     // 事件出口 + 定时任务调度器（30 秒一轮，等价 Go 的 TickAutomations）。
@@ -180,7 +172,7 @@ pub async fn serve(cfg: Config) -> std::io::Result<()> {
     let layer_state = Arc::clone(&state);
     acp::commands::init_shared_layer(
         cfg.root.clone(),
-        cfg.upstream_port,
+        format!("http://127.0.0.1:{}", cfg.listen_port),
         Arc::new(move |channel: &str, payload: &Value| {
             emit_events(&layer_state, &[(channel.to_string(), payload.clone())]);
         }),
@@ -197,48 +189,163 @@ pub async fn serve(cfg: Config) -> std::io::Result<()> {
 
     let app = Router::new()
         .route("/api/health", get(health))
-        .route("/api/{command}", post(api_dispatch))
-        .route("/ws", get(ws_proxy))
-        .route("/ws/events", get(ws_proxy))
-        .fallback(any(forward))
-        .with_state(state);
+        .route("/api/upload_attachment", any(upload_attachment))
+        .route("/api/codeg_mcp", any(companion))
+        .route("/api/{command}", any(api_dispatch))
+        .route("/ws", get(ws_events))
+        .route("/ws/events", get(ws_events))
+        .fallback(any(static_or_dev))
+        .with_state(state.clone())
+        .layer(axum::middleware::from_fn_with_state(state, guard_layer));
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", cfg.listen_port)).await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
 
-/// Health is proxied rather than synthesised: the UI and the sidecar's own
-/// probes read fields from it (`codeg_version`, `data`, …), and a hand-built
-/// body drifts the moment the Go side adds one. The only marker this layer
-/// adds is a response header, so the body stays byte-identical to Go's.
-async fn health(State(st): State<Arc<ProxyState>>) -> Response {
-    match st
-        .client
-        .get(format!("{}/api/health", st.upstream_http))
-        .send()
-        .await
-    {
+/// Health is answered locally (Phase 3): the sidecar is gone, and the row Go
+/// used to synthesise is reproduced verbatim in `webapp::health`.
+async fn health() -> Response {
+    webapp::health()
+}
+
+/// Go `attachments.go` `uploadAttachment` — the multipart body is read here
+/// so the 20MB + 1MB cap matches Go's `MaxBytesReader`.
+async fn upload_attachment(State(st): State<Arc<ProxyState>>, req: Request) -> Response {
+    let (parts, body) = req.into_parts();
+    let body = match axum::body::to_bytes(body, webapp::MAX_ATTACHMENT_REQUEST + 1024).await {
+        Ok(bytes) => bytes,
+        Err(err) => return fail(format!("读取请求体失败：{err}")),
+    };
+    webapp::upload_attachment(&st.root, &parts.method, &parts.headers, &body)
+}
+
+/// Go `delegation.go` `companionRequest`: the MCP companion endpoint. The
+/// caller token must match one of the live ACP callers; the tool call itself
+/// is dispatched by `mcp_companion::dispatch`.
+async fn companion(
+    State(st): State<Arc<ProxyState>>,
+    req: Request,
+) -> Response {
+    let (parts, body) = req.into_parts();
+    // Go answers a non-POST companion request with 405 before the token check.
+    if parts.method != Method::POST {
+        return webapp::companion_method_not_allowed();
+    }
+    let body = match axum::body::to_bytes(body, 256 << 10).await {
+        Ok(bytes) => bytes,
+        Err(err) => return fail(format!("读取请求体失败：{err}")),
+    };
+    let token = parts
+        .headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim_start_matches("Bearer ").to_string())
+        .unwrap_or_default();
+    let Some(layer) = acp::commands::layer_if_ready() else {
+        return webapp::companion_unauthorized();
+    };
+    let Some(caller) = layer.caller_for_token(&token) else {
+        return webapp::companion_unauthorized();
+    };
+    let request: Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(err) => return webapp::companion_bad_request(&err.to_string()),
+    };
+    let name = request
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let arguments = request.get("arguments").cloned().unwrap_or(json!({}));
+    let root = st.root.clone();
+    match mcp_companion::dispatch(&root, Some(&layer), Some(&caller), &name, &arguments).await {
+        Ok(value) => webapp::companion_ok(&value),
+        Err(message) => webapp::companion_bad_request(&message),
+    }
+}
+
+/// Static assets (or the `next dev` proxy when one is configured).
+async fn static_or_dev(State(st): State<Arc<ProxyState>>, req: Request) -> Response {
+    let (parts, body) = req.into_parts();
+    let body = match axum::body::to_bytes(body, 128 << 20).await {
+        Ok(bytes) => bytes,
+        Err(err) => return fail(format!("读取请求体失败：{err}")),
+    };
+    if let Some(target) = webapp::dev_frontend() {
+        return dev_proxy(&st, &target, parts.method, &parts.uri, &parts.headers, body).await;
+    }
+    let path = parts.uri.path().to_string();
+    webapp::static_asset(&st.root, &path, &parts.headers)
+}
+
+/// Go's dev proxy: non-API traffic goes to the `next dev` server so the
+/// running WebView keeps its hot reload. Unreachable target → 502.
+async fn dev_proxy(
+    st: &ProxyState,
+    target: &str,
+    method: Method,
+    uri: &axum::http::Uri,
+    headers: &HeaderMap,
+    body: Bytes,
+) -> Response {
+    let path = uri.path_and_query().map(|value| value.as_str()).unwrap_or("/");
+    let url = format!("{}{}", target.trim_end_matches('/'), path);
+    let mut outgoing = HeaderMap::new();
+    webapp::copy_headers(headers, &mut outgoing);
+    outgoing.remove(header::HOST);
+    outgoing.remove(header::ORIGIN);
+    outgoing.remove(header::CONTENT_LENGTH);
+    let mut builder = st.client.request(method, &url);
+    for (name, value) in outgoing.iter() {
+        builder = builder.header(name, value);
+    }
+    if !body.is_empty() {
+        builder = builder.body(body);
+    }
+    match builder.send().await {
         Ok(upstream) => {
             let status = upstream.status();
+            let upstream_headers = upstream.headers().clone();
             let body = upstream.bytes().await.unwrap_or_default();
             let mut response = Response::new(axum::body::Body::from(body));
             *response.status_mut() = status;
-            response.headers_mut().insert(
-                header::CONTENT_TYPE,
-                HeaderValue::from_static("application/json"),
-            );
-            response
-                .headers_mut()
-                .insert("x-codepluse-proxy", HeaderValue::from_static("rust"));
+            for (name, value) in upstream_headers.iter() {
+                if name == header::TRANSFER_ENCODING || name == header::CONNECTION {
+                    continue;
+                }
+                if let (Ok(name), Ok(value)) = (
+                    HeaderName::from_bytes(name.as_str().as_bytes()),
+                    HeaderValue::from_bytes(value.as_bytes()),
+                ) {
+                    response.headers_mut().append(name, value);
+                }
+            }
             response
         }
-        Err(err) => (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({ "ok": false, "error": err.to_string() })),
-        )
-            .into_response(),
+        Err(err) => webapp::dev_unavailable(target, &err.to_string()),
     }
+}
+
+/// Go `guard.go` `checkLocalRequest`: a browser page on any origin must not
+/// be able to drive the terminal, git and file-system commands.
+async fn guard_layer(
+    State(st): State<Arc<ProxyState>>,
+    req: Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let host = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    if let Err(reason) = webapp::guard(req.headers(), &host, st.listen_port, &method, &path) {
+        return webapp::denied(reason);
+    }
+    next.run(req).await
 }
 
 /// Command entry point. Rust answers what it owns; the rest goes upstream.
@@ -248,7 +355,14 @@ async fn api_dispatch(
     req: Request,
 ) -> Response {
     let (parts, body) = req.into_parts();
-    let body = match axum::body::to_bytes(body, 128 << 20).await {
+
+    // Go answers a non-POST command with 405 before it looks at the body.
+    if parts.method != Method::POST {
+        return webapp::error_envelope(StatusCode::METHOD_NOT_ALLOWED, "invalid_input", "Use POST");
+    }
+    // The content-type contract is enforced by the guard middleware (Go
+    // `cmd/serve/guard.go`), which sees every request.
+    let body = match axum::body::to_bytes(body, webapp::MAX_COMMAND_BODY + 1024).await {
         Ok(bytes) => bytes,
         Err(err) => return fail(format!("读取请求体失败：{err}")),
     };
@@ -256,7 +370,7 @@ async fn api_dispatch(
     // Go caps POST bodies at 2MB (MaxBytesReader) and answers with its
     // invalid_input envelope; mirrored here so owned commands enforce the
     // same contract (forwarded ones hit the sidecar's own cap regardless).
-    if body.len() > 2 << 20 {
+    if body.len() > webapp::MAX_COMMAND_BODY {
         let mut response = go_json(json!({
             "code": "invalid_input",
             "message": "http: request body too large",
@@ -268,19 +382,30 @@ async fn api_dispatch(
     let args: Value = if body.is_empty() {
         json!({})
     } else {
-        serde_json::from_slice(&body).unwrap_or_else(|_| json!({}))
+        match serde_json::from_slice(&body) {
+            Ok(value) => value,
+            Err(err) => {
+                let mut response = go_json(json!({
+                    "code": "invalid_input",
+                    "message": go_decode_message(&err),
+                }));
+                *response.status_mut() = StatusCode::BAD_REQUEST;
+                return response;
+            }
+        }
     };
 
     // The ACP layer is stateful (driver pool, connections): dispatch is async
     // and owns its dispatch table. `turn_in_progress` maps to Go's 409.
     if acp::owns(&command) {
         let root = st.root.clone();
-        let upstream_port = st.upstream_port;
+        let upstream_port = st.upstream_http.as_deref().and_then(|base| base.rsplit(':').next().and_then(|port| port.parse::<u16>().ok())).unwrap_or_default();
         let state_for_sink = st.clone();
         let sink: acp::connections::EmitSink = Arc::new(move |channel, payload| {
             emit_events(&state_for_sink, &[(channel.to_string(), payload.clone())]);
         });
-        return match acp::commands::dispatch(root, upstream_port, sink, &command, &args).await {
+        let base_url = format!("http://127.0.0.1:{}", st.listen_port);
+        return match acp::commands::dispatch(root, base_url, sink, &command, &args).await {
             Ok(value) => go_json(value),
             Err(message) if message == "turn_in_progress" => {
                 let mut response = go_json(json!({
@@ -294,14 +419,23 @@ async fn api_dispatch(
         };
     }
     if let Some(outcome) = providers::handle(&st.root, &command, &args) {
+        // Go returns structs here (`[]Info` / `Info`), whose field order is
+        // part of the wire shape; `update_model_provider` returns a Row (a
+        // map), whose keys Go sorts.
+        let shape = if command == "update_model_provider" {
+            go_json
+        } else {
+            go_json_struct
+        };
         return match outcome {
-            Ok(value) => go_json(value),
+            Ok(value) => shape(value),
             Err(message) => fail(message),
         };
     }
     if let Some(outcome) = exec_providers::handle(&st.root, &command, &args) {
+        // `codepluse_provider_save` answers with the Provider struct.
         return match outcome {
-            Ok(value) => go_json(value),
+            Ok(value) => go_json_struct(value),
             Err(message) => fail(message),
         };
     }
@@ -326,7 +460,15 @@ async fn api_dispatch(
             })
             .await;
         return match outcome {
-            Ok(Some(Ok(value))) => go_json(value),
+            Ok(Some(Ok(value))) => {
+                // `codepluse_providers_list` answers with the Data struct; the
+                // sibling commands answer with a Row (a map Go sorts).
+                if command == "codepluse_providers_list" {
+                    go_json_struct(value)
+                } else {
+                    go_json(value)
+                }
+            }
             Ok(Some(Err(message))) => fail(message),
             Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
             Err(join) => fail(format!("命令执行失败：{join}")),
@@ -643,6 +785,9 @@ fn go_json(value: Value) -> Response {
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
         .header(header::CACHE_CONTROL, "no-store")
+        // 本地应答标记：双跑据此断言「这条命令真由 Rust 接管」，否则
+        // 前门转发给 Go 也会和 Go 侧逐字节相同（假绿）。
+        .header("x-codepluse-backend", "rust")
         .body(axum::body::Body::from(body))
         .expect("静态部件构造不可能失败")
 }
@@ -688,7 +833,15 @@ async fn forward_parts(
     body: Bytes,
 ) -> Response {
     let path = uri.path_and_query().map(|p| p.as_str()).unwrap_or("/");
-    let url = format!("{}{}", st.upstream_http, path);
+    // Without a sidecar there is nothing to forward to: every command is
+    // owned by Rust, so reaching this point means an unknown command.
+    let base = match st.upstream_http.as_deref() {
+        Some(base) => base,
+        None => {
+            return fail(format!("命令未实现：{}", path.trim_start_matches("/api/")));
+        }
+    };
+    let url = format!("{base}{path}");
 
     let mut headers = headers;
     for name in [
@@ -733,100 +886,25 @@ async fn forward_parts(
     }
 }
 
-/// WebSocket passthrough. The subprotocol must be echoed back: the browser
-/// rejects an upgrade whose server did not select one of the offered protocols.
-async fn ws_proxy(
+/// The event WebSocket (Go `websocket.go`), implemented locally in
+/// `events_ws.rs`.
+async fn ws_events(
     ws: WebSocketUpgrade,
     State(st): State<Arc<ProxyState>>,
     headers: HeaderMap,
 ) -> Response {
-    let requested = headers
-        .get(header::SEC_WEBSOCKET_PROTOCOL)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(|value| value.trim().to_string());
-
-    let upgrade = match requested {
-        Some(protocol) if !protocol.is_empty() => ws.protocols([protocol]),
-        _ => ws,
-    };
-
-    upgrade.on_upgrade(move |socket| async move {
-        if let Err(err) = relay(socket, st.clone()).await {
-            eprintln!("[proxy] websocket relay ended: {err}");
-        }
-    })
+    events_ws::handle(ws, headers, st.listen_port).await
 }
 
-async fn relay(client: WebSocket, st: Arc<ProxyState>) -> Result<(), String> {
-    let (upstream, _) = tokio_tungstenite::connect_async(&st.upstream_ws)
-        .await
-        .map_err(|e| format!("连接上游失败：{e}"))?;
-    let (mut client_tx, mut client_rx) = client.split();
-    let (mut upstream_tx, mut upstream_rx) = upstream.split();
-
-    // Client-bound frames come from two places: the upstream relay and
-    // `emit_events`. The injector channel joins them into one writer loop.
-    let (inject_tx, mut inject_rx) = mpsc::unbounded_channel::<Message>();
-    let sink_id = {
-        let mut book = st.sinks.lock().unwrap();
-        book.next_id += 1;
-        let id = book.next_id;
-        book.list.push((id, inject_tx.clone()));
-        id
-    };
-    let outcome = loop {
-        tokio::select! {
-            incoming = client_rx.next() => {
-                match incoming {
-                    Some(Ok(Message::Text(text))) => {
-                        if upstream_tx.send(UpstreamMessage::Text(text.to_string())).await.is_err() { break Ok(()); }
-                    }
-                    Some(Ok(Message::Binary(bytes))) => {
-                        if upstream_tx.send(UpstreamMessage::Binary(bytes.to_vec())).await.is_err() { break Ok(()); }
-                    }
-                    Some(Ok(Message::Ping(payload))) => {
-                        let _ = upstream_tx.send(UpstreamMessage::Ping(payload.to_vec())).await;
-                    }
-                    Some(Ok(Message::Pong(payload))) => {
-                        let _ = upstream_tx.send(UpstreamMessage::Pong(payload.to_vec())).await;
-                    }
-                    Some(Ok(Message::Close(_))) | None => break Ok(()),
-                    Some(Err(err)) => break Err(err.to_string()),
-                }
-            }
-            outgoing = upstream_rx.next() => {
-                match outgoing {
-                    Some(Ok(UpstreamMessage::Text(text))) => {
-                        if client_tx.send(Message::Text(text.into())).await.is_err() { break Ok(()); }
-                    }
-                    Some(Ok(UpstreamMessage::Binary(bytes))) => {
-                        if client_tx.send(Message::Binary(Bytes::from(bytes))).await.is_err() { break Ok(()); }
-                    }
-                    Some(Ok(UpstreamMessage::Ping(payload))) => {
-                        let _ = client_tx.send(Message::Ping(Bytes::from(payload))).await;
-                    }
-                    Some(Ok(UpstreamMessage::Pong(payload))) => {
-                        let _ = client_tx.send(Message::Pong(Bytes::from(payload))).await;
-                    }
-                    Some(Ok(UpstreamMessage::Close(_))) | None => break Ok(()),
-                    // Raw frames never surface from a read stream.
-                    Some(Ok(UpstreamMessage::Frame(_))) => {}
-                    Some(Err(err)) => break Err(err.to_string()),
-                }
-            }
-            injected = inject_rx.recv() => {
-                match injected {
-                    Some(frame) => {
-                        if client_tx.send(frame).await.is_err() { break Ok(()); }
-                    }
-                    // The registry never drops a live sink; losing it means
-                    // shutdown, so end the relay instead of spinning on None.
-                    None => break Ok(()),
-                }
-            }
-        }
-    };
-    st.sinks.lock().unwrap().list.retain(|(id, _)| *id != sink_id);
-    outcome
+/// Go's JSON decoder error texts, so a malformed body answers with the same
+/// message the sidecar used to send.
+fn go_decode_message(err: &serde_json::Error) -> String {
+    let text = err.to_string();
+    if err.is_eof() {
+        return "unexpected EOF".to_string();
+    }
+    if let Some(rest) = text.split(" at line ").next() {
+        return rest.to_string();
+    }
+    text
 }

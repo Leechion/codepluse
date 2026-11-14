@@ -183,8 +183,7 @@ spawnServer(GO_EXE, goRoot, {
 }, 'go');
 spawnServer(RUST_EXE, rustRoot, {
   HARNESS_HUB_ALLOW_ANY_PATH: '1', HARNESS_HUB_WARM: '0',
-  CODEPLUSE_PROXY_ONLY: '1', CODEPLUSE_PORT: String(GO_PORT),
-  CODEPLUSE_PROXY_PORT: String(RUST_PORT), CODEPLUSE_ROOT: rustRoot,
+  CODEPLUSE_HEADLESS: '1', CODEPLUSE_PORT: String(RUST_PORT), CODEPLUSE_ROOT: rustRoot,
 }, 'rust');
 
 const waitHealth = async (port) => {

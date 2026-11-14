@@ -56,6 +56,8 @@ pub struct Layer {
 
 pub struct LayerState {
     pub connections: HashMap<String, Arc<Mutex<Connection>>>,
+    /// The delegation registry (Go's `s.tasks`).
+    pub delegations: HashMap<String, super::delegation::Delegation>,
     pub warm: HashMap<String, Vec<WarmEntry>>,
     pub warming: HashSet<String>,
     pub started: bool,
@@ -95,6 +97,10 @@ pub struct Connection {
     pub warm: bool,
     pub run_seq: u64,
     pub run_accepted: Option<std::time::Instant>,
+    /// The assistant text of the last finished turn, with the run it belongs
+    /// to — the delegation domain reads it to report a child task's result.
+    pub last_output: String,
+    pub output_run_seq: u64,
 }
 
 impl Connection {
@@ -123,6 +129,8 @@ impl Connection {
             warm: false,
             run_seq: 0,
             run_accepted: None,
+            last_output: String::new(),
+            output_run_seq: 0,
             id,
         }
     }
@@ -193,15 +201,18 @@ fn timeout_ms() -> i64 {
 }
 
 /// Build the layer. The dispatcher calls this once (front door startup).
-pub fn init_layer(root: PathBuf, upstream_port: u16, sink: EmitSink) -> Arc<Layer> {
+pub fn init_layer(root: PathBuf, base_url: String, sink: EmitSink) -> Arc<Layer> {
+    // The delegation registry is restored from disk so a restart keeps the
+    // tasks (Go `loadDelegationsLocked`).
     let layer = Arc::new(Layer {
         root: root.clone(),
-        upstream_base: format!("http://127.0.0.1:{upstream_port}"),
+        upstream_base: base_url,
         sink,
         runtime: OnceLock::new(),
         self_weak: OnceLock::new(),
         state: Mutex::new(LayerState {
             connections: HashMap::new(),
+            delegations: HashMap::new(),
             warm: HashMap::new(),
             warming: HashSet::new(),
             started: std::env::var("HARNESS_HUB_WARM").map(|v| v != "0").unwrap_or(true),
@@ -211,6 +222,10 @@ pub fn init_layer(root: PathBuf, upstream_port: u16, sink: EmitSink) -> Arc<Laye
         }),
     });
     let _ = layer.self_weak.set(Arc::downgrade(&layer));
+    {
+        let mut state = layer.state.lock().unwrap();
+        super::delegation::load(&root, &mut state.delegations);
+    }
     let runtime = Runtime::new(RuntimeOptions {
         state_file: state_file(&root),
         timeout_ms: timeout_ms(),
@@ -244,6 +259,19 @@ impl Layer {
     }
 
     /// The connection entry for command handlers.
+    /// The MCP companion authenticates with the caller's token.
+    pub fn caller_for_token(&self, token: &str) -> Option<Caller> {
+        if token.is_empty() {
+            return None;
+        }
+        let state = self.state.lock().unwrap();
+        state
+            .callers
+            .values()
+            .find(|caller| caller.token == token)
+            .cloned()
+    }
+
     pub fn connection(&self, cid: &str) -> Option<Arc<Mutex<Connection>>> {
         self.state.lock().unwrap().connections.get(cid).cloned()
     }
@@ -352,7 +380,7 @@ impl Layer {
 
     /// Go `s.event` (connections.go:372): connection-scoped bookkeeping plus
     /// the `acp://event` firehose frame.
-    fn event(&self, connection_id: &str, e: Value) {
+    pub(crate) fn event(&self, connection_id: &str, e: Value) {
         let mut e = e;
         let state = self.state.lock().unwrap();
         let conn = match state.connections.get(connection_id) {
@@ -1360,7 +1388,7 @@ impl Layer {
         }
     }
 
-    fn self_arc(&self) -> Arc<Layer> {
+    pub(crate) fn self_arc(&self) -> Arc<Layer> {
         self.self_weak
             .get()
             .expect("layer self reference")
@@ -1552,7 +1580,9 @@ fn native_update_by_runtime(layer: &Arc<Layer>, runtime_id: &str, u: &Value) {
 
 impl Layer {
     /// Go `prompt` (connections.go:497).
-    pub async fn prompt(&self, args: &Value) -> Result<(), String> {
+    /// Runs one turn. The assistant's output text is returned as well: the
+    /// delegation domain records it as the child task's result.
+    pub async fn prompt(&self, args: &Value) -> Result<String, String> {
         let cid = text(args.get("connectionId"));
         let conn = self
             .state
@@ -1731,7 +1761,9 @@ impl Layer {
                 .run_with_content(&conn, &agent, &prompt_text, Some(wire_content))
                 .await;
         });
-        Ok(())
+        // The turn runs in the background (Go's `go s.runWithContent`); the
+        // delegation domain waits for `last_output` instead.
+        Ok(String::new())
     }
 
     /// Go `releaseRun` (connections.go:638): clear the busy state for the run
@@ -1794,6 +1826,7 @@ impl Layer {
         let native_session = text(result.meta.get("sessionId"));
         let ok = result.ok;
         let output = result.output.clone();
+        let output_for_slot = output.clone();
         let root = self.root.clone();
         let events = tokio::task::spawn_blocking(move || {
             store_conv::completion_side_write(
@@ -1823,6 +1856,8 @@ impl Layer {
             c.status = "connected".into();
             c.live = Value::Null;
             c.pending = Value::Null;
+            c.last_output = output_for_slot.clone();
+            c.output_run_seq = my_seq;
         }
         // A cancelled/ended turn can strand a blocking ask_user_question.
         self.release_questions_for_connection(&cid).await;

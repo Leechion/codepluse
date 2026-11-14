@@ -69,7 +69,7 @@ WorkBuddy 使用桌面安装包内置的 CodeBuddy 执行内核，界面显示 W
 
 仍待迁移：本地 Git 的自定义凭据账户、自动生成提交说明、部分 worktree / 分支更新组合操作（网络操作使用系统 Git 凭据）；原生历史导入和任意消息分叉；对话输入仅支持文本；终端面向 Windows。
 
-工作台数据保存在 `.data/codeg-workspace.json`，原生 ACP 会话元数据保存在 `.data/codeg-sessions.json`，与旧工作台数据分开。委派任务及待收消息保存在 `.data/codeg-delegations.json`。后台重启后，运行中的任务标记为中断；主会话可用 `resume_delegation` 按原 task_id 在原子对话与原生会话中继续。重复委派同一执行端的未完成任务会优先恢复，明确创建不同任务时使用 `new_task: true`。
+工作台数据保存在 `.data/codeg-workspace.json`（文件夹、会话元数据、标签页、画布、设置），对话历史保存在 `.data/codeg.db`（SQLite，增量写入）。首次启动会从旧 `codeg-workspace.json` 的 `turns` 字段迁移历史到 SQLite，迁移前备份为 `.data/codeg-workspace.json.bak-<时间>`，之后 JSON 不再包含历史。原生 ACP 会话元数据保存在 `.data/codeg-sessions.json`，与旧工作台数据分开。委派任务及待收消息保存在 `.data/codeg-delegations.json`。后台重启后，运行中的任务标记为中断；主会话可用 `resume_delegation` 按原 task_id 在原子对话与原生会话中继续。重复委派同一执行端的未完成任务会优先恢复，明确创建不同任务时使用 `new_task: true`。
 
 ## 验证
 

@@ -938,43 +938,45 @@ fn mask_secret(value: &str) -> String {
 }
 
 /// Public 响应里的供应商行（Go Provider 结构体序，omitempty 生效）。
-fn provider_public_json(provider: &Provider) -> Value {
-    let mut models = Vec::new();
-    for model in &provider.models {
-        let mut row = json!({ "id": model.id });
-        if !model.name.is_empty() {
-            row["name"] = json!(model.name);
-        }
-        if model.enabled.is_some() {
-            row["enabled"] = json!(model.enabled);
-        }
-        models.push(row);
-    }
-    let mut row = json!({
-        "id": provider.id,
-        "name": provider.name,
-        "agent": provider.agent,
-        "url": provider.url,
-        "model": provider.model,
-        "hasKey": provider.has_key,
-        "api": provider.api,
-    });
+pub(crate) fn provider_public_json(provider: &Provider) -> Value {
+    // Go's `Provider` struct field order — the JSON key order is part of the
+    // wire contract the dual-run compares byte for byte.
+    let mut row = Map::new();
+    row.insert("id".into(), json!(provider.id));
+    row.insert("name".into(), json!(provider.name));
+    row.insert("agent".into(), json!(provider.agent));
+    row.insert("url".into(), json!(provider.url));
+    row.insert("model".into(), json!(provider.model));
+    row.insert("hasKey".into(), json!(provider.has_key));
     if !provider.source.is_empty() {
-        row["source"] = json!(provider.source);
+        row.insert("source".into(), json!(provider.source));
     }
     if provider.cc_current {
-        row["ccCurrent"] = json!(true);
+        row.insert("ccCurrent".into(), json!(true));
     }
-    if !models.is_empty() {
-        row["models"] = json!(models);
+    if !provider.models.is_empty() {
+        let mut models = Vec::new();
+        for model in &provider.models {
+            let mut item = Map::new();
+            item.insert("id".into(), json!(model.id));
+            if !model.name.is_empty() {
+                item.insert("name".into(), json!(model.name));
+            }
+            if model.enabled.is_some() {
+                item.insert("enabled".into(), json!(model.enabled));
+            }
+            models.push(Value::Object(item));
+        }
+        row.insert("models".into(), Value::Array(models));
     }
     if !provider.protocol.is_empty() {
-        row["protocol"] = json!(provider.protocol);
+        row.insert("protocol".into(), json!(provider.protocol));
     }
+    row.insert("api".into(), json!(provider.api));
     if provider.enabled.is_some() {
-        row["enabled"] = json!(provider.enabled);
+        row.insert("enabled".into(), json!(provider.enabled));
     }
-    row
+    Value::Object(row)
 }
 
 // ── 模型目录（providermodels.go）────────────────────────────────────────────
@@ -1223,7 +1225,7 @@ fn blocked_fetch_ip(ip: &std::net::IpAddr) -> bool {
     }
 }
 
-fn host_is_safe(host: &str) -> Result<(), String> {
+pub(crate) fn host_is_safe(host: &str) -> Result<(), String> {
     use std::net::ToSocketAddrs;
     if host.eq_ignore_ascii_case("localhost") {
         return Err(format!("目标地址不允许访问：{host}"));

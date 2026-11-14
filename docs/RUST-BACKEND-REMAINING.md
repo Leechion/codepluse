@@ -68,6 +68,58 @@ Go 现行是 SQLite —— 本批把写路径切到 `codeg.db`，并实现旧文
 4. 任务定时器间隔 15s（Go 在 server 主循环里跑）；`TickWorkTasks` 的 Go 版本保留但
    不再被调用（避免双调度）——**收尾时需删除 wiring 里的调用**（已删）。
 
+
+## 复核补记（2026-11-13 22:40）—— 命令面 0 缺口，但有三处功能缺口
+
+复核方式：`node scripts/inventory-commands.mjs` 的 `RUST` 集合已按
+`src-tauri/src/backend/` 的**分派面**重建（命令必须出现在某个模块 `owns()` 的
+`matches!` 块、`match command` 块，或 `command == "…"` 比较式中）。结果：
+**366 / 366，剩余 0**。三个工作区逐一比对（main、worktree `acp-port-c`、
+worktree `641b`）——后两个是更早的快照（分别少 138 / 45 条），**没有 main
+之外尚未集成的实现**，不需要再合并。
+
+但「命令在 Rust 里」不等于「功能完整」。下列三处是删除 Go sidecar 前必须补的：
+
+### 1. 外部 provider 写回 —— ❌ 唯一一条会落到 Go 转发的命令分支
+
+`exec_providers.rs:314`：遇到外部 id（`native:` / `ccswitch:` / `store:`）直接
+`return None` → 落回上游转发。Go 侧实现是 `internal/providers/writeback.go`(321)
++ `ccswitch.go`(104)，写回目标：
+
+| id 前缀 | 写回位置 |
+|---|---|
+| `ccswitch:` | CC Switch 的 SQLite（`~/.cc-switch/cc-switch.db`） |
+| `native:codex:` | `~/.codex/config.toml` |
+| `native:dsh:` | DSH 的 YAML 配置 |
+| `store:` | `.data/model-providers.json`（`modelproviders.Update`） |
+
+删 Go 后「保存外部 provider」必然失败。
+
+### 2. companion MCP（`mcp-codeg`）—— ❌ 未移植，但 Rust **仍在广告它**
+
+`internal/mcpserver/`(457) + `cmd/serve/wiring.go:504` 的 `mcp-codeg` stdio 模式
+没有移植，Rust 二进制里没有这个子命令。而
+`acp/connections.rs:611` 仍向 agent 广告：
+
+```json
+{"name":"codeg-mcp","command":"<exe>","args":["mcp-codeg","<base>/api/codeg_mcp","<token>"]}
+```
+
+sidecar 移除后：`command` 指向不存在的子命令，`base` 又来自 sidecar 端口
+（`Layer::upstream_base`）。**工具一被调用就失败**——要么移植
+`internal/mcpserver` 并给 Rust 加 `mcp-codeg` 模式，要么停止广告。
+
+### 3. 协作域 delegation —— ❌ 未移植（已知偏差，但同样属于「删 Go 前」）
+
+`internal/codeg/delegation.go`(602) + `delegation_profiles.go`(98) +
+`delegation_recovery.go`(195)。Rust 侧 `acp_respond_task_split` 的 approve 直接
+返回「协作派发尚未移植：拆分提案已撤销……」（`acp/connections.rs:349`）。
+
+### 4. 删 Go 之前的历史保全
+
+`server-go/` 在 main 与 worktree `641b` 里都有 **75–84 个未提交的改动文件**，
+从未进过任何 commit —— 删目录即不可追溯，先 commit（建议 tag `go-sidecar-final`）。
+
 ## 建议顺序
 
 1. ~~验收本批 24 条（`office` + `experts`），跑双跑。~~ ✅ 批次 5

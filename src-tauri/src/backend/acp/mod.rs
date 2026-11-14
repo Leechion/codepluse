@@ -21,6 +21,7 @@
 pub mod agents;
 pub mod commands;
 pub mod connections;
+pub mod delegation;
 pub mod custom_install;
 pub mod launch;
 pub mod providers_core;

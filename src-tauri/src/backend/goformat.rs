@@ -150,6 +150,98 @@ pub fn marshal_store(doc: &Value) -> Vec<u8> {
     marshal_preserve(&Value::Object(out))
 }
 
+/// Go's `json.MarshalIndent(value, "", "  ")`: two-space indent, HTML escaping
+/// and map keys sorted (Go marshals `map[string]any`, whose keys it sorts).
+/// `serde_json`'s pretty printer escapes neither `<`/`>`/`&` nor sorts map keys
+/// the same way, so the shape is produced here.
+pub fn marshal_pretty(value: &Value) -> Vec<u8> {
+    let mut out = Vec::new();
+    write_pretty(value, 0, &mut out);
+    out
+}
+
+fn write_pretty(value: &Value, depth: usize, out: &mut Vec<u8>) {
+    match value {
+        Value::Null => out.extend_from_slice(b"null"),
+        Value::Bool(flag) => {
+            out.extend_from_slice(if *flag { b"true" } else { b"false" });
+        }
+        Value::Number(number) => out.extend_from_slice(number.to_string().as_bytes()),
+        Value::String(text) => write_pretty_string(text, out),
+        Value::Array(items) => {
+            if items.is_empty() {
+                out.extend_from_slice(b"[]");
+                return;
+            }
+            out.extend_from_slice(b"[\n");
+            for (index, item) in items.iter().enumerate() {
+                pretty_indent(depth + 1, out);
+                write_pretty(item, depth + 1, out);
+                if index + 1 < items.len() {
+                    out.push(b',');
+                }
+                out.push(b'\n');
+            }
+            pretty_indent(depth, out);
+            out.push(b']');
+        }
+        Value::Object(map) => {
+            if map.is_empty() {
+                out.extend_from_slice(b"{}");
+                return;
+            }
+            out.extend_from_slice(b"{\n");
+            let count = map.len();
+            for (index, (key, item)) in map.iter().enumerate() {
+                pretty_indent(depth + 1, out);
+                write_pretty_string(key, out);
+                out.extend_from_slice(b": ");
+                write_pretty(item, depth + 1, out);
+                if index + 1 < count {
+                    out.push(b',');
+                }
+                out.push(b'\n');
+            }
+            pretty_indent(depth, out);
+            out.push(b'}');
+        }
+    }
+}
+
+fn pretty_indent(depth: usize, out: &mut Vec<u8>) {
+    for _ in 0..depth {
+        out.extend_from_slice(b"  ");
+    }
+}
+
+/// Go's string escaping (HTML mode on): the JSON specials plus `<`, `>`, `&`,
+/// U+2028/U+2029 and the remaining control characters.
+fn write_pretty_string(text: &str, out: &mut Vec<u8>) {
+    out.push(b'"');
+    for ch in text.chars() {
+        match ch {
+            '"' => out.extend_from_slice(b"\\\""),
+            '\\' => out.extend_from_slice(b"\\\\"),
+            '\n' => out.extend_from_slice(b"\\n"),
+            '\r' => out.extend_from_slice(b"\\r"),
+            '\t' => out.extend_from_slice(b"\\t"),
+            '<' => out.extend_from_slice(b"\\u003c"),
+            '>' => out.extend_from_slice(b"\\u003e"),
+            '&' => out.extend_from_slice(b"\\u0026"),
+            '\u{2028}' => out.extend_from_slice(b"\\u2028"),
+            '\u{2029}' => out.extend_from_slice(b"\\u2029"),
+            control if (control as u32) < 0x20 => {
+                out.extend_from_slice(format!("\\u{:04x}", control as u32).as_bytes());
+            }
+            other => {
+                let mut buffer = [0u8; 4];
+                out.extend_from_slice(other.encode_utf8(&mut buffer).as_bytes());
+            }
+        }
+    }
+    out.push(b'"');
+}
+
 /// Recursively sorts object keys and collapses whole floats, mirroring what Go
 /// does when it unmarshals into `any` and marshals back.
 pub fn canon(value: &Value) -> Value {

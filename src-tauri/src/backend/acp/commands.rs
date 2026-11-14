@@ -51,6 +51,7 @@ pub fn owns(command: &str) -> bool {
             | "acp_prepare_npx_agent"
             | "acp_uninstall_agent"
             | "acp_clear_binary_cache"
+            | "acp_download_agent_binary"
     )
 }
 
@@ -64,10 +65,10 @@ pub fn layer_if_ready() -> Option<Arc<Layer>> {
 
 /// 启动期就把连接层建起来：工作任务的执行引擎（收尾批）要在请求路径之外
 /// 直接调 connect/prompt/cancel，不能等某个 acp 命令先把层建出来。
-pub fn init_shared_layer(root: PathBuf, upstream_port: u16, sink: EmitSink) {
+pub fn init_shared_layer(root: PathBuf, base_url: String, sink: EmitSink) {
     let _ = LAYER.set(crate::backend::acp::connections::init_layer(
         root,
-        upstream_port,
+        base_url,
         sink,
     ));
 }
@@ -76,12 +77,12 @@ pub fn init_shared_layer(root: PathBuf, upstream_port: u16, sink: EmitSink) {
 /// door's relay; the layer is built once per process.
 pub async fn dispatch(
     root: PathBuf,
-    upstream_port: u16,
+    base_url: String,
     sink: EmitSink,
     command: &str,
     args: &Value,
 ) -> Result<Value, String> {
-    let layer = LAYER.get_or_init(|| crate::backend::acp::connections::init_layer(root, upstream_port, sink));
+    let layer = LAYER.get_or_init(|| crate::backend::acp::connections::init_layer(root, base_url, sink));
     match command {
         "acp_connect" => Ok(json!(layer.connect(args).await?)),
         "acp_disconnect" => {
@@ -213,9 +214,10 @@ pub async fn dispatch(
             let live = update_agent_settings(&layer.root, &layer, args, false)?;
             Ok(json!(live))
         }
-        "acp_prepare_npx_agent" | "acp_uninstall_agent" | "acp_clear_binary_cache" => {
-            custom_install_command(&layer, command, args).await
-        }
+        "acp_prepare_npx_agent"
+        | "acp_uninstall_agent"
+        | "acp_clear_binary_cache"
+        | "acp_download_agent_binary" => custom_install_command(&layer, command, args).await,
         _ => Err(format!("Go 移植尚未实现此接口：{command}")),
     }
 }
@@ -604,8 +606,11 @@ async fn custom_install_command(
             if !text(args.get("version")).is_empty() && text(args.get("version")) != d.version {
                 return Err("自定义智能体的版本由发行版 spec 固定，请先编辑配置中的包版本或下载地址".into());
             }
-            let clean = command != "acp_prepare_npx_agent"
-                || args.get("cleanFirst").and_then(Value::as_bool).unwrap_or(false);
+            // Go: `command == uninstall || command == clear_binary_cache || a["cleanFirst"] == true`
+            // ——下载链路只在显式 cleanFirst 时清缓存。
+            let clean = command != "acp_download_agent_binary"
+                && (command == "acp_prepare_npx_agent"
+                    || args.get("cleanFirst").and_then(Value::as_bool).unwrap_or(false));
             if command == "acp_uninstall_agent" || command == "acp_clear_binary_cache" || clean {
                 // disconnect the agent's connections first; a busy one blocks
                 let mut cids: Vec<String> = Vec::new();
