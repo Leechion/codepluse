@@ -6,14 +6,12 @@
  *
  *   * "General" — feature kill switch + chain depth limit. Persisted as
  *     `delegation.enabled` / `delegation.depth_limit` in the Go settings store.
- *   * "Sub-agent config" (子智能体配置) — the main agent's default harness +
- *     model and the named harness instances (执行端实例), each pinned to its own
- *     provider/model. This hosts the relocated `HarnessInstanceSection`; the
- *     per-agent `delegation.agent_defaults` blob it used to edit is now carried
- *     through untouched on save, since the instances cover per-sub-agent staffing.
- *   * "Sub-agent config" — named harness instances and the user's assistants.
- *     These are presented together in the assistants UI; every change is
- *     written at once, so the section's save bar does not apply to them.
+ *   * "Main agent config" — the default harness + model used by new
+ *     conversations.
+ *   * "Sub-agent config" — the user's assistant presets are the sub-agents.
+ *     Each preset holds its agent, selected options, and standing instructions,
+ *     so this tab uses the sub-agent list as its only editor. The legacy
+ *     `delegation.agent_defaults` data is preserved when saving general settings.
  *
  * Cancellation is handled out-of-band via MCP `notifications/cancelled`
  * forwarded from the parent agent CLI; there is no broker-side timeout to
@@ -376,16 +374,12 @@ export function DelegationSettingsSection() {
         </TabsContent>
 
         <TabsContent value="agentDefaults" className="pt-2">
-          <div className="space-y-4">
-            <AssistantsPanel
-              delegationEnabled={persisted ? persisted.enabled : null}
-              unsavedTabs={unsavedTabs}
-              onShowUnsaved={() => setTab("general")}
-              onShowGeneral={() => setTab("general")}
-            />
-            {/* 具名执行端实例和助手共享“子智能体配置”页。 */}
-            <HarnessInstanceSection mode="instances" />
-          </div>
+          <AssistantsPanel
+            delegationEnabled={persisted ? persisted.enabled : null}
+            unsavedTabs={unsavedTabs}
+            onShowUnsaved={() => setTab("general")}
+            onShowGeneral={() => setTab("general")}
+          />
         </TabsContent>
       </Tabs>
 
