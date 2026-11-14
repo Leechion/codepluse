@@ -23,7 +23,6 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/codepluse-backend"],
     "resources": ["resources/workspace.json"],
     "windows": {
       "nsis": {
