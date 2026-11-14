@@ -47,6 +47,7 @@ pub fn owns(command: &str) -> bool {
             | "acp_update_agent_config"
             | "acp_update_agent_env"
             | "acp_answer_question"
+            | "submit_session_feedback"
             | "acp_prepare_npx_agent"
             | "acp_uninstall_agent"
             | "acp_clear_binary_cache"
@@ -54,6 +55,22 @@ pub fn owns(command: &str) -> bool {
 }
 
 static LAYER: OnceLock<Arc<Layer>> = OnceLock::new();
+
+/// 已建好的连接层（未被任何 acp 命令触发过时为空）——收尾批的
+/// mcp 状态与连接退役在请求路径之外复用同一层。
+pub fn layer_if_ready() -> Option<Arc<Layer>> {
+    LAYER.get().cloned()
+}
+
+/// 启动期就把连接层建起来：工作任务的执行引擎（收尾批）要在请求路径之外
+/// 直接调 connect/prompt/cancel，不能等某个 acp 命令先把层建出来。
+pub fn init_shared_layer(root: PathBuf, upstream_port: u16, sink: EmitSink) {
+    let _ = LAYER.set(crate::backend::acp::connections::init_layer(
+        root,
+        upstream_port,
+        sink,
+    ));
+}
 
 /// Dispatch one group-C command. `sink` forwards WS frames into the front
 /// door's relay; the layer is built once per process.
@@ -109,6 +126,7 @@ pub async fn dispatch(
                 .respond_permission(&text(args.get("requestId")), Some(&choice))?;
             Ok(Value::Null)
         }
+        "submit_session_feedback" => Ok(layer.submit_feedback(args).await?),
         "acp_answer_question" => {
             layer.answer_question(args);
             Ok(Value::Null)

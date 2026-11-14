@@ -60,7 +60,8 @@ pub(crate) struct PModel {
 }
 
 /// providers.go `IsAPI`.
-fn is_api(p: &Provider) -> bool {
+/// Go providers.IsAPI（供实例/连接校验复用）。
+pub(crate) fn is_api(p: &Provider) -> bool {
     let Some(parts) = parse_url(&p.url) else {
         return false;
     };
@@ -209,7 +210,7 @@ impl ApiProviderStored {
     }
 }
 
-fn api_providers_path(root: &Path) -> PathBuf {
+pub(crate) fn api_providers_path(root: &Path) -> PathBuf {
     root.join(".data").join("api-providers.json")
 }
 
@@ -819,7 +820,7 @@ fn find_raw(root: &Path, id: &str) -> Result<Provider, String> {
 
 /// providers.go `Public`: executors + CC Switch + saved stores + native
 /// (non-claude), with UI metadata applied and every secret stripped.
-fn public(root: &Path) -> Result<Value, String> {
+pub(crate) fn public(root: &Path) -> Result<Value, String> {
     let api_data = read_api(root)?;
     let mut providers: Vec<Provider> = api_data
         .providers

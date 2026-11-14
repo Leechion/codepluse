@@ -44,6 +44,10 @@ pub fn owns(command: &str) -> bool {
             | "science_apply_links"
             | "acp_list_agent_skills"
             | "acp_list_agent_runtime_skills"
+            | "experts_list_all_install_statuses"
+            | "science_list_all_install_statuses"
+            | "experts_get_install_status"
+            | "science_get_install_status"
     )
 }
 
@@ -355,10 +359,40 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
 /// linking writes into `%USERPROFILE%\.claude\skills`, which a test must never
 /// touch for real.
 fn run_with_home(home: &Path, root: &Path, command: &str, args: &Value) -> Result<Value, String> {
+    let group = group_of(command);
     if command == "acp_list_agent_runtime_skills" || command == "acp_list_agent_skills" {
         return list_agent_skills(home, root, args);
     }
-    let group = group_of(command);
+    // 安装状态（skills.go:236-262）：每个技能 × 每个已注册执行端一行。
+    if command.ends_with("_list_all_install_statuses") {
+        let list = bundled_skills(root, group)?;
+        let agents = crate::backend::acp::commands::agents_rows(root);
+        let mut out = Vec::new();
+        for item in &list {
+            let name = item["metadata"]["id"].as_str().unwrap_or("");
+            let central = item["central_path"].as_str().unwrap_or("");
+            for agent in &agents {
+                let agent_type = agent["agent_type"].as_str().unwrap_or("");
+                out.push(skill_status(home, name, agent_type, central));
+            }
+        }
+        return Ok(Value::Array(out));
+    }
+    if command.ends_with("_get_install_status") {
+        let mut name = text(args, "expertId");
+        if name.is_empty() {
+            name = text(args, "skillId");
+        }
+        let agent_type = text(args, "agentType");
+        let list = bundled_skills(root, group)?;
+        for item in &list {
+            if item["metadata"]["id"].as_str() == Some(name.as_str()) {
+                let central = item["central_path"].as_str().unwrap_or("");
+                return Ok(skill_status(home, &name, &agent_type, central));
+            }
+        }
+        return Err(format!("技能不存在：{name}"));
+    }
     match command {
         "experts_list" | "science_list" => {
             let list = bundled_skills(root, group)?;
@@ -649,9 +683,36 @@ mod tests {
     }
 
     #[test]
-    fn list_all_statuses_stays_in_go() {
+    fn install_statuses_cover_every_registered_agent() {
         let f = fixture("defer");
-        assert!(handle(&f.root, "experts_list_all_install_statuses", &serde_json::json!({})).is_none());
+        seed(&f.root, "experts");
+        // 一个技能 × N 个已注册执行端。
+        let out = handle(
+            &f.root,
+            "experts_list_all_install_statuses",
+            &serde_json::json!({}),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(out.is_array());
+        let row = handle(
+            &f.root,
+            "experts_get_install_status",
+            &serde_json::json!({"expertId": "one", "agentType": "claude"}),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(row["expertId"], "one");
+        assert_eq!(row["agentType"], "claude");
+        seed(&f.root, "science");
+        let err = handle(
+            &f.root,
+            "science_get_install_status",
+            &serde_json::json!({"expertId": "nope"}),
+        )
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(err, "技能不存在：nope");
     }
 
     /// The agent-skill listing moved into this module once the runtime

@@ -190,6 +190,11 @@ fn canon_spec(spec: &Value) -> Value {
 }
 
 /// custom_agents.go `fetchRegistryEntries`.
+/// 供 custom_agents 的 add_registry_agent 复用。
+pub(crate) fn fetch_entries() -> Result<Vec<Value>, String> {
+    fetch_registry_entries(&registry_url())
+}
+
 fn fetch_registry_entries(registry: &str) -> Result<Vec<Value>, String> {
     let response = net::client()
         .get(registry)

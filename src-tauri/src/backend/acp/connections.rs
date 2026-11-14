@@ -1200,6 +1200,59 @@ impl Layer {
             .push(WarmEntry { id: cid.to_string(), placed_at: std::time::Instant::now() });
     }
 
+    /// Go `retireAgentConnections` (instances.go:350): release every warm
+    /// entry belonging to one agent wire. Live conversations keep their driver.
+    pub fn retire_agent(&self, wire: &str) {
+        let cids: Vec<String> = {
+            let state = self.state.lock().unwrap();
+            state
+                .connections
+                .iter()
+                .filter(|(_, conn)| {
+                    let conn = conn.lock().unwrap();
+                    conn.warm && wire_agent(&conn.agent) == wire
+                })
+                .map(|(cid, _)| cid.clone())
+                .collect()
+        };
+        for cid in cids {
+            self.release_warm(&cid);
+        }
+    }
+
+    /// Go `get_codeg_mcp_service_status` 的计数面：(companions, sessions, active)。
+    pub fn service_counts(&self) -> (usize, usize, usize) {
+        let state = self.state.lock().unwrap();
+        let companions = state.callers.len();
+        let sessions = state.connections.len();
+        (companions, sessions, 0)
+    }
+
+    /// Go `Runtime.KillDriversAt`：工作树目录下的驱动进程不再需要。
+    pub fn kill_drivers_at(&self, dir: &str) {
+        let runtime = self.runtime();
+        let dir = dir.to_string();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move { runtime.kill_drivers_at(&dir).await });
+        }
+    }
+
+    /// 断连的同步包装（discard 路径在阻塞上下文里跑，不能 await）。
+    pub fn cancel_and_disconnect_later(&self, cid: &str) {
+        let layer = self.self_weak.get().and_then(|weak| weak.upgrade());
+        let cid = cid.to_string();
+        if let (Some(layer), Ok(handle)) = (layer, tokio::runtime::Handle::try_current()) {
+            handle.spawn(async move {
+                let _ = layer.disconnect(&cid).await;
+            });
+        }
+    }
+
+    /// 前端门的上游地址（Go 的 `s.Base`）：mcp socket_path 拼在它后面。
+    pub fn upstream_base(&self) -> &str {
+        &self.upstream_base
+    }
+
     /// Go `releaseWarm` (connections.go:266): retire an idle pre-built
     /// connection for good; the shared driver process stays alive.
     fn release_warm(&self, cid: &str) {
@@ -1926,4 +1979,128 @@ impl Layer {
 
 fn agent_type_of(conn: &Arc<Mutex<Connection>>) -> String {
     conn.lock().unwrap().agent_type.clone()
+}
+
+// ── submit_session_feedback（feedback.go）──────────────────────────────────
+
+impl Layer {
+    /// Go `submitFeedback`：运行中的连接支持原生引导时立即 steer 并落一条
+    /// user turn；否则把反馈挂到连接的 pending 队列（下一轮 consumeFeedback 取走）。
+    pub async fn submit_feedback(&self, args: &Value) -> Result<Value, String> {
+        let cid = text(args.get("connectionId"));
+        let body = text(args.get("text")).trim().to_string();
+        if body.is_empty() || body.len() > 12000 {
+            return Err("反馈需要 1–12000 字节".into());
+        }
+        let mut note = json!({
+            "id": goformat::hex_id(),
+            "text": body,
+            "status": "pending",
+            "created_at": goformat::timestamp(),
+        });
+        let (busy, runtime_id, conversation_id) = {
+            let state = self.state.lock().unwrap();
+            match state.connections.get(&cid) {
+                Some(conn) => {
+                    let conn = conn.lock().unwrap();
+                    (conn.busy, conn.runtime_id.clone(), conn.conversation_id)
+                }
+                None => (false, String::new(), 0),
+            }
+        };
+        if runtime_id.is_empty() || !busy {
+            // 前端靠这个标记保留草稿，改走正常队列。
+            return Err("no active turn".into());
+        }
+        let blocks: Vec<Value> = args
+            .get("blocks")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if self.runtime().supports_native_steering(&runtime_id) {
+            let capabilities = self.runtime().prompt_capabilities(&runtime_id);
+            let mut wire: Vec<Value> = Vec::new();
+            let mut stored: Vec<Value> = Vec::new();
+            for block in &blocks {
+                match text(block.get("type")).as_str() {
+                    "text" => {
+                        let value = text(block.get("text"));
+                        wire.push(json!({"type": "text", "text": value}));
+                        stored.push(json!({"type": "text", "text": value}));
+                    }
+                    "image" => {
+                        let mime = text(block.get("mime_type"));
+                        if capabilities.get("image") != Some(&Value::Bool(true))
+                            || !mime.starts_with("image/")
+                        {
+                            return Err("当前执行端不支持此图片".into());
+                        }
+                        let data = image_data(&self.root, block)?;
+                        wire.push(json!({"type": "image", "mimeType": mime, "data": data}));
+                        stored.push(json!({
+                            "type": "image",
+                            "mime_type": mime,
+                            "data": data,
+                            "uri": block.get("uri").cloned().unwrap_or(Value::Null),
+                        }));
+                    }
+                    "resource_link" => {
+                        let (link, display) = resource_link(block)?;
+                        wire.push(link);
+                        stored.push(display);
+                    }
+                    "resource" => {
+                        if capabilities.get("embedded_context") != Some(&Value::Bool(true)) {
+                            return Err("当前执行端不支持嵌入资源".into());
+                        }
+                        let (resource, display) = embedded_resource(&self.root, block)?;
+                        wire.push(resource);
+                        stored.push(display);
+                    }
+                    _ => return Err("当前引导不支持此附件类型".into()),
+                }
+            }
+            if wire.is_empty() {
+                wire.push(json!({"type": "text", "text": body}));
+                stored.push(json!({"type": "text", "text": body}));
+            }
+            self.runtime().steer(&runtime_id, &wire).await?;
+            let now = goformat::timestamp();
+            let turn = json!({
+                "id": goformat::hex_id(),
+                "role": "user",
+                "blocks": stored,
+                "timestamp": now,
+            });
+            crate::backend::turn_store::append_raw(&self.root, conversation_id, &turn)?;
+            note["status"] = json!("delivered");
+            note["delivered_at"] = json!(goformat::timestamp());
+            {
+                let state = self.state.lock().unwrap();
+                if let Some(conn) = state.connections.get(&cid) {
+                    conn.lock().unwrap().feedback.push(note.clone());
+                }
+            }
+            self.event(&cid, json!({"type": "feedback_submitted", "item": note.clone()}));
+            return Ok(note);
+        }
+        if !blocks.is_empty() {
+            return Err("no active turn".into());
+        }
+        {
+            let state = self.state.lock().unwrap();
+            match state.connections.get(&cid) {
+                Some(conn) => {
+                    let mut conn = conn.lock().unwrap();
+                    if !conn.busy {
+                        return Err("no active turn".into());
+                    }
+                    conn.feedback.push(note.clone());
+                }
+                None => return Err("no active turn".into()),
+            }
+        }
+        self.event(&cid, json!({"type": "feedback_submitted", "item": note.clone()}));
+        Ok(note)
+    }
 }

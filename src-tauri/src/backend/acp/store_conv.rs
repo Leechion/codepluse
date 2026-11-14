@@ -38,7 +38,11 @@ fn locked_doc(root: &Path) -> Result<(store_file::WriteLock, Map<String, Value>)
 }
 
 fn persist(root: &Path, doc: &Map<String, Value>) -> Result<(), String> {
-    let body = goformat::marshal_store(&Value::Object(doc.clone()));
+    // turns 已迁至 SQLite（turnstore.go）：文档绝不回写这份旧 map，否则会把
+    // 迁移去掉的历史重新塞回去。
+    let mut doc = doc.clone();
+    doc.remove("turns");
+    let body = goformat::marshal_store(&Value::Object(doc));
     store_file::write_bytes(&root.join(FILE), &body)
 }
 
@@ -173,22 +177,33 @@ pub fn create_conversation_locked(
         "tag_ids": [],
     });
     rows_mut(doc, "conversations").push(row);
-    turns_of_mut(doc, id).clear();
     id
 }
 
-/// Go `appendTurnLocked` (store.go:196).
-pub fn append_turn_locked(doc: &mut Map<String, Value>, conversation_id: i64, role: &str, body: &str) {
-    let now = goformat::timestamp();
-    let turn_id = goformat::hex_id();
-    let turns = turns_of_mut(doc, conversation_id);
-    turns.push(json!({
-        "id": turn_id,
-        "role": role,
-        "blocks": [{"type": "text", "text": body}],
-        "timestamp": now,
-    }));
-    let count = turns.len() as i64;
+/// 任务引擎建会话：在任务所属文件夹里建 row 并落盘（Go
+/// `createConversationLocked(t.FolderID, agentType, title, 0)`）。
+pub fn create_task_conversation(
+    root: &Path,
+    folder_id: i64,
+    agent_type: &str,
+    title: &str,
+) -> Result<i64, String> {
+    let (_guard, mut doc) = locked_doc(root)?;
+    let id = create_conversation_locked(&mut doc, folder_id, agent_type, title, 0);
+    persist(root, &doc)?;
+    Ok(id)
+}
+
+/// Go `appendTurnLocked` (store.go:196) with the SQLite turn store: append the
+/// row through `turn_store` and mirror message_count/updated_at into the JSON
+/// document (the document no longer carries turns — turnstore.go).
+pub fn append_turn_locked(
+    root: &Path,
+    doc: &mut Map<String, Value>,
+    conversation_id: i64,
+    turn: &Value,
+) -> Result<(), String> {
+    let count = crate::backend::turn_store::append_raw(root, conversation_id, turn)?;
     for row in rows_mut(doc, "conversations").iter_mut() {
         if number(row.get("id")) == conversation_id {
             if let Some(obj) = row.as_object_mut() {
@@ -197,6 +212,7 @@ pub fn append_turn_locked(doc: &mut Map<String, Value>, conversation_id: i64, ro
             }
         }
     }
+    Ok(())
 }
 
 /// The changed event the connections layer emits after a store write
@@ -240,15 +256,13 @@ pub fn prompt_side_write(
     let Some(mut row) = row else {
         return Err("会话不存在".into());
     };
-    append_turn_locked(&mut doc, conversation_id, "user", prompt_text);
-    {
-        let turns = turns_of_mut(&mut doc, conversation_id);
-        if let Some(last) = turns.last_mut() {
-            if let Some(obj) = last.as_object_mut() {
-                obj.insert("blocks".into(), json!(user_blocks));
-            }
-        }
-    }
+    let user_turn = json!({
+        "id": goformat::hex_id(),
+        "role": "user",
+        "blocks": json!(user_blocks),
+        "timestamp": goformat::timestamp(),
+    });
+    append_turn_locked(root, &mut doc, conversation_id, &user_turn)?;
     // Mutate the LIVE row in place — a stale-snapshot overwrite would clobber
     // appendTurnLocked's message_count (Go mutates the pointer).
     let mut event_row = row.clone();
@@ -304,30 +318,25 @@ pub fn completion_side_write(
         return Ok(Vec::new());
     };
     if ok {
-        append_turn_locked(&mut doc, conversation_id, "assistant", output);
-        {
-            let turns = turns_of_mut(&mut doc, conversation_id);
-            if let Some(last) = turns.last_mut() {
-                if let Some(obj) = last.as_object_mut() {
-                    obj.insert("blocks".into(), json!(blocks));
-                    if !created_at.is_empty() {
-                        obj.insert("timestamp".into(), json!(created_at));
-                    }
-                    if !source_turn_id.is_empty() {
-                        obj.insert("source_turn_id".into(), json!(source_turn_id));
-                    }
-                    if let Some(usage) = usage.filter(|u| u.as_object().map(|m| !m.is_empty()).unwrap_or(false)) {
-                        obj.insert("usage".into(), usage.clone());
-                    }
-                    if !model.is_empty() {
-                        obj.insert("model".into(), json!(model));
-                    }
-                    if let Some(duration) = duration_ms {
-                        obj.insert("duration_ms".into(), json!(duration));
-                    }
-                }
-            }
+        let mut assistant_turn = json!({
+            "id": goformat::hex_id(),
+            "role": "assistant",
+            "blocks": json!(blocks),
+            "timestamp": if created_at.is_empty() { goformat::timestamp() } else { created_at.to_string() },
+        });
+        if !source_turn_id.is_empty() {
+            assistant_turn["source_turn_id"] = json!(source_turn_id);
         }
+        if let Some(usage) = usage.filter(|u| u.as_object().map(|m| !m.is_empty()).unwrap_or(false)) {
+            assistant_turn["usage"] = usage.clone();
+        }
+        if !model.is_empty() {
+            assistant_turn["model"] = json!(model);
+        }
+        if let Some(duration) = duration_ms {
+            assistant_turn["duration_ms"] = json!(duration);
+        }
+        append_turn_locked(root, &mut doc, conversation_id, &assistant_turn)?;
     }
     // Mutate the LIVE row in place (Go mutates the pointer); overwriting with
     // an earlier snapshot would clobber appendTurnLocked's message_count.
@@ -365,12 +374,7 @@ pub fn fork_prepare(
     let Some(row) = row else {
         return Err("会话不存在".into());
     };
-    let turns = doc
-        .get("turns")
-        .and_then(|t| t.get(&conversation_id.to_string()))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    let turns = crate::backend::turn_store::all_turns_for(root, conversation_id)?;
     Ok((row, turns))
 }
 
@@ -395,12 +399,7 @@ pub fn fork_commit(
     let Some(mut row) = row else {
         return Err("会话不存在".into());
     };
-    let turns: Vec<Value> = doc
-        .get("turns")
-        .and_then(|t| t.get(&conversation_id.to_string()))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    let turns: Vec<Value> = crate::backend::turn_store::all_turns_for(root, conversation_id)?;
     let sibling_id = allocate(&mut doc);
     let now = goformat::timestamp();
     let mut sibling = row.clone();
@@ -427,17 +426,12 @@ pub fn fork_commit(
             }
         }
     }
-    {
-        let turns_map = doc
-            .entry("turns".to_string())
-            .or_insert_with(|| json!({}))
-            .as_object_mut()
-            .expect("turns object");
-        turns_map.insert(sibling_id.to_string(), json!(turns.clone()));
-        turns_map.insert(conversation_id.to_string(), json!(kept));
-    }
     let _ = row;
     persist(root, &doc)?;
+    // Turns live in SQLite now: give the sibling the full list and truncate
+    // the original at the fork point (fork.go keeps turns[:point+1]).
+    crate::backend::turn_store::replace_all(root, sibling_id, &turns)?;
+    crate::backend::turn_store::replace_all(root, conversation_id, &kept)?;
     Ok(sibling_id)
 }
 
@@ -499,7 +493,9 @@ mod tests {
         let folders = doc.get("folders").unwrap().as_array().unwrap();
         assert_eq!(folders.len(), 2);
         assert_eq!(folders[1]["path"], "E:/ws/new");
-        let turns = doc.get("turns").unwrap().get("4").unwrap().as_array().unwrap();
+        // Turns live in SQLite (turnstore.go), not the JSON document.
+        assert!(doc.get("turns").is_none(), "文档不再承载 turns");
+        let turns = crate::backend::turn_store::all_turns_for(&root, 4).unwrap();
         assert_eq!(turns.len(), 1);
         assert_eq!(turns[0]["role"], "user");
         assert_eq!(turns[0]["blocks"].as_array().unwrap().len(), 2);
@@ -531,7 +527,7 @@ mod tests {
         let row = &doc.get("conversations").unwrap().as_array().unwrap()[0];
         assert_eq!(row["status"], "pending_review");
         assert_eq!(row["message_count"], 2);
-        let turns = doc.get("turns").unwrap().get("2").unwrap().as_array().unwrap();
+        let turns = crate::backend::turn_store::all_turns_for(&root, 2).unwrap();
         let last = turns.last().unwrap();
         assert_eq!(last["role"], "assistant");
         assert_eq!(last["source_turn_id"], "fixture-message-1");
@@ -546,7 +542,7 @@ mod tests {
         let doc = store_file::read_json(&root.join(FILE)).unwrap().unwrap();
         let row = &doc.get("conversations").unwrap().as_array().unwrap()[0];
         assert_eq!(row["status"], "cancelled");
-        let turns = doc.get("turns").unwrap().get("2").unwrap().as_array().unwrap();
+        let turns = crate::backend::turn_store::all_turns_for(&root, 2).unwrap();
         assert_eq!(turns.len(), 2, "no assistant turn appended on failure");
     }
 
@@ -566,14 +562,13 @@ mod tests {
         let conversations = doc.get("conversations").unwrap().as_array().unwrap();
         assert_eq!(conversations.len(), 2);
         assert_eq!(conversations[1]["external_id"], "n1", "sibling keeps the original native id");
-        let turns = doc.get("turns").unwrap();
         assert_eq!(
-            turns.get("2").unwrap().as_array().unwrap().len(),
+            crate::backend::turn_store::all_turns_for(&root, 2).unwrap().len(),
             1,
             "current row truncated at the fork point"
         );
         assert_eq!(
-            turns.get("3").unwrap().as_array().unwrap().len(),
+            crate::backend::turn_store::all_turns_for(&root, 3).unwrap().len(),
             3,
             "sibling keeps the full history"
         );

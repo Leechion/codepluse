@@ -41,6 +41,13 @@ const FILE: &str = "codeg-worktasks.json";
 /// `taskStore.mu` (a load → mutate → write cycle must not interleave).
 static BOARD: Mutex<()> = Mutex::new(());
 
+/// 任务板根目录（引擎本地调用需要），启动时由前端门登记。
+static BOARD_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn set_board_root(root: PathBuf) {
+    let _ = BOARD_ROOT.set(root);
+}
+
 /// Sidecar base URL (`http://127.0.0.1:<port>`), set by the proxy at startup.
 static UPSTREAM: OnceLock<String> = OnceLock::new();
 
@@ -364,6 +371,28 @@ fn load(root: &Path) -> TaskDoc {
 /// Writes the document with Go's byte layout: struct fields in declaration
 /// order, maps sorted, compact, HTML-escaped. No `canon` — that would sort
 /// the struct fields too.
+/// 引擎（worktask_engine.rs）以 Value 形态改 board；这里转成 TaskDoc 再落盘，
+/// 保证 Go struct 字段序/omitempty 与其它写路径一致。
+pub(crate) fn persist_board(root: &Path, board: &Value) -> Result<(), String> {
+    let doc: TaskDoc = serde_json::from_value(board.clone())
+        .map_err(|e| format!("任务板格式无效：{e}"))?;
+    let value = serde_json::to_value(&doc).map_err(|e| e.to_string())?;
+    let body = goformat::marshal_preserve(&value);
+    store_file::write_bytes(&file_path(root), &body)
+}
+
+/// 工作任务的定时器（Go `TickWorkTasks`）：到期 todo → queued → claim，
+/// 以及重试排队的任务。替代 sidecar 里唯一的 Go 后台循环。
+pub fn spawn_scheduler(root: PathBuf) {
+    crate::backend::worktask_engine::bind_runtime();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            crate::backend::worktask_engine::tick(&root);
+        }
+    });
+}
+
 fn persist(root: &Path, doc: &TaskDoc) {
     let value = match serde_json::to_value(doc) {
         Ok(value) => value,
@@ -503,6 +532,11 @@ fn folder_path(root: &Path, folder_id: i64) -> Option<String> {
 /// POSTs an internal engine command to the sidecar and waits for its answer.
 /// `None` means no sidecar was configured (tests, or a missing upstream).
 fn engine_trigger(command: &str, body: Value) -> Option<Result<Value, String>> {
+    // 引擎已归 Rust（worktask_engine.rs）：本地直接调用，不再回打 sidecar。
+    // 任务板的根目录由 `set_board_root` 在启动时登记。
+    if let Some(root) = BOARD_ROOT.get() {
+        return Some(crate::backend::worktask_engine::handle(root, command, &body));
+    }
     let base = UPSTREAM.get()?;
     let client = UPSTREAM_CLIENT.get_or_init(|| {
         reqwest::blocking::Client::builder()

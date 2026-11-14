@@ -36,7 +36,10 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
 
 pub mod acp;
+pub mod turn_store;
 pub mod exec_providers;
+pub mod harness_connections;
+pub mod harness_instances;
 pub mod experts;
 pub mod files;
 pub mod folder_commands;
@@ -60,6 +63,7 @@ pub mod store_file;
 pub mod browser;
 pub mod computer;
 pub mod worktask;
+pub mod worktask_engine;
 
 pub struct Config {
     /// Port the webview connects to (this server).
@@ -154,6 +158,7 @@ pub async fn serve(cfg: Config) -> std::io::Result<()> {
     // The work task engine still lives in the sidecar; its handlers learn the
     // upstream address here so Rust-owned commands can hand work back to it.
     worktask::set_upstream(format!("http://127.0.0.1:{}", cfg.upstream_port));
+    worktask::set_board_root(cfg.root.clone());
     let state = Arc::new(ProxyState {
         client: reqwest::Client::builder()
             .no_proxy()
@@ -171,6 +176,16 @@ pub async fn serve(cfg: Config) -> std::io::Result<()> {
     let _ = EMITTER.set(Arc::new(move |channel: &str, payload: Value| {
         emit_events(&emitter_state, &[(channel.to_string(), payload)]);
     }));
+    // ACP 连接层在启动期就绪：任务引擎在请求路径之外直接驱动它。
+    let layer_state = Arc::clone(&state);
+    acp::commands::init_shared_layer(
+        cfg.root.clone(),
+        cfg.upstream_port,
+        Arc::new(move |channel: &str, payload: &Value| {
+            emit_events(&layer_state, &[(channel.to_string(), payload.clone())]);
+        }),
+    );
+    worktask::spawn_scheduler(cfg.root.clone());
     automations::spawn_scheduler(automations::Bridge {
         client: reqwest::Client::builder()
             .no_proxy()
@@ -306,6 +321,8 @@ async fn api_dispatch(
                     .or_else(|| forge::handle(&root, &owned, &owned_args))
                     .or_else(|| provider_catalog::handle(&root, &owned, &owned_args))
                     .or_else(|| acp_registry::handle(&root, &owned, &owned_args))
+
+
             })
             .await;
         return match outcome {
@@ -425,6 +442,85 @@ async fn api_dispatch(
         return match outcome {
             Ok(Some(Ok(value))) => go_json(value),
             Ok(Some(Err(message))) => fail(message),
+            Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
+            Err(join) => fail(format!("命令执行失败：{join}")),
+        };
+    }
+    // 收尾批：会话历史（SQLite）+ token 用量——带 conversation://changed 事件。
+    if turn_store::owns(&command) {
+        let root = st.root.clone();
+        let owned = command.clone();
+        let owned_args = args.clone();
+        let outcome =
+            tokio::task::spawn_blocking(move || turn_store::handle(&root, &owned, &owned_args))
+                .await;
+        return match outcome {
+            Ok(Some(outcome)) => {
+                emit_events(&st, &outcome.events);
+                match outcome.result {
+                    Ok(value) => go_json(value),
+                    Err(message) => fail(message),
+                }
+            }
+            Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
+            Err(join) => fail(format!("命令执行失败：{join}")),
+        };
+    }
+    // 收尾批：任务执行引擎（claim/merge 后台跑、discard 同步 git 清理）。
+    if worktask_engine::owns(&command) {
+        let root = st.root.clone();
+        let owned = command.clone();
+        let owned_args = args.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            worktask_engine::handle(&root, &owned, &owned_args)
+        })
+        .await;
+        return match outcome {
+            Ok(result) => match result {
+                Ok(value) => go_json(value),
+                Err(message) => fail(message),
+            },
+            Err(join) => fail(format!("引擎命令执行失败：{join}")),
+        };
+    }
+    // 收尾批：执行端实例 CRUD + 主智能体设置（带 agent://changed 事件）。
+    if harness_instances::owns(&command) {
+        let root = st.root.clone();
+        let owned = command.clone();
+        let owned_args = args.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            harness_instances::handle(&root, &owned, &owned_args)
+        })
+        .await;
+        return match outcome {
+            Ok(Some((result, events))) => {
+                emit_events(&st, &events);
+                match result {
+                    Ok(value) => go_json(value),
+                    Err(message) => fail(message),
+                }
+            }
+            Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
+            Err(join) => fail(format!("命令执行失败：{join}")),
+        };
+    }
+    // 收尾批：连接目录/保存 + MCP 服务状态。
+    if harness_connections::owns(&command) {
+        let root = st.root.clone();
+        let owned = command.clone();
+        let owned_args = args.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            harness_connections::handle(&root, &owned, &owned_args)
+        })
+        .await;
+        return match outcome {
+            Ok(Some(outcome)) => {
+                emit_events(&st, &outcome.events);
+                match outcome.result {
+                    Ok(value) => go_json(value),
+                    Err(message) => fail(message),
+                }
+            }
             Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
             Err(join) => fail(format!("命令执行失败：{join}")),
         };
