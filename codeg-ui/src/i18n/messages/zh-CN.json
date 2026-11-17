@@ -35,7 +35,8 @@
     "deleteProfile": "删除这套模型配置？",
     "bareHarness": "该 Harness 自行管理供应商与模型。新建对话仍会使用它，主智能体也可以直接委派给它。",
     "bareDelegation": "以下 Harness 自行管理供应商与模型，无需在此配置，主智能体会直接委派给它们：{harnesses}",
-    "immutableHarness": "更换 Harness 时请添加新的配置。"
+    "immutableHarness": "更换 Harness 时请添加新的配置。",
+    "mainUnset": "未配置"
   },
   "SettingsNavigation": {
     "skills": "技能",
@@ -95,7 +96,7 @@
     "nav": {
       "general": "常规",
       "appearance": "外观",
-      "agents": "智能体",
+      "agents": "供应商",
       "mcp": "MCP",
       "skills": "Skills",
       "shortcuts": "快捷键",
@@ -856,7 +857,7 @@
       "probeFailed": "加载配置项失败：{detail}",
       "retry": "重试",
       "noConfigAvailable": "该智能体没有可配置项。",
-      "modeLabel": "模式",
+      "modeLabel": "Mode",
       "agentDefaultHint": "智能体默认：{value}",
       "defaultOptionLabel": "默认（{value}）",
       "overrideCount": "已自定义 {count} 项",
@@ -2402,7 +2403,7 @@
         "cacheRead": "缓存读取",
         "cacheWrite": "缓存写入",
         "user": "用户",
-        "assistant": "助手",
+        "assistant": "子智能体",
         "system": "系统",
         "toolResult": "结果",
         "toolError": "错误",
@@ -2444,7 +2445,7 @@
       "none": "—",
       "copyField": "复制{field}",
       "copiedField": "已复制{field}",
-      "assistant": "助手"
+      "assistant": "子智能体"
     },
     "conversationCard": {
       "untitledConversation": "未命名会话",
@@ -3566,7 +3567,7 @@
         "mentionGroupSession": "会话",
         "mentionGroupCommit": "提交",
         "mentionGroupSkill": "技能",
-        "mentionGroupAssistant": "助手"
+        "mentionGroupAssistant": "子智能体"
       },
       "messageQueue": {
         "addToQueue": "加入队列",
@@ -3910,12 +3911,12 @@
             "child_rejected": "子代理拒绝该请求",
             "child_unknown": "子代理未知错误",
             "unknown": "未知任务",
-            "assistant_not_found": "助手不存在",
+            "assistant_not_found": "子智能体不存在",
             "assistants_unsupported": "需要重启",
             "assistant_support_unknown": "未响应"
           }
         },
-        "unknownAssistant": "助手 #{id}",
+        "unknownAssistant": "子智能体 #{id}",
         "deletedAssistant": "（已删除）"
       },
       "contentParts": {
@@ -5387,7 +5388,7 @@
       "quickMessages": "快捷消息",
       "taskTemplates": "任务模板",
       "preferences": "应用偏好（语言、外观、开关）",
-      "assistants": "助手"
+      "assistants": "子智能体"
     },
     "scopeExcluded": {
       "conversations": "会话记录与历史",
@@ -5458,7 +5459,7 @@
       "quickMessages": "{count} 条快捷消息",
       "taskTemplates": "{count} 个任务模板",
       "preferences": "{count} 项应用偏好",
-      "assistants": "{count} 个助手"
+      "assistants": "{count} 个子智能体"
     },
     "rollbackTitle": "撤销导入",
     "rollbackHint": "每次导入和每次还原前，都会先保存这台设备当时的配置，最近十份会保留下来。",
@@ -5475,7 +5476,7 @@
     "passphraseKeep": "留空则沿用已保存的口令",
     "passphrasePlaceholder": "加密口令",
     "passphraseHint": "只保存在这台设备的钥匙串里，不会上传。请在你的其他设备上输入同一个口令。",
-    "assistantsRenamed": "有 {count} 个助手与本机已有的助手重名，已自动改名。"
+    "assistantsRenamed": "有 {count} 个子智能体与本机已有的子智能体重名，已自动改名。"
   },
   "backup": {
     "restore": {
@@ -7712,7 +7713,7 @@
     }
   },
   "Connections": {
-    "title": "智能体",
+    "title": "供应商",
     "description": "按执行端管理 API 供应商、官网账号和模型。",
     "harness": "智能体",
     "chooseHarness": "选择智能体",
@@ -7733,6 +7734,7 @@
     "modelName": "显示名称（可选）",
     "accountDefault": "跟随官网账号的默认模型",
     "nativeAccount": "本机官网账号",
+    "credits": "积分 {value}",
     "credentialsFound": "已读取本机登录凭据",
     "accountManaged": "由该智能体的原生客户端管理登录",
     "loginRequired": "未读取到官网登录，请先在原生客户端登录",

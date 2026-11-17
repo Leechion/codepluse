@@ -35,7 +35,8 @@
     "deleteProfile": "Delete this model configuration?",
     "bareHarness": "This harness manages its own provider and model. New conversations still start on it, and the main agent can delegate to it as it is.",
     "bareDelegation": "These harnesses manage their own provider and model, so there is nothing to configure here — the main agent delegates to them directly: {harnesses}",
-    "immutableHarness": "Create a new configuration to use another harness."
+    "immutableHarness": "Create a new configuration to use another harness.",
+    "mainUnset": "Not configured"
   },
   "SettingsNavigation": {
     "skills": "Skills",
@@ -95,7 +96,7 @@
     "nav": {
       "general": "General",
       "appearance": "Appearance",
-      "agents": "Agents",
+      "agents": "Providers",
       "mcp": "MCP",
       "skills": "Skills",
       "shortcuts": "Shortcuts",
@@ -2402,7 +2403,7 @@
         "cacheRead": "Cache Read",
         "cacheWrite": "Cache Write",
         "user": "User",
-        "assistant": "Assistant",
+        "assistant": "Sub-agent",
         "system": "System",
         "toolResult": "Result",
         "toolError": "Error",
@@ -2444,7 +2445,7 @@
       "none": "—",
       "copyField": "Copy {field}",
       "copiedField": "Copied {field}",
-      "assistant": "Assistant"
+      "assistant": "Sub-agent"
     },
     "conversationCard": {
       "untitledConversation": "Untitled conversation",
@@ -3566,7 +3567,7 @@
         "mentionGroupSession": "Sessions",
         "mentionGroupCommit": "Commits",
         "mentionGroupSkill": "Skills",
-        "mentionGroupAssistant": "Assistants"
+        "mentionGroupAssistant": "Sub-agents"
       },
       "messageQueue": {
         "addToQueue": "Queue message",
@@ -3910,12 +3911,12 @@
             "child_rejected": "subagent rejected",
             "child_unknown": "subagent unknown error",
             "unknown": "unknown task",
-            "assistant_not_found": "assistant not found",
+            "assistant_not_found": "sub-agent not found",
             "assistants_unsupported": "needs restart",
             "assistant_support_unknown": "no answer"
           }
         },
-        "unknownAssistant": "Assistant #{id}",
+        "unknownAssistant": "Sub-agent #{id}",
         "deletedAssistant": "(deleted)"
       },
       "contentParts": {
@@ -5387,7 +5388,7 @@
       "quickMessages": "Quick messages",
       "taskTemplates": "Task templates",
       "preferences": "App preferences (language, appearance, toggles)",
-      "assistants": "Assistants"
+      "assistants": "Sub-agents"
     },
     "scopeExcluded": {
       "conversations": "Conversations and history",
@@ -5458,7 +5459,7 @@
       "quickMessages": "{count, plural, one {# quick message} other {# quick messages}}",
       "taskTemplates": "{count, plural, one {# task template} other {# task templates}}",
       "preferences": "{count, plural, one {# preference} other {# preferences}}",
-      "assistants": "{count, plural, one {# assistant} other {# assistants}}"
+      "assistants": "{count, plural, one {# sub-agent} other {# sub-agents}}"
     },
     "rollbackTitle": "Undo an import",
     "rollbackHint": "Every import and every restore saves what this machine looked like beforehand. The last ten are kept.",
@@ -5475,7 +5476,7 @@
     "passphraseKeep": "Leave empty to keep the saved passphrase",
     "passphrasePlaceholder": "Encryption passphrase",
     "passphraseHint": "Kept in this machine's keychain and never uploaded. Enter the same passphrase on your other machines.",
-    "assistantsRenamed": "{count, plural, one {# assistant was renamed: one here already had its name.} other {# assistants were renamed: ones here already had their names.}}"
+    "assistantsRenamed": "{count, plural, one {# sub-agent was renamed: one here already had its name.} other {# sub-agents were renamed: ones here already had their names.}}"
   },
   "backup": {
     "restore": {
@@ -7712,7 +7713,7 @@
     }
   },
   "Connections": {
-    "title": "Agents",
+    "title": "Providers",
     "description": "Manage API providers, native accounts, and models for each harness.",
     "harness": "Agent",
     "chooseHarness": "Choose an agent",
@@ -7733,6 +7734,7 @@
     "modelName": "Display name (optional)",
     "accountDefault": "Use the account default model",
     "nativeAccount": "Native official account",
+    "credits": "Credits {value}",
     "credentialsFound": "Native sign-in credentials found",
     "accountManaged": "Sign-in is managed by the native client",
     "loginRequired": "No native sign-in found. Sign in with the native client first.",

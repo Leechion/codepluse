@@ -827,7 +827,46 @@ mod tests {
         )
         .unwrap()
         .unwrap_err();
-        assert!(err.contains("工作目录必须位于"), "{err}");
+        assert!(err.contains("路径超出工作区范围"), "{err}");
+    }
+
+    /// 用户选中的外部目录一旦以文件夹身份打开，就并入可读根，文件树/预览必须
+    /// 立刻可读——否则「打开文件夹」只在列表里多一行，点开就报越界。
+    #[test]
+    fn opened_folders_become_readable() {
+        let root = temp_root("opened");
+        let external = temp_root("external");
+        fs::write(external.join("x.txt"), "hello\n").unwrap();
+        fs::create_dir_all(root.join(".data")).unwrap();
+        fs::write(
+            root.join(".data").join("codeg-workspace.json"),
+            serde_json::to_vec(&json!({
+                "folders": [{"id": 2, "path": external.to_string_lossy(), "open": true}]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let preview = call(
+            &root,
+            "read_file_preview",
+            json!({"path": external.join("x.txt").to_string_lossy()}),
+        );
+        assert_eq!(preview["content"], "hello\n");
+
+        let listing = call(
+            &root,
+            "list_directory_with_files",
+            json!({"path": external.to_string_lossy()}),
+        );
+        assert!(
+            listing
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["name"] == "x.txt"),
+            "{listing}"
+        );
     }
 
     #[test]

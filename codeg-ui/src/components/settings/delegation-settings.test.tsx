@@ -332,17 +332,13 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
     await screen.findByLabelText("Enable delegation")
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument()
 
-    await user.click(tab(/^Agent defaults/))
+    await user.click(tab(/^Sub-agent configuration/))
     expect(
       screen.queryByRole("button", { name: "Save" })
     ).not.toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: "Add model configuration" })
-    ).toBeInTheDocument()
 
-    // Every assistant change is written at once.
-    await user.click(tab(/^Assistants/))
-    await screen.findByText(/No assistants yet/)
+    // Every sub-agent change is written at once — there is no page-level Save.
+    await screen.findByText(/No sub-agents yet/)
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
   })
 
@@ -352,10 +348,8 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
     renderWithIntl()
     await loaded()
 
-    await user.click(tab(/^Agent defaults/))
-    expect(
-      await screen.findByRole("heading", { name: "Sub-agent configurations" })
-    ).toBeInTheDocument()
+    await user.click(tab(/^Sub-agent configuration/))
+    expect(await screen.findByText(/No sub-agents yet/)).toBeInTheDocument()
     await user.click(tab(/^General/))
     expect(screen.getByLabelText("Enable delegation")).toHaveAttribute(
       "data-state",
@@ -373,9 +367,9 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
 
     fireEvent.change(depth, { target: { value: "4" } })
     expect(dotOn(/^General/)).not.toBeNull()
-    expect(dotOn(/^Agent defaults/)).toBeNull()
+    expect(dotOn(/^Sub-agent configuration/)).toBeNull()
 
-    await user.click(tab(/^Assistants/))
+    await user.click(tab(/^Sub-agent configuration/))
     expect(
       await screen.findByText("General has unsaved changes.")
     ).toBeInTheDocument()
@@ -399,7 +393,7 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
 
     // Switched off but not saved: assistants can still be delegated to.
     fireEvent.click(toggle)
-    await user.click(tab(/^Assistants/))
+    await user.click(tab(/^Sub-agent configuration/))
     await screen.findByText("General has unsaved changes.")
     expect(screen.queryByText(offNotice)).toBeNull()
 
@@ -434,8 +428,8 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
     )
     expect(screen.getByLabelText("Maximum delegation depth")).toHaveValue(3)
     expect(dotOn(/^General/)).toBeNull()
-    await user.click(tab(/^Assistants/))
-    await screen.findByText(/No assistants yet/)
+    await user.click(tab(/^Sub-agent configuration/))
+    await screen.findByText(/No sub-agents yet/)
     expect(screen.queryByText(offNotice)).toBeNull()
     expect(screen.queryByText(/unsaved changes/)).toBeNull()
   })
@@ -475,8 +469,8 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
       "checked"
     )
     expect(dotOn(/^General/)).toBeNull()
-    await user.click(tab(/^Assistants/))
-    await screen.findByText(/No assistants yet/)
+    await user.click(tab(/^Sub-agent configuration/))
+    await screen.findByText(/No sub-agents yet/)
     expect(screen.queryByText(offNotice)).toBeNull()
     expect(screen.queryByText(/unsaved changes/)).toBeNull()
   })
@@ -510,7 +504,7 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
       "unchecked"
     )
     expect(dotOn(/^General/)).toBeNull()
-    await user.click(tab(/^Assistants/))
+    await user.click(tab(/^Sub-agent configuration/))
     expect(await screen.findByText(offNotice)).toBeInTheDocument()
   })
 })

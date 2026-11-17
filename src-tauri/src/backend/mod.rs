@@ -69,6 +69,30 @@ pub mod workspace_state;
 pub mod worktask;
 pub mod worktask_engine;
 
+// ── 补全批次（2026-11-15）：前端已调用、后端从未实现的命令 ──────────────
+// 原 Go sidecar（tag `go-sidecar-final`）里这些命令同样不存在，只有
+// `codepluse_provider_delete` 有原型，所以契约一律取自前端调用点
+// （`codeg-ui/src/lib/api.ts` 的参数名 + `types.ts` 的返回结构）。
+// 每个模块只暴露 `owns(command) -> bool` 与 `handle(root, command, args)`，
+// 由下面的 `EXT_MODULES` 表统一派发。
+pub mod acp_ext;
+pub mod backup;
+pub mod browser_bridge;
+pub mod chat_channels;
+pub mod cli_access;
+pub mod codex;
+pub mod git_ext;
+pub mod import_sessions;
+pub mod logs;
+pub mod mcp_market;
+pub mod office_ext;
+pub mod opencode;
+pub mod pet;
+pub mod pet_window;
+pub mod projects_skills;
+pub mod token_validate;
+pub mod web_service;
+
 pub struct Config {
     /// Port the webview connects to (this server).
     pub listen_port: u16,
@@ -160,6 +184,27 @@ pub async fn serve(cfg: Config) -> std::io::Result<()> {
         worktask::set_upstream(base);
     }
     worktask::set_board_root(cfg.root.clone());
+    // The connection catalog is cold-expensive on two counts: the provider
+    // catalog reads machine state (CC Switch SQLite, api/model-provider JSONs,
+    // native configs) and — dominantly — the first `account_channels::ensure`
+    // has to start the account-channel protocol process before /status
+    // answers (measured ~4.9s cold, ~80ms once it is up). The settings page
+    // pays that on its first visit inside `codepluse_connection_catalog`.
+    // Pay it here, before the UI asks: run the real catalog assembly once and
+    // drop the result. Read-only, so racing a real request is safe.
+    {
+        let warm_root = cfg.root.clone();
+        std::thread::Builder::new()
+            .name("connection-catalog-warmup".into())
+            .spawn(move || {
+                let _ = harness_connections::handle(
+                    &warm_root,
+                    "codepluse_connection_catalog",
+                    &json!({}),
+                );
+            })
+            .ok();
+    }
     let state = Arc::new(ProxyState {
         client: reqwest::Client::builder()
             .no_proxy()
@@ -360,6 +405,37 @@ async fn guard_layer(
     }
     next.run(req).await
 }
+
+/// 补全批次模块的统一签名。它们是同步 I/O（文件、注册表、短超时 HTTP），
+/// 一律进阻塞池执行，和既有模块的 `spawn_blocking` 约定一致。
+/// 这里必须写全 `std::path::Path`：文件顶部把 `Path` 让给了 axum 的路径提取器。
+struct ExtModule {
+    name: &'static str,
+    owns: fn(&str) -> bool,
+    handle: fn(&std::path::Path, &str, &Value) -> Option<Result<Value, String>>,
+}
+
+/// 补全批次的派发表：一次查找即可定位模块，新增命令只需要改模块自己的
+/// `owns()`，这里一行都不用加。
+const EXT_MODULES: &[ExtModule] = &[
+    ExtModule { name: "ACP 扩展", owns: acp_ext::owns, handle: acp_ext::handle },
+    ExtModule { name: "备份与恢复", owns: backup::owns, handle: backup::handle },
+    ExtModule { name: "浏览器桥", owns: browser_bridge::owns, handle: browser_bridge::handle },
+    ExtModule { name: "聊天渠道", owns: chat_channels::owns, handle: chat_channels::handle },
+    ExtModule { name: "CLI 访问", owns: cli_access::owns, handle: cli_access::handle },
+    ExtModule { name: "Codex 目录", owns: codex::owns, handle: codex::handle },
+    ExtModule { name: "Git 扩展", owns: git_ext::owns, handle: git_ext::handle },
+    ExtModule { name: "会话导入", owns: import_sessions::owns, handle: import_sessions::handle },
+    ExtModule { name: "日志", owns: logs::owns, handle: logs::handle },
+    ExtModule { name: "MCP 市场", owns: mcp_market::owns, handle: mcp_market::handle },
+    ExtModule { name: "Office 扩展", owns: office_ext::owns, handle: office_ext::handle },
+    ExtModule { name: "OpenCode", owns: opencode::owns, handle: opencode::handle },
+    ExtModule { name: "桌面宠物", owns: pet::owns, handle: pet::handle },
+    ExtModule { name: "宠物窗口", owns: pet_window::owns, handle: pet_window::handle },
+    ExtModule { name: "项目与技能", owns: projects_skills::owns, handle: projects_skills::handle },
+    ExtModule { name: "令牌验证", owns: token_validate::owns, handle: token_validate::handle },
+    ExtModule { name: "Web 服务", owns: web_service::owns, handle: web_service::handle },
+];
 
 /// Command entry point. Rust answers what it owns; the rest goes upstream.
 async fn api_dispatch(
@@ -877,6 +953,25 @@ async fn api_dispatch(
         };
     }
 
+    // ── 补全批次：前端调用、后端从未实现的命令 ────────────────────────
+    // 这 134 条命令在原 Go sidecar 里同样不存在，因此没有 Go 的字节对齐需求，
+    // 一律按 `go_json`（键序排序）应答，并带上 `x-codepluse-backend: rust`，
+    // 便于双跑断言「这条命令确实由 Rust 接管」。
+    if let Some(module) = EXT_MODULES.iter().find(|module| (module.owns)(&command)) {
+        let root = st.root.clone();
+        let owned = command.clone();
+        let owned_args = args.clone();
+        let name = module.name;
+        let handle = module.handle;
+        let outcome = tokio::task::spawn_blocking(move || handle(&root, &owned, &owned_args)).await;
+        return match outcome {
+            Ok(Some(Ok(value))) => go_json(value),
+            Ok(Some(Err(message))) => fail(message),
+            Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
+            Err(join) => fail(format!("{name}命令执行失败：{join}")),
+        };
+    }
+
     forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await
 }
 
@@ -1076,5 +1171,105 @@ mod transport_contract_tests {
         );
         assert_eq!(post_body, get_body);
         assert_eq!(ready["channel"], "__ready__");
+    }
+
+    /// 补全批次的派发验收：每条命令都要真的走到自己模块的 `handle`，而不是
+    /// 落到 `forward_parts` 的「命令未实现」。没有 sidecar 时那条兜底路径会
+    /// 回 `命令未实现：<cmd>`，所以这条断言能把「只把命令名塞进 `owns()` 骗过
+    /// 静态审计」和「真的实现了」区分开。
+    #[tokio::test]
+    async fn every_completion_module_answers_over_the_real_http_route() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "codepluse-ext-dispatch-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let state = Arc::new(ProxyState {
+            client: client.clone(),
+            upstream_http: None,
+            root: root.clone(),
+            listen_port: port,
+        });
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app_router(state)).await.unwrap();
+        });
+        let base = format!("http://127.0.0.1:{port}");
+
+        // 每个模块一条代表命令；参数故意给最小合法值，这样成功与「缺参报错」
+        // 都必须来自模块自己，而不是兜底转发。
+        let probes: Vec<(&str, &str, Value)> = vec![
+            ("logs", "get_log_settings", json!({})),
+            ("acp_ext", "acp_list_pi_model_capabilities", json!({})),
+            ("backup", "backup_list_safety_snapshots", json!({})),
+            ("codex", "codex_endpoint_catalog_status", json!({})),
+            ("pet", "pet_list", json!({})),
+            ("pet_window", "pet_celebrate", json!({"kind": "waving"})),
+            ("chat_channels", "list_chat_channels", json!({})),
+            ("web_service", "get_web_service_config", json!({})),
+            ("token_validate", "validate_gitea_token", json!({})),
+            ("opencode", "opencode_list_plugins", json!({})),
+            ("projects_skills", "detect_hyperframes_skills", json!({})),
+            ("browser_bridge", "browser_bridge_status", json!({})),
+            ("cli_access", "cli_access_status", json!({})),
+            ("office_ext", "resolve_close_request", json!({"action": "cancel"})),
+            ("mcp_market", "mcp_scan_local", json!({})),
+            ("git_ext", "git_generate_commit_message_cancel", json!({"requestId": "smoke"})),
+            ("import_sessions", "scan_importable_sessions", json!({})),
+        ];
+        for (module, command, body) in probes {
+            let response = client
+                .post(format!("{base}/api/{command}"))
+                .header("Origin", &base)
+                .header("content-type", "application/json")
+                .body(serde_json::to_vec(&body).unwrap())
+                .send()
+                .await
+                .unwrap();
+            let header = response
+                .headers()
+                .get("x-codepluse-backend")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            assert_eq!(header, "rust", "{module}/{command} 未由 Rust 应答");
+            assert!(
+                status.is_success() || status.as_u16() == 400,
+                "{module}/{command} 状态异常：{status}",
+            );
+            assert!(
+                !text.contains("命令未实现"),
+                "{module}/{command} 落到了兜底转发：{text}",
+            );
+        }
+
+        // 对照组：真正没实现的命令必须仍然落到兜底，证明上面的断言有区分力。
+        let unknown = client
+            .post(format!("{base}/api/definitely_not_a_command"))
+            .header("Origin", &base)
+            .header("content-type", "application/json")
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        let unknown_text = unknown.text().await.unwrap_or_default();
+        server.abort();
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            unknown_text.contains("命令未实现"),
+            "未知命令应当落到兜底路径：{unknown_text}",
+        );
     }
 }

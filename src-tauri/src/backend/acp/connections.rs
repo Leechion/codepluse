@@ -342,6 +342,100 @@ impl Layer {
         let _ = park.answer_tx.send(answer);
     }
 
+    /// Go `askUserQuestion` intake (question.go:34): park the question on the
+    /// connection, raise the card in the frontend, and block the companion's
+    /// tool call until the user answers (`acp_answer_question`). Turn end and
+    /// disconnect settle declined through `release_questions_for_connection`,
+    /// so the block can never outlive its session.
+    pub async fn ask_user_question(&self, caller: &Caller, args: &Value) -> Result<Value, String> {
+        let conn_id = caller.connection_id.clone();
+        let questions = args
+            .get("questions")
+            .and_then(Value::as_array)
+            .cloned()
+            .filter(|list| !list.is_empty())
+            .ok_or_else(|| "questions 需要至少一道选择题".to_string())?;
+        let qid = goformat::hex_id();
+        let (answer_tx, mut answer_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        let payload = json!({
+            "type": "question_request",
+            "question_id": qid,
+            "questions": questions,
+        });
+        {
+            let mut state = self.state.lock().unwrap();
+            if !state.connections.contains_key(&conn_id) {
+                return Err("父会话已断开".into());
+            }
+            state.questions.insert(
+                qid.clone(),
+                ParkedQuestion {
+                    conn_id: conn_id.clone(),
+                    answer_tx,
+                },
+            );
+            if let Some(conn) = state.connections.get(&conn_id) {
+                conn.lock().unwrap().pending_question = payload.clone();
+            }
+        }
+        self.event(&conn_id, payload);
+        self.publish_session(&conn_id).await;
+        let answer = answer_rx.recv().await;
+        Ok(question::question_tool_result(answer.as_ref()))
+    }
+
+    /// Go `proposeTaskSplit` (split.go:107): normalize the proposed tasks,
+    /// park the card on the connection, persist the registry and tell the
+    /// frontend. Returns immediately — the user's approval fans out through
+    /// `respond_task_split`.
+    pub async fn propose_task_split(&self, caller: &Caller, args: &Value) -> Result<Value, String> {
+        let conn_id = caller.connection_id.clone();
+        let raw = args
+            .get("tasks")
+            .and_then(Value::as_array)
+            .cloned()
+            .ok_or_else(|| "tasks 需要 1–8 个子任务".to_string())?;
+        let tasks = splits::normalize_confirmed_tasks(&raw)?;
+        let id = goformat::hex_id();
+        let sp = TaskSplit {
+            id: id.clone(),
+            parent: conn_id.clone(),
+            root: if caller.root_id.is_empty() {
+                conn_id.clone()
+            } else {
+                caller.root_id.clone()
+            },
+            parent_tool_use_id: text(args.get("tool_use_id")),
+            tasks: tasks.clone(),
+            created_at: goformat::timestamp(),
+        };
+        let wire = splits::split_wire(&sp);
+        {
+            let mut state = self.state.lock().unwrap();
+            if !state.connections.contains_key(&conn_id) {
+                return Err("父会话已断开".into());
+            }
+            state.splits.insert(id.clone(), sp);
+            if let Some(conn) = state.connections.get(&conn_id) {
+                conn.lock().unwrap().pending_split = wire.clone();
+            }
+        }
+        // Persist outside the state lock: the write blocks, the guard must not
+        // live across the await (the handler's future must stay Send).
+        let root = self.root.clone();
+        let rows: Vec<Value> = {
+            let state = self.state.lock().unwrap();
+            state.splits.values().map(splits::split_wire).collect()
+        };
+        let _ = tokio::task::spawn_blocking(move || splits::save(&root, &rows)).await;
+        self.event(&conn_id, json!({"type": "task_split_request", "split": wire}));
+        self.publish_session(&conn_id).await;
+        Ok(json!({
+            "split_id": id,
+            "message": "拆分提案已展示，等待用户确认后由系统自动派发",
+        }))
+    }
+
     /// Go `respondTaskSplit` (split.go:446). Approve fans the plan out through
     /// the (unported) delegation engine — the splits registry can only be
     /// filled by the companion MCP, so on this side approve is unreachable in
@@ -399,9 +493,118 @@ impl Layer {
             return Ok(json!({"split_id": split_id, "action": "reject"}));
         }
         let _ = outcome;
-        // Approve → delegation fan-out (D 组, unported). The card is already
-        // retired, so the user's decision is not lost to a retry.
-        Err("协作派发尚未移植：拆分提案已撤销，请重新提案后使用 delegate_to_agent 分工".into())
+        // Approve → delegation fan-out: one `delegate_to_agent` per confirmed
+        // task, launched concurrently under the parent connection's caller so
+        // every child inherits the parent's scope, depth and conversation
+        // linkage. The card is already retired, so a second respond cannot
+        // double-launch; per-task failures surface through the delegation
+        // status the parent collects with get_delegation_status /
+        // check_user_feedback.
+        let sp = match dropped {
+            Some(sp) => sp,
+            None => return Err("拆分提案不存在或已处理".into()),
+        };
+        let tasks = match tasks_confirmed {
+            Some(raw) => {
+                let mut confirmed = splits::normalize_confirmed_tasks(&raw)?;
+                // The confirmation card does not round-trip the proposed
+                // assistant_id / agent_type / model — approving unchanged
+                // tasks would then fall into auto-select and lose the
+                // 子智能体 the model named. Restore the stored proposal's
+                // values for any blank field (same length = same order);
+                // tasks the user edited in the card keep their selections.
+                if confirmed.len() == sp.tasks.len() {
+                    for (task, stored) in confirmed.iter_mut().zip(sp.tasks.iter()) {
+                        for key in ["assistant_id", "agent_type", "model"] {
+                            let blank = match task.get(key) {
+                                None | Some(Value::Null) => true,
+                                Some(Value::String(s)) => s.trim().is_empty(),
+                                Some(v) => v.to_string() == "0",
+                            };
+                            if !blank {
+                                continue;
+                            }
+                            let carried = match stored.get(key) {
+                                Some(Value::Null) | None => None,
+                                Some(Value::String(s)) if s.trim().is_empty() => None,
+                                Some(v) => Some(v),
+                            };
+                            if let (Some(value), Some(obj)) = (carried, task.as_object_mut()) {
+                                obj.insert(key.to_string(), value.clone());
+                            }
+                        }
+                    }
+                }
+                confirmed
+            }
+            None => sp.tasks.clone(),
+        };
+        let parent_depth = {
+            let state = self.state.lock().unwrap();
+            match state.connections.get(&parent) {
+                Some(conn) => conn.lock().unwrap().depth,
+                None => return Err("父会话已断开".into()),
+            }
+        };
+        let caller = Caller {
+            token: String::new(),
+            connection_id: parent.clone(),
+            root_id: if sp.root.is_empty() {
+                parent.clone()
+            } else {
+                sp.root.clone()
+            },
+            depth: parent_depth,
+        };
+        for task in &tasks {
+            // A named 子智能体 drives the delegation; otherwise empty
+            // agent_type = auto-select the first delegatable entry.
+            let assistant_id = task
+                .get("assistant_id")
+                .cloned()
+                .filter(|value| !value.is_null() && value.to_string() != "\"\"");
+            let mut agent_type = text(task.get("agent_type"));
+            if agent_type.is_empty() && assistant_id.is_none() {
+                let profiles = crate::backend::mcp_companion::delegation_agents(&self.root);
+                agent_type = text(
+                    profiles
+                        .first()
+                        .and_then(|row| row.get("agent_type")),
+                );
+            }
+            if agent_type.is_empty() && assistant_id.is_none() {
+                self.event(
+                    &parent,
+                    json!({
+                        "type": "task_split_task_failed",
+                        "split_id": split_id,
+                        "title": text(task.get("title")),
+                        "error": "没有可委派的子智能体",
+                    }),
+                );
+                continue;
+            }
+            let layer = self.self_arc();
+            let caller = caller.clone();
+            let mut args = json!({
+                "task": text(task.get("prompt")),
+                "model": text(task.get("model")),
+            });
+            if let Some(assistant_id) = assistant_id {
+                args["assistant_id"] = assistant_id;
+            } else if !agent_type.is_empty() {
+                args["agent_type"] = json!(agent_type);
+            }
+            tokio::spawn(async move {
+                let _ = layer.delegate_to_agent(&caller, &args).await;
+            });
+        }
+        self.event(
+            &parent,
+            json!({"type": "task_split_resolved", "split_id": split_id, "action": "approve"}),
+        );
+        self.publish_session(&parent).await;
+        Ok(json!({"split_id": split_id, "action": "approve"}))
     }
 
     /// Go `s.event` (connections.go:372): connection-scoped bookkeeping plus
@@ -1114,9 +1317,32 @@ impl Layer {
             conn.options.role = "worker".into();
         }
         let previous = text(args.get("sessionId"));
+        // The conversation row this native session belongs to, if any. Both
+        // resume paths below bind it.
+        let mut conversation_id = 0i64;
         if !previous.is_empty() {
-            // Reuse only a session already owned by this runtime; native
-            // history import has its own adapter-specific path.
+            let doc =
+                store_file::read_json(&self.root.join(".data").join("codeg-workspace.json"))
+                    .ok()
+                    .flatten()
+                    .unwrap_or(Value::Null);
+            for row in doc
+                .get("conversations")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if text(row.get("external_id")) == previous
+                    && text(row.get("agent_type")) == conn.agent_type
+                {
+                    conversation_id = crate::backend::acp::wire::number(row.get("id"));
+                    break;
+                }
+            }
+        }
+        if !previous.is_empty() {
+            // Reuse only a session already owned by this runtime; a session it
+            // does not own is resumed off the transcript on disk below.
             let views = self.runtime().list_json("").await;
             let mut found = false;
             for view in &views {
@@ -1173,36 +1399,35 @@ impl Layer {
                     break;
                 }
             }
-            if !found {
-                return Err("未导入此原生会话，不能无上下文恢复".into());
-            }
-            let mut conversation_id = 0i64;
-            {
-                let doc =
-                    store_file::read_json(&self.root.join(".data").join("codeg-workspace.json"))
-                        .ok()
-                        .flatten()
-                        .unwrap_or(Value::Null);
-                for row in doc
-                    .get("conversations")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
+            if found {
+                let conn_arc = Arc::new(Mutex::new(conn));
+                // Register BEFORE bring-up, exactly like the fresh-session path
+                // below: `connect_finish` resolves events, snapshot and prompt
+                // through `state.connections`, and its error path removes the
+                // entry itself. The runtime rehydrates every persisted record
+                // at startup (`Runtime::load`), so reconnecting any pre-restart
+                // conversation lands here — an unregistered connection handed
+                // the frontend a ghost cid that snapshot/prompt/events all
+                // rejected, which is how restored conversations died after
+                // every app restart.
                 {
-                    if text(row.get("external_id")) == previous
-                        && text(row.get("agent_type")) == conn.agent_type
-                    {
-                        conversation_id = crate::backend::acp::wire::number(row.get("id"));
-                        break;
-                    }
+                    let mut state = self.state.lock().unwrap();
+                    let cid = conn_arc.lock().unwrap().id.clone();
+                    state.connections.insert(cid, conn_arc.clone());
                 }
+                self.bind_conversation(&conn_arc, conversation_id);
+                // continue with the bound connection below
+                return self
+                    .connect_finish(conn_arc, &agent, &options, args, &permission)
+                    .await;
             }
-            let conn_arc = Arc::new(Mutex::new(conn));
-            self.bind_conversation(&conn_arc, conversation_id);
-            // continue with the bound connection below
-            return self
-                .connect_finish(conn_arc, &agent, &options, args, &permission)
-                .await;
+            // Nothing in this runtime owns the session: the harness wrote the
+            // transcript in an earlier run and no wrapper survived the restart.
+            // Seed the record with that native id so `ensure` reloads it
+            // (`session/load` / `session/resume`) instead of refusing to open
+            // the conversation — the context is still on disk.
+            options.native_session_id = previous.clone();
+            conn.options.native_session_id = previous.clone();
         }
         let pool_key = self.warm_pool_key(
             &conn.agent_type,
@@ -1225,6 +1450,9 @@ impl Layer {
             .unwrap()
             .connections
             .insert(cid.clone(), conn_arc.clone());
+        // No-op for a brand-new conversation (conversation_id == 0); a resumed
+        // one has to be re-bound so its row points at this connection again.
+        self.bind_conversation(&conn_arc, conversation_id);
         self.connect_finish(conn_arc, &agent, &options, args, &permission)
             .await
     }
@@ -1895,6 +2123,30 @@ impl Layer {
         let root = self.root.clone();
         let conversation_arg = crate::backend::acp::wire::number(args.get("conversationId"));
         let folder_arg = crate::backend::acp::wire::number(args.get("folderId"));
+        // A delegated child creating its first conversation nests under the
+        // parent's conversation — the Delegation registry row for this
+        // connection carries the parent_conversation_id. Without it the child
+        // would land as a top-level row beside its parent in the sidebar.
+        let parent_conversation = if conversation_arg == 0 {
+            let state = self.state.lock().unwrap();
+            let child_is_delegated = state
+                .connections
+                .get(&cid)
+                .map(|conn| conn.lock().unwrap().depth > 0)
+                .unwrap_or(false);
+            if child_is_delegated {
+                state
+                    .delegations
+                    .values()
+                    .find(|task| task.connection_id == cid)
+                    .map(|task| task.parent_conversation_id)
+                    .unwrap_or(0)
+            } else {
+                0
+            }
+        } else {
+            0
+        };
         let prompt_for_store = prompt_text.clone();
         let user_blocks_for_store = user_blocks.clone();
         let store = tokio::task::spawn_blocking(move || {
@@ -1907,6 +2159,7 @@ impl Layer {
                 &prompt_for_store,
                 &user_blocks_for_store,
                 &native,
+                parent_conversation,
             )
         })
         .await

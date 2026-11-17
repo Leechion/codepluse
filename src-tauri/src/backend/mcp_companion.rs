@@ -13,11 +13,12 @@
 //! (`/api/codeg_mcp`) with the caller's bearer token. The server side
 //! ([`dispatch`]) answers the tool call.
 //!
-//! The delegation tools (`delegate_to_agent`, `resume_delegation`,
+//! The collaboration tools (`delegate_to_agent`, `resume_delegation`,
 //! `get_delegation_status`, `cancel_delegation`, `send_agent_message`,
-//! `propose_task_split`, `check_user_feedback`, `ask_user_question`) need the
-//! delegation task registry, which is not ported yet — they answer with an
-//! explicit error instead of pretending to work.
+//! `propose_task_split`, `check_user_feedback`, `ask_user_question`) resolve
+//! the live layer through the caller's bearer token: `ask_user_question`
+//! parks on the connection until the user answers (the HTTP request blocks,
+//! like Go), and `propose_task_split` returns after the card is raised.
 
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -44,7 +45,7 @@ pub fn tool_definitions() -> Vec<Value> {
     vec![
         tool(
             "list_agents",
-            "列出可委派的 Harness 配置；每个 agent_type 对应已保存的供应商与 default_model。同一个 Harness 可有多个模型配置，请按任务选择具体 agent_type。",
+            "列出子智能体配置中可委派的子智能体；每项含 assistant_id、名称、agent_type（它配置的执行端）与 model。委派时传 assistant_id。",
             &[],
             json!({}),
         ),
@@ -59,10 +60,11 @@ pub fn tool_definitions() -> Vec<Value> {
         ),
         tool(
             "delegate_to_agent",
-            "异步委派完整、自包含的子任务，立即返回 task_id。子代理没有你的对话上下文。可多次调用并行分工，再查询状态收集结果。用户点名 Harness 时使用指定目标。",
-            &["agent_type", "task"],
+            "异步委派完整、自包含的子任务，立即返回 task_id。子代理没有你的对话上下文。可多次调用并行分工，再查询状态收集结果。优先传 list_agents 返回的 assistant_id（由该子智能体配置决定执行端与模型）；用户点名某个子智能体时用它的 assistant_id。",
+            &["task"],
             json!({
-                "agent_type": property("string", "list_agents 返回的 agent_type"),
+                "assistant_id": property("string", "list_agents 返回的 assistant_id；传入后由该子智能体配置决定执行端与模型"),
+                "agent_type": property("string", "可选，未传 assistant_id 时直接指定执行端"),
                 "task": property("string", "完整任务、相关路径、约束、预期结果"),
                 "working_dir": property("string", "可选工作目录，默认继承父会话"),
                 "model": property("string", "可选，目标 Harness 支持的模型 ID"),
@@ -102,7 +104,7 @@ pub fn tool_definitions() -> Vec<Value> {
         ),
         tool(
             "propose_task_split",
-            "把整体任务拆成 1–8 个子任务交给用户确认：返回 split_id 并在界面展示卡片，用户确认后由系统并行派发，无需你逐条调用 delegate_to_agent。每个子任务可指定 agent_type（list_agents 中的 agent_type；留空=自动选择）与 model（留空=该执行端钉住的默认模型）。调用后立即返回：卡片已在用户界面展示，用户确认后由系统自动派发全部子任务。本轮到此结束即可，不要结束前自行执行这些子任务，也禁止再调用 delegate_to_agent 重复派发；若用户随后发来新消息，先查看上方任务状态，切勿重复提案。无需用户挑选目标的单独立项仍用 delegate_to_agent。",
+            "把整体任务拆成 1–8 个子任务交给用户确认：返回 split_id 并在界面展示卡片，用户确认后由系统并行派发，无需你逐条调用 delegate_to_agent。每个子任务可指定 assistant_id（list_agents 中的 assistant_id，由该子智能体配置决定执行端）或 agent_type（留空=自动选择）与 model（留空=该执行端钉住的默认模型）。调用后立即返回：卡片已在用户界面展示，用户确认后由系统自动派发全部子任务。本轮到此结束即可，不要结束前自行执行这些子任务，也禁止再调用 delegate_to_agent 重复派发；若用户随后发来新消息，先查看上方任务状态，切勿重复提案。无需用户挑选目标的单独立项仍用 delegate_to_agent。",
             &["tasks"],
             json!({
                 "tasks": {
@@ -113,7 +115,8 @@ pub fn tool_definitions() -> Vec<Value> {
                         "properties": {
                             "title": property("string", "一句话任务名，用于卡片展示"),
                             "prompt": property("string", "完整、自包含的子任务指令（子代理没有你的上下文）"),
-                            "agent_type": property("string", "list_agents 返回的 agent_type；留空由系统自动选择"),
+                            "assistant_id": property("string", "list_agents 返回的 assistant_id；传入后由该子智能体配置决定执行端"),
+                            "agent_type": property("string", "未指定 assistant_id 时的执行端；留空由系统自动选择"),
                             "model": property("string", "可选，目标 Harness 支持的模型 ID；留空使用钉住的默认模型"),
                         }
                     }
@@ -176,8 +179,16 @@ pub fn main_companion(args: &[String]) -> i32 {
 /// Go `ServeCompanion` (companion.go:59): newline-delimited JSON-RPC over
 /// stdin/stdout; only stdout carries protocol messages.
 fn serve(endpoint: &str, token: &str) -> i32 {
+    // `reqwest::blocking` defaults to a 30-second TOTAL request timeout
+    // (reqwest 0.12.x `blocking::client.rs`: `Timeout(Some(Duration::
+    // from_secs(30)))`), which kills the parked `ask_user_question` call —
+    // it legitimately blocks until the user answers and is released by the
+    // layer, so it cannot hang forever. Disable the total timeout
+    // explicitly (passing `None` opts out of the 30s default) and bound
+    // only the connect phase, so a dead endpoint still fails fast.
     let client = match reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(60))
+        .timeout(None)
+        .connect_timeout(Duration::from_secs(15))
         .build()
     {
         Ok(client) => client,
@@ -376,6 +387,14 @@ pub async fn dispatch(
             let (layer, caller) = collaborators(layer, caller)?;
             Ok(layer.check_user_feedback(caller))
         }
+        "ask_user_question" => {
+            let (layer, caller) = collaborators(layer, caller)?;
+            layer.ask_user_question(caller, args).await
+        }
+        "propose_task_split" => {
+            let (layer, caller) = collaborators(layer, caller)?;
+            layer.propose_task_split(caller, args).await
+        }
         other => Err(format!("未知协作工具：{other}")),
     }
 }
@@ -400,85 +419,45 @@ fn collaborators<'a>(
 /// Go `delegationAgents` (delegation_profiles.go:22): the harnesses that can
 /// take a delegated task.
 pub fn delegation_agents(root: &Path) -> Vec<Value> {
-    let all = crate::backend::acp::commands::agents_rows(root);
-    let mut profiles: Vec<Value> = Vec::new();
-    let mut standalone: Vec<Value> = Vec::new();
-    for row in all.iter() {
-        let text_of = |key: &str| {
-            row.get(key)
-                .and_then(|value| value.as_str())
-                .unwrap_or("")
-                .to_string()
-        };
-        let is_instance = row.get("instance") == Some(&Value::Bool(true));
-        if is_instance {
-            let agent_type = text_of("agent_type");
-            if (!text_of("provider_id").is_empty() || text_of("auth_mode") == "subscription")
-                && !agent_type.starts_with("inst_main_")
-            {
-                profiles.push(row.clone());
-            }
-            continue;
-        }
-        // Harnesses that can never carry a profile are their own target;
-        // disabled or missing ones stay out — a delegate to them can only fail.
-        let pinnable = matches!(text_of("real_tool").as_str(), "claude" | "codex" | "dsh");
-        let enabled = row.get("enabled") == Some(&Value::Bool(true));
-        let available = row.get("available") == Some(&Value::Bool(true));
-        if !pinnable && enabled && available {
-            standalone.push(row.clone());
-        }
-    }
-    // A native harness with saved account profiles must resolve through those
-    // profiles too.
-    let configured_bases: Vec<String> = profiles
-        .iter()
-        .map(|row| {
-            row.get("base_agent_type")
-                .and_then(|value| value.as_str())
-                .unwrap_or("")
-                .to_string()
-        })
-        .collect();
-    let standalone: Vec<Value> = standalone
+    // 子智能体配置 is the single delegation entry: every enabled assistant
+    // row, never the raw ACP instance profiles it happens to run on.
+    super::acp::delegation::assistant_rows(root)
         .into_iter()
         .filter(|row| {
+            row.get("deleted_at")
+                .map(|value| value.is_null())
+                .unwrap_or(true)
+                && row
+                    .get("enabled")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true)
+        })
+        .filter_map(|row| {
             let agent_type = row
                 .get("agent_type")
                 .and_then(|value| value.as_str())
                 .unwrap_or("")
                 .to_string();
-            !configured_bases.contains(&agent_type)
+            if agent_type.is_empty() {
+                return None;
+            }
+            let mut entry = json!({
+                "assistant_id": row.get("id").cloned().unwrap_or(Value::Null),
+                "assistant_uid": row.get("uid").cloned().unwrap_or(Value::Null),
+                "name": row.get("name").cloned().unwrap_or(Value::Null),
+                "description": row.get("description").cloned().unwrap_or(Value::Null),
+                "agent_type": agent_type,
+            });
+            let model = row
+                .pointer("/agent_options/config_values/model")
+                .cloned()
+                .unwrap_or(Value::Null);
+            if !model.is_null() {
+                entry["model"] = model;
+            }
+            Some(entry)
         })
-        .collect();
-    if !profiles.is_empty() {
-        let mut out = profiles;
-        out.extend(standalone);
-        return out;
-    }
-    // Without profiles the strict main-bot setting decides whether the bare
-    // harnesses are offered at all.
-    let main =
-        crate::backend::store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
-            .ok()
-            .flatten()
-            .and_then(|doc| {
-                doc.get("settings")
-                    .and_then(|settings| settings.get("get_main_bot_settings"))
-                    .cloned()
-            })
-            .unwrap_or(Value::Null);
-    let strict = !main
-        .get("provider_id")
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .is_empty()
-        || main.get("auth_mode").and_then(|value| value.as_str()) == Some("subscription");
-    if strict {
-        standalone
-    } else {
-        all
-    }
+        .collect()
 }
 
 // ── fetch_url (webfetch.go) ───────────────────────────────────────────────
@@ -723,6 +702,44 @@ mod tests {
         assert_eq!(tools[0]["inputSchema"]["required"], json!([]));
         assert_eq!(tools[6]["name"], json!("fetch_url"));
         assert_eq!(tools[6]["inputSchema"]["required"], json!(["url"]));
+    }
+
+    /// The delegation list is the 子智能体配置 store and nothing else: old
+    /// ACP instance profiles never surface, disabled or deleted rows stay out.
+    #[test]
+    fn delegation_agents_lists_enabled_assistants_only() {
+        let dir = std::env::temp_dir().join(format!("codeg-mcp-agents-{}", std::process::id()));
+        let data = dir.join(".data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(
+            data.join("codeg-workspace.json"),
+            json!({
+                "assistants": [
+                    {"id": 1, "name": "调研", "agent_type": "inst_claude2",
+                     "agent_options": {"config_values": {"model": "m1"}},
+                     "enabled": true, "deleted_at": null},
+                    {"id": 2, "name": "已停用", "agent_type": "claude_code",
+                     "enabled": false, "deleted_at": null},
+                    {"id": 3, "name": "已删除", "agent_type": "claude_code",
+                     "enabled": true, "deleted_at": "2026-01-01T00:00:00Z"},
+                    {"id": 4, "name": "无执行端", "agent_type": null,
+                     "enabled": true, "deleted_at": null}
+                ],
+                "agents": [
+                    {"agent_type": "inst_claude3", "instance": true,
+                     "provider_id": "acct", "enabled": true}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let agents = delegation_agents(&dir);
+        assert_eq!(agents.len(), 1, "only the enabled, configured sub-agent");
+        assert_eq!(agents[0]["assistant_id"], json!(1));
+        assert_eq!(agents[0]["name"], json!("调研"));
+        assert_eq!(agents[0]["agent_type"], json!("inst_claude2"));
+        assert_eq!(agents[0]["model"], json!("m1"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

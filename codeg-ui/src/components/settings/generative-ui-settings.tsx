@@ -30,6 +30,7 @@ import {
   type GenerativeUiSkillInfo,
 } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
+import { isProviderAgent } from "@/lib/custom-agents"
 import { piUsesCustomAgentDir } from "@/lib/pi-config"
 import type { AcpAgentInfo, AgentType, ExpertLinkState } from "@/lib/types"
 
@@ -68,7 +69,10 @@ export function GenerativeUiBody({
       // default-dir skill store, so it doesn't get a column here.
       setAgents(
         agentList.filter(
-          (agent) => agent.skills_capable && !piUsesCustomAgentDir(agent)
+          (agent) =>
+            agent.skills_capable &&
+            isProviderAgent(agent) &&
+            !piUsesCustomAgentDir(agent)
         )
       )
       setReloadKey((k) => k + 1)

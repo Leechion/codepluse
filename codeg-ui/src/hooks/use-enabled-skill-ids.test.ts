@@ -165,3 +165,54 @@ describe("useEnabledSkillIds — custom-dir pi gating", () => {
     )
   })
 })
+
+describe("useEnabledSkillIds — usable gating", () => {
+  function status(
+    expertId: string,
+    state: ExpertInstallStatus["state"],
+    usable?: boolean
+  ): ExpertInstallStatus {
+    return {
+      expertId,
+      agentType: "claude_code",
+      state,
+      linkPath: "",
+      targetPath: null,
+      expectedTargetPath: "",
+      copyMode: false,
+      ...(usable === undefined ? {} : { usable }),
+    }
+  }
+
+  it("enables a blocked skill the agent can actually load (usable: true)", async () => {
+    const { api, hook } = await setup()
+    // The post-fix claude_code reality: the real directory holds a SKILL.md,
+    // so `usable` is true even while `state` stays blocked_by_real_directory.
+    vi.mocked(api.expertsListAllInstallStatuses).mockResolvedValue([
+      status("brainstorming", "blocked_by_real_directory", true),
+      status("writer", "not_linked", false),
+    ])
+
+    const { result } = renderHook(() => hook.useEnabledSkillIds("claude_code"))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+
+    expect(result.current.enabledIds.has("brainstorming")).toBe(true)
+    expect(result.current.enabledIds.has("writer")).toBe(false)
+  })
+
+  it("keeps old-shape rows gating on state alone (usable missing)", async () => {
+    const { api, hook } = await setup()
+    // Rows emitted by a backend predating the `usable` field: no regression in
+    // what used to gate — blocked stays locked, linked stays enabled.
+    vi.mocked(api.expertsListAllInstallStatuses).mockResolvedValue([
+      status("brainstorming", "blocked_by_real_directory"),
+      status("writer", "linked_to_codeg"),
+    ])
+
+    const { result } = renderHook(() => hook.useEnabledSkillIds("claude_code"))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+
+    expect(result.current.enabledIds.has("brainstorming")).toBe(false)
+    expect(result.current.enabledIds.has("writer")).toBe(true)
+  })
+})

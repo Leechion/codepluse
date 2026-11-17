@@ -142,6 +142,7 @@ pub fn normalize_confirmed_tasks(raw: &[Value]) -> Result<Vec<Value>, String> {
             "title": title,
             "prompt": prompt,
             "agent_type": item.get("agent_type").cloned().unwrap_or(Value::Null),
+            "assistant_id": item.get("assistant_id").cloned().unwrap_or(Value::Null),
             "model": item.get("model").cloned().unwrap_or(Value::Null),
         }));
     }

@@ -105,11 +105,14 @@ function releaseFocusRefresh(): void {
 
 /**
  * Returns the set of skill ids (built-in experts + office tools + science)
- * currently
- * enabled — i.e. symlinked into the given agent's skill directory — for the
- * passed agent. Mirrors the settings page's "enabled" definition: a
- * `(skillId, agentType)` pair counts as enabled only when its install status is
- * `linked_to_codeg`.
+ * currently **usable** by the passed agent — i.e. loadable from that agent's
+ * own skill directory, regardless of who put the file there (codeg link/copy,
+ * a symlink to anywhere, or a real directory holding a SKILL.md). The
+ * settings matrix still edits codeg's own links; this gate answers what the
+ * agent can actually load, so a skill the provider can already use is never
+ * locked behind codeg bookkeeping (see `usable` on ExpertInstallStatus).
+ * Instances share their base tool's skill directory, so enablement at the
+ * provider level is inherited by every model/agent under it.
  *
  * `ready` is false until the first snapshot resolves successfully, so callers
  * can avoid marking everything as "not enabled" during the initial async load
@@ -194,10 +197,15 @@ export function useEnabledSkillIds(agentType: AgentType | null): {
     const set = new Set<string>()
     if (!snapshot || !agentType || piSkillsUnmanaged) return set
     for (const status of snapshot) {
-      if (
-        status.agentType === agentType &&
-        status.state === "linked_to_codeg"
-      ) {
+      if (status.agentType !== agentType) continue
+      // `usable` is the agent-truthful signal: the skill is loadable from the
+      // agent's own skill directory — a codeg link/copy, a symlink to anywhere,
+      // or a real directory holding a SKILL.md (e.g. skills the user installed
+      // by hand or that shipped with the harness). Gating on it honors
+      // "provider enabled in Settings ⇒ the models/agents under it can use it"
+      // instead of requiring codeg's exact link. The `linked_to_codeg` fallback
+      // keeps older rows (no `usable` field) gating exactly as before.
+      if (status.usable === true || status.state === "linked_to_codeg") {
         set.add(status.expertId)
       }
     }

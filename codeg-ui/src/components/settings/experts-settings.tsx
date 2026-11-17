@@ -17,6 +17,7 @@ import {
 } from "@/lib/api"
 import { invalidateAgentSkillsCache } from "@/hooks/use-agent-skills"
 import { useLatestCall } from "@/hooks/use-latest-call"
+import { isProviderAgent } from "@/lib/custom-agents"
 import { piUsesCustomAgentDir } from "@/lib/pi-config"
 import type { AcpAgentInfo, ExpertLinkState, ExpertListItem } from "@/lib/types"
 import { toErrorMessage } from "@/lib/app-error"
@@ -64,7 +65,10 @@ export function ExpertsBody({
       // default-dir skill store, so it doesn't get a column here.
       setAgents(
         agentList.filter(
-          (agent) => agent.skills_capable && !piUsesCustomAgentDir(agent)
+          (agent) =>
+            agent.skills_capable &&
+            isProviderAgent(agent) &&
+            !piUsesCustomAgentDir(agent)
         )
       )
       setReloadKey((k) => k + 1)

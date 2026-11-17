@@ -253,6 +253,8 @@ export type ReasoningTriggerProps = ComponentProps<
 > & {
   getThinkingMessage?: (isStreaming: boolean, duration?: number) => ReactNode
   streamingText?: string
+  /** The activity timeline renders the shared rail icon instead. */
+  showIcon?: boolean
 }
 
 export function scrollReasoningSummaryToEnd(
@@ -306,6 +308,7 @@ export const ReasoningTrigger = memo(
     children,
     getThinkingMessage,
     streamingText = "",
+    showIcon = true,
     ...props
   }: ReasoningTriggerProps) => {
     const { isStreaming, isOpen, duration } = useReasoning()
@@ -391,7 +394,9 @@ export const ReasoningTrigger = memo(
           <>
             {/* thinking 会在长流式回复里持续存在，旋转 loader 会长期占用渲染资源；
             运行态保留文案扫光，图标固定为静态思考语义。 */}
-            <BrainIcon className="size-4 shrink-0 text-muted-foreground" />
+            {showIcon ? (
+              <BrainIcon className="size-4 shrink-0 text-muted-foreground" />
+            ) : null}
             {/* 右侧流式摘要是可伸缩内容；如果左侧标签也参与 flex shrink，
                 长摘要会把思考状态标签挤成多行。固定语义标签宽度，只让摘要占剩余空间。 */}
             <span

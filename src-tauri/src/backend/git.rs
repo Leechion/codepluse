@@ -301,18 +301,50 @@ pub(crate) fn within_root(base: &Path, target: &Path) -> bool {
     }
 }
 
-/// `cmd/serve/state.go:resolveWorkdir`.
+/// `cmd/serve/state.go:resolveWorkdir`, bounded by the *readable* roots.
+///
+/// Go enforces two different boundaries: `resolveWorkdir` (a work directory must
+/// sit inside the workspace root) and `readableRoots` (file / git / terminal work
+/// may touch the root *plus* every opened folder). The Rust port collapsed both
+/// into a root-only check, so opening a folder outside the default root "worked"
+/// and then every later operation on it was rejected as out of range — which the
+/// UI reported as "cannot open the system folder picker".
 pub(crate) fn resolve(root: &Path, input: &str) -> Result<PathBuf, String> {
     let resolved = resolve_existing_path(input, root);
     if std::env::var("HARNESS_HUB_ALLOW_ANY_PATH").as_deref() == Ok("1") {
         return Ok(resolved);
     }
-    let real_root = strip_verbatim(eval_symlinks(root));
-    if within_root(&real_root, &resolved) {
-        Ok(resolved)
-    } else {
-        Err(format!("工作目录必须位于 {} 之内", root.display()))
+    let real = strip_verbatim(eval_symlinks(&resolved));
+    for base in readable_roots(root) {
+        let base = strip_verbatim(eval_symlinks(&base));
+        if within_root(&base, &real) {
+            return Ok(resolved);
+        }
     }
+    Err(format!("路径超出工作区范围：{}", resolved.display()))
+}
+
+/// Opening a folder is what *creates* a readable root, so it cannot be judged
+/// against them. Any existing directory is accepted, matching the Go
+/// `open_folder` handler (which only stats the path).
+///
+/// The existence check has to happen on the requested path itself: `resolve`
+/// collapses a non-existent tail onto its nearest existing ancestor (Go parity),
+/// so a typo'd path would otherwise silently open the *parent* directory.
+pub(crate) fn resolve_openable(root: &Path, input: &str) -> Result<PathBuf, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("项目目录不存在".into());
+    }
+    let requested = if Path::new(trimmed).is_absolute() {
+        PathBuf::from(trimmed)
+    } else {
+        root.join(trimmed)
+    };
+    if !requested.is_dir() {
+        return Err("项目目录不存在".into());
+    }
+    Ok(resolve_existing_path(trimmed, root))
 }
 
 /// `codeg/files.go:readableRoots` — workspace root + every opened folder.
@@ -1883,7 +1915,36 @@ mod tests {
             json!({"path": outside.to_string_lossy()}),
         )
         .unwrap_err();
-        assert!(err.contains("工作目录必须位于"), "{err}");
+        assert!(err.contains("路径超出工作区范围"), "{err}");
+    }
+
+    /// 打开过的文件夹会并入可读根；否则「选中一个外部目录」之后，对它做任何
+    /// 文件/终端/Git 操作都会被误判为越界。
+    #[test]
+    fn opened_folders_widen_the_readable_roots() {
+        let root = temp_dir("ws-widen");
+        let outside = temp_dir("ws-opened");
+        std::fs::create_dir_all(root.join(".data")).unwrap();
+        std::fs::write(
+            root.join(".data").join("codeg-workspace.json"),
+            serde_json::to_vec(&json!({
+                "folders": [{"id": 9, "path": outside.to_string_lossy(), "open": true}]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let inside_opened = crate::backend::git::resolve(
+            &root,
+            &outside.to_string_lossy(),
+        )
+        .expect("已打开的文件夹应当可解析");
+        assert_eq!(inside_opened, outside);
+
+        let other = temp_dir("ws-still-blocked");
+        let err = crate::backend::git::resolve(&root, &other.to_string_lossy())
+            .unwrap_err();
+        assert!(err.contains("路径超出工作区范围"), "{err}");
     }
 
     #[test]

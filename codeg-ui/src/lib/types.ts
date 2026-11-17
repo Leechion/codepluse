@@ -4395,6 +4395,15 @@ export interface ExpertInstallStatus {
   expertId: string
   agentType: AgentType
   state: ExpertLinkState
+  /**
+   * Whether the agent can actually load this skill from its own skill
+   * directory, regardless of who put it there: a codeg link/copy, a symlink
+   * to anywhere, or a real directory holding a SKILL.md. Chat-side gating
+   * reads this instead of `state` so an agent that can already use a skill
+   * is never locked behind codeg's link bookkeeping. Optional because
+   * office-tool rows (empty while OfficeCLI is absent) omit it.
+   */
+  usable?: boolean
   linkPath: string
   targetPath: string | null
   expectedTargetPath: string

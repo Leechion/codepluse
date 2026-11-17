@@ -187,7 +187,7 @@ export function ActivityRow({
     >
       <span
         className={cn(
-          "activity-marker absolute flex items-center justify-center",
+          "activity-marker absolute flex -translate-y-0.5 items-center justify-center",
           MARKER_POSITION[variant][markerKind]
         )}
       >

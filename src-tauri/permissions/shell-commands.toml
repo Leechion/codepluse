@@ -1,0 +1,36 @@
+# 应用级命令（非插件命令）的 ACL 授权。
+#
+# Tauri v2 里 `#[tauri::command]` 定义在应用自己的 crate 中时，同样要显式声明
+# 权限并在 capabilities 里引用，否则前端 invoke 会被拒绝，报
+# “Command <name> not allowed by ACL”。这些命令是外壳窗口控件与登录页跳转，
+# 只有 loopback 页面（见 capabilities/main-shell.json 的 remote.urls）能调用。
+
+[[permission]]
+identifier = "allow-open-external"
+description = "打开 HTTPS 登录页到系统浏览器（仅 https、无 userinfo）。"
+commands.allow = ["open_external"]
+
+[[permission]]
+identifier = "allow-window-open"
+description = "按路径打开一个新的应用窗口。"
+commands.allow = ["window_open"]
+
+[[permission]]
+identifier = "allow-window-close"
+description = "关闭当前应用窗口。"
+commands.allow = ["window_close"]
+
+[[permission]]
+identifier = "allow-window-minimize"
+description = "最小化当前应用窗口。"
+commands.allow = ["window_minimize"]
+
+[[permission]]
+identifier = "allow-window-toggle-maximize"
+description = "最大化 / 还原当前应用窗口。"
+commands.allow = ["window_toggle_maximize"]
+
+[[permission]]
+identifier = "allow-window-begin-drag"
+description = "开始拖动窗口（自绘标题栏用）。"
+commands.allow = ["window_begin_drag"]

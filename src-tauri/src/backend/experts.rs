@@ -359,9 +359,17 @@ fn delete_agent_skill(home: &Path, root: &Path, args: &Value) -> Result<Value, S
     Ok(Value::Null)
 }
 
-/// Go compares resolved paths with `strings.EqualFold`.
+/// Go compares resolved paths with `strings.EqualFold`. The two strings arrive
+/// with mixed separator styles: the central path is built from a root that may
+/// carry forward slashes (`E:/code/codepluse\codeg-assets\...`) while copy
+/// markers and symlink targets were written with native backslashes
+/// (`E:\code\codepluse\codeg-assets\...`). Folding only case made every such
+/// pair read as "blocked_by_real_directory", so fold both case and separators.
 fn eq_fold(a: &str, b: &str) -> bool {
-    a.to_lowercase() == b.to_lowercase()
+    fn fold(s: &str) -> String {
+        s.replace('\\', "/").to_lowercase()
+    }
+    fold(a) == fold(b)
 }
 
 fn resolved_text(path: &Path) -> String {
@@ -436,10 +444,22 @@ fn skill_status(home: &Path, name: &str, agent_type: &str, central: &str) -> Val
             _ => state = "blocked_by_real_directory",
         }
     }
+    // `usable` answers a different question than `state`: can the AGENT load
+    // this skill from its own directory, regardless of who put it there? A
+    // codeg link/copy obviously yes; a symlink to anywhere resolves to a real
+    // directory the harness reads fine; a real directory counts only when it
+    // actually holds a SKILL.md. Chat-side gating reads this field so a skill
+    // the provider can already use is never locked behind codeg bookkeeping.
+    let usable = match state {
+        "linked_to_codeg" | "linked_elsewhere" => true,
+        "blocked_by_real_directory" => link.join("SKILL.md").is_file(),
+        _ => false,
+    };
     json!({
         "expertId": name,
         "agentType": agent_type,
         "state": state,
+        "usable": usable,
         "linkPath": link.to_string_lossy(),
         "targetPath": target,
         "expectedTargetPath": central,
@@ -1454,5 +1474,102 @@ mod tests {
         )
         .expect("owned now");
         assert_eq!(outcome.unwrap_err(), "执行端不存在");
+    }
+
+    /// Production hit this: copy markers written with native backslashes read
+    /// as `blocked_by_real_directory` once the live central path arrived with
+    /// forward slashes (a root passed as `E:/code/...`). The comparison must
+    /// fold separators, not just case.
+    #[test]
+    fn copy_marker_paths_compare_across_separator_styles() {
+        let f = fixture("markers");
+        seed(&f.root, "experts");
+        let link = native_skill_root(&f.home, "claude").join("one");
+        fs::create_dir_all(&link).unwrap();
+        fs::write(link.join("SKILL.md"), "# one\n").unwrap();
+        // Marker in native form; live central path in forward-slash form.
+        fs::write(
+            link.join(COPY_MARKER),
+            f.root
+                .join("codeg-assets")
+                .join("experts")
+                .join("skills")
+                .join("one")
+                .to_string_lossy()
+                .as_bytes(),
+        )
+        .unwrap();
+        let fwd_root = PathBuf::from(f.root.to_string_lossy().replace('\\', "/"));
+        let row = run_with_home(
+            &f.home,
+            &fwd_root,
+            "experts_get_install_status",
+            &serde_json::json!({"expertId": "one", "agentType": "claude"}),
+        )
+        .unwrap();
+        assert_eq!(row["state"], "linked_to_codeg", "{row}");
+        assert_eq!(row["copyMode"], true);
+        // The same row must also unlink cleanly under the mismatched style.
+        let after = run_with_home(
+            &f.home,
+            &fwd_root,
+            "experts_unlink_from_agent",
+            &serde_json::json!({"expertId": "one", "agentType": "claude"}),
+        )
+        .unwrap();
+        assert_eq!(after["state"], "not_linked");
+        assert!(!link.exists());
+    }
+
+    /// `usable` answers what the agent can load, independent of codeg's own
+    /// link bookkeeping: linked/copy ⇒ usable, a real directory only when it
+    /// actually holds a SKILL.md, not_linked/broken ⇒ not usable.
+    #[test]
+    fn usable_reports_whether_the_agent_can_load_the_skill() {
+        let f = fixture("usable");
+        seed(&f.root, "experts");
+        let probe = |agent: &str| {
+            run_with_home(
+                &f.home,
+                &f.root,
+                "experts_get_install_status",
+                &serde_json::json!({"expertId": "one", "agentType": agent}),
+            )
+            .unwrap()
+        };
+
+        // Nothing installed: neither codeg-linked nor agent-loadable.
+        let row = probe("claude");
+        assert_eq!(row["state"], "not_linked");
+        assert_eq!(row["usable"], false);
+
+        // codeg's own link/copy: usable however it was materialized.
+        run_with_home(
+            &f.home,
+            &f.root,
+            "experts_link_to_agent",
+            &serde_json::json!({"expertId": "one", "agentType": "claude"}),
+        )
+        .unwrap();
+        let row = probe("claude");
+        assert_eq!(row["state"], "linked_to_codeg");
+        assert_eq!(row["usable"], true);
+
+        // A real directory WITH a SKILL.md is blocked for codeg's bookkeeping
+        // but the agent can still load it.
+        let link = native_skill_root(&f.home, "codex").join("one");
+        fs::create_dir_all(&link).unwrap();
+        fs::write(link.join("SKILL.md"), "# mine\n").unwrap();
+        let row = probe("codex");
+        assert_eq!(row["state"], "blocked_by_real_directory");
+        assert_eq!(row["usable"], true);
+
+        // A real directory without a SKILL.md is neither linked nor loadable.
+        let link = native_skill_root(&f.home, "dsh").join("one");
+        fs::create_dir_all(&link).unwrap();
+        fs::write(link.join("keep.txt"), "mine").unwrap();
+        let row = probe("dsh");
+        assert_eq!(row["state"], "blocked_by_real_directory");
+        assert_eq!(row["usable"], false);
     }
 }

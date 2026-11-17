@@ -35,7 +35,8 @@
     "deleteProfile": "Delete this model configuration?",
     "bareHarness": "Este harness gerencia o próprio provedor e modelo. As novas conversas ainda começam nele, e o agente principal pode delegar a ele como está.",
     "bareDelegation": "Estes harnesses gerenciam o próprio provedor e modelo, então não há o que configurar aqui — o agente principal delega a eles diretamente: {harnesses}",
-    "immutableHarness": "Create a new configuration to use another harness."
+    "immutableHarness": "Create a new configuration to use another harness.",
+    "mainUnset": "Não configurado"
   },
   "SettingsNavigation": {
     "skills": "Habilidades",
@@ -95,7 +96,7 @@
     "nav": {
       "general": "Geral",
       "appearance": "Aparência",
-      "agents": "Agentes",
+      "agents": "Provedores",
       "mcp": "MCP",
       "skills": "Skills",
       "shortcuts": "Atalhos",
@@ -7712,7 +7713,7 @@
     }
   },
   "Connections": {
-    "title": "Agents",
+    "title": "Provedores",
     "description": "Manage API providers, native accounts, and models for each harness.",
     "harness": "Agent",
     "chooseHarness": "Choose an agent",
@@ -7733,6 +7734,7 @@
     "modelName": "Display name (optional)",
     "accountDefault": "Use the account default model",
     "nativeAccount": "Native official account",
+    "credits": "Créditos {value}",
     "credentialsFound": "Native sign-in credentials found",
     "accountManaged": "Sign-in is managed by the native client",
     "loginRequired": "No native sign-in found. Sign in with the native client first.",

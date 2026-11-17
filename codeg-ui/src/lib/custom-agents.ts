@@ -23,6 +23,7 @@ import {
   instanceBaseAgent,
   isCustomAgentType,
   isInstanceAgentType,
+  type AcpAgentInfo,
   type AgentType,
   type BuiltinAgentType,
 } from "@/lib/types"
@@ -118,6 +119,26 @@ export function getAgentIconUrl(agentType: AgentType): string | null {
   const id = displayKeyOf(agentType)
   if (!id) return null
   return customAgentIcons.get(id) ?? null
+}
+
+/**
+ * Whether an agent is a real **provider** — a built-in harness (Codex, Claude
+ * Code, an `account_*` channel) or a user-wired `custom:` ACP — rather than one
+ * of the user's own `inst_*` copies.
+ *
+ * An instance is a provider pinned to its own model and connection: every
+ * per-agent surface either inherits the provider's setting or shows a locked
+ * duplicate of it. So lists that answer "which harness" or "which skill store"
+ * (agent pickers, skill matrix columns) exclude instances; lists that answer
+ * "which agent did this run use" must keep them.
+ *
+ * Checks the prefix as well as the flag: a listing that omits `instance` still
+ * cannot make an `inst_` id a provider.
+ */
+export function isProviderAgent(
+  agent: Pick<AcpAgentInfo, "agent_type" | "instance">
+): boolean {
+  return !agent.instance && !isInstanceAgentType(agent.agent_type)
 }
 
 /** Turn `github-copilot-cli` into `Github Copilot Cli`. */

@@ -792,7 +792,7 @@ describe("adaptMessageTurn proposed plan", () => {
   it("keeps a tag quoted in an inline code span as plain text", () => {
     const text =
       "**缺陷 A — 计划卡片**。新增 `event_msg.item_completed` 分支，" +
-      "并把助手的 `<proposed_plan>` 记录从 promotion 闸门前拦下来单独处理。"
+      "并把子智能体的 `<proposed_plan>` 记录从 promotion 闸门前拦下来单独处理。"
     const adapted = wrap(text)
     expect(adapted.content.map((p) => p.type)).toEqual(["text"])
     expect(adapted.content[0]).toMatchObject({ type: "text", text })
@@ -807,7 +807,7 @@ describe("adaptMessageTurn proposed plan", () => {
 
   it("keeps several quoted mentions in one block as plain text", () => {
     const text =
-      "| 助手正文落在哪 | `item_completed`(14) + `<proposed_plan>`(15) | 正常 |\n" +
+      "| 子智能体正文落在哪 | `item_completed`(14) + `<proposed_plan>`(15) | 正常 |\n" +
       "解析器两份都不要：`<proposed_plan>` 撞上 promotion 闸门。"
     const adapted = wrap(text)
     expect(adapted.content.map((p) => p.type)).toEqual(["text"])
@@ -827,7 +827,7 @@ describe("adaptMessageTurn proposed plan", () => {
   // cannot see the quote yet; the opener is still mid-line, which is what stops
   // a half-typed sentence from flashing a plan card.
   it("keeps a half-typed quote as plain text while the turn streams", () => {
-    const adapted = wrap("并把助手的 `<proposed_plan>", true)
+    const adapted = wrap("并把子智能体的 `<proposed_plan>", true)
     expect(adapted.content.map((p) => p.type)).toEqual(["text"])
   })
 

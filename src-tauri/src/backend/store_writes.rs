@@ -477,7 +477,7 @@ fn run_inner(
 
         // ---- workspace: folders ----
         "open_folder" | "open_folder_in_workspace" => {
-            let resolved = git::resolve(root, &txt(args, "path"))?;
+            let resolved = git::resolve_openable(root, &txt(args, "path"))?;
             match std::fs::metadata(&resolved) {
                 Ok(meta) if meta.is_dir() => {}
                 _ => return Err("项目目录不存在".into()),
@@ -846,7 +846,7 @@ fn sidebar_entity_command(root: &Path, command: &str, args: &Value) -> Result<Va
         "assistant_update" => {
             let aid = num(args, "id");
             let Some(mut row) = find_by_id(rows(&doc, "assistants"), aid) else {
-                return Err("助手不存在".into());
+                return Err("子智能体不存在".into());
             };
             let patch = args.get("patch").cloned().unwrap_or(Value::Null);
             if let Some(name) = patch.get("name") {
@@ -876,7 +876,7 @@ fn sidebar_entity_command(root: &Path, command: &str, args: &Value) -> Result<Va
         "assistant_delete" => {
             let aid = num(args, "id");
             let Some(mut row) = find_by_id(rows(&doc, "assistants"), aid) else {
-                return Err("助手不存在".into());
+                return Err("子智能体不存在".into());
             };
             let now = goformat::timestamp();
             row["deleted_at"] = json!(now);
@@ -1663,6 +1663,51 @@ mod tests {
         );
     }
 
+    /// 「选择一个文件夹作为工作空间」必须能接受工作区根之外的目录：打开动作
+    /// 本身就是新增可读根，不能拿可读根去校验它。
+    #[test]
+    fn opens_folders_outside_the_workspace_root() {
+        let root = temp_root("open-outside");
+        seed(&root, json!({}));
+        let outside = std::env::temp_dir().join(format!(
+            "codepluse-open-outside-target-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&outside).unwrap();
+
+        let folder = ok(
+            &root,
+            "open_folder",
+            json!({"path": outside.to_string_lossy()}),
+        );
+        assert_eq!(
+            folder["path"],
+            json!(outside.to_string_lossy().to_string()),
+            "{folder}"
+        );
+        let doc = store_file::read_json(&store_path(&root)).unwrap().unwrap();
+        assert!(
+            doc["folders"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["path"] == json!(outside.to_string_lossy().to_string())),
+            "{doc}"
+        );
+
+        // 不存在的目录仍然拒绝。
+        let missing = outside.join("nope");
+        assert_eq!(
+            err(&root, "open_folder", json!({"path": missing.to_string_lossy()})),
+            "项目目录不存在"
+        );
+        let _ = fs::remove_dir_all(&outside);
+    }
+
     #[test]
     fn branch_tag_setting_is_written() {
         let root = temp_root("branch");
@@ -1755,7 +1800,7 @@ mod tests {
         assert_eq!(changed.as_array().unwrap().len(), 0, "幂等时无行返回");
         assert_eq!(
             err(&root, "assistant_update", json!({"id": 42, "patch": {}})),
-            "助手不存在"
+            "子智能体不存在"
         );
     }
 

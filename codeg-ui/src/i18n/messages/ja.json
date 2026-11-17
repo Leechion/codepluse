@@ -35,7 +35,8 @@
     "deleteProfile": "Delete this model configuration?",
     "bareHarness": "このハーネスはプロバイダとモデルを自身で管理します。新しい会話は引き続きこのハーネスで始まり、メインエージェントはそのまま委任できます。",
     "bareDelegation": "次のハーネスはプロバイダとモデルを自身で管理するため、ここに設定項目はありません。メインエージェントが直接委任します: {harnesses}",
-    "immutableHarness": "Create a new configuration to use another harness."
+    "immutableHarness": "Create a new configuration to use another harness.",
+    "mainUnset": "未設定"
   },
   "SettingsNavigation": {
     "skills": "スキル",
@@ -95,7 +96,7 @@
     "nav": {
       "general": "一般",
       "appearance": "外観",
-      "agents": "エージェント",
+      "agents": "プロバイダー",
       "mcp": "MCP",
       "skills": "Skills",
       "shortcuts": "ショートカット",
@@ -7712,7 +7713,7 @@
     }
   },
   "Connections": {
-    "title": "Agents",
+    "title": "プロバイダー",
     "description": "Manage API providers, native accounts, and models for each harness.",
     "harness": "Agent",
     "chooseHarness": "Choose an agent",
@@ -7733,6 +7734,7 @@
     "modelName": "Display name (optional)",
     "accountDefault": "Use the account default model",
     "nativeAccount": "Native official account",
+    "credits": "クレジット {value}",
     "credentialsFound": "Native sign-in credentials found",
     "accountManaged": "Sign-in is managed by the native client",
     "loginRequired": "No native sign-in found. Sign in with the native client first.",

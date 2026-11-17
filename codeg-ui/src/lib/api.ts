@@ -607,6 +607,12 @@ export interface AccountChannelAccount {
   id?: string
   /** 协议进程给的是 nickname（账号昵称）。 */
   nickname?: string
+  /** 上游资料接口给出的真实用户名；拿不到时省略。 */
+  username?: string
+  /** 上游资料接口给出的头像地址（带签名，会过期，由协议进程按 TTL 重新取）。 */
+  avatarUrl?: string
+  /** 剩余积分；上游没有下发这个字段时省略。 */
+  credits?: number
   name?: string
   enabled?: boolean
   expiresAt?: string

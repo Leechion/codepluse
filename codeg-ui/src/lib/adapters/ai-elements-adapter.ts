@@ -473,7 +473,7 @@ type TextRange = readonly [number, number]
  * `<proposed_plan>` is matched as a bare substring, so an assistant that merely
  * *writes about* the tag hits the same detector codex's real plans do — and any
  * agent can do that, not just codex. It happens for real: an unclosed mention
- * inside a code span (``…助手的 `<proposed_plan>` 记录…``) used to swallow the
+ * inside a code span (``…子智能体的 `<proposed_plan>` 记录…``) used to swallow the
  * whole rest of the message into a plan card. Anything the reader will see as
  * literal code is quoting the tag, never emitting it, so it is skipped here.
  *

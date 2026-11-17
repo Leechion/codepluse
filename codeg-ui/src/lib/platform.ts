@@ -192,6 +192,21 @@ export async function openFileDialog(options?: {
         : (options ?? {})
     )
   }
+  // Tauri 窗口里 `window.prompt` 不可用：WebView2 把脚本对话框交给宿主，
+  // 宿主（本仓库的 shell）不处理 `ScriptDialogOpening`，prompt 就一直挂着，
+  // 页面看起来像「选择器打不开」。目录选择改走后端 `pick_directory`——它用
+  // 系统原生 FolderBrowserDialog（Rust 侧 misc.rs），本机与远程工作区都对。
+  if (options?.directory && isTauriWindow()) {
+    const picked = (await getTransport().call(
+      "pick_directory",
+      {},
+      // 用户可能盯着资源管理器挑很久，别用默认超时把它掐断。
+      { timeoutMs: 300_000 }
+    )) as string
+    if (!picked) return null
+    // 后端只返回一个路径；多选场景退化成单选，调用方拿到的仍是数组。
+    return options.multiple ? [picked] : picked
+  }
   // Web fallback: for directory selection, prompt for server-side path.
   // For file selection, use a hidden file input.
   if (options?.directory) {
@@ -215,6 +230,16 @@ export async function openFileDialog(options?: {
     input.click()
   })
 }
+
+/**
+ * True inside any Tauri webview — including the sidecar shell, which reports
+ * itself as "web" for transport purposes but still cannot run browser-only UI
+ * primitives like `window.prompt`.
+ */
+function isTauriWindow(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+}
+
 
 /**
  * Get the current Tauri window (desktop only).

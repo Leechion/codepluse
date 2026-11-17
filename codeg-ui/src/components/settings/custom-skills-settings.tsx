@@ -73,6 +73,7 @@ import {
 import { invalidateAgentSkillsCache } from "@/hooks/use-agent-skills"
 import { useLatestCall } from "@/hooks/use-latest-call"
 import { isLocalDesktop } from "@/lib/platform"
+import { isProviderAgent } from "@/lib/custom-agents"
 import { piUsesCustomAgentDir } from "@/lib/pi-config"
 import {
   defaultCustomSkillTemplate,
@@ -199,10 +200,16 @@ export function CustomSkillsBody({
       // `skills_capable` is derived backend-side from `skill_storage_spec`:
       // every built-in today, custom agents only once they declare the shared
       // `.agents/skills` store. Without the filter an undeclared custom agent
-      // would render a matrix column whose links can only fail.
+      // would render a matrix column whose links can only fail. `inst_*`
+      // copies are excluded on top of that: a copy reads and writes the same
+      // store as the provider it was made from, so its column is a locked
+      // duplicate.
       setAgents(
         agentList.filter(
-          (agent) => agent.skills_capable && !piUsesCustomAgentDir(agent)
+          (agent) =>
+            agent.skills_capable &&
+            isProviderAgent(agent) &&
+            !piUsesCustomAgentDir(agent)
         )
       )
       setReloadKey((k) => k + 1)

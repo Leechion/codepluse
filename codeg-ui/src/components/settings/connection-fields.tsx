@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   Copy,
@@ -22,6 +23,7 @@ import { AccountChannelPanel } from "./account-channel-panel"
 import { ProviderModelPicker } from "./provider-model-picker"
 import type { AcpAgentInfo } from "@/lib/types"
 import type {
+  AccountChannelAccount,
   HarnessAuthMode,
   HarnessConnectionSource,
   HarnessProviderInfo,
@@ -127,6 +129,7 @@ export function AccountConnection({
   onRefresh: () => void
 }) {
   const t = useTranslations("Connections")
+  const [primary, setPrimary] = useState<AccountChannelAccount | null>(null)
   const account = source?.account
   if (!account?.supported)
     return (
@@ -142,18 +145,35 @@ export function AccountConnection({
     <div className="space-y-5">
       <div className="cp-account-card rounded-2xl border p-5">
         <div className="flex items-center gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/5">
-            <UserRound className="size-5" />
+          <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary/5">
+            {primary?.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={primary.avatarUrl}
+                alt=""
+                referrerPolicy="no-referrer"
+                className="size-10 object-cover"
+              />
+            ) : (
+              <UserRound className="size-5" />
+            )}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">{t("nativeAccount")}</p>
-            <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <p className="truncate text-sm font-medium">
+              {primary?.username || primary?.nickname || t("nativeAccount")}
+            </p>
+            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               <StatusIcon className="size-3.5" />
               {account.configured
                 ? t("credentialsFound")
                 : account.managed
                   ? t("accountManaged")
                   : t("loginRequired")}
+              {typeof primary?.credits === "number" && (
+                <span className="rounded-full border px-1.5 py-0.5 text-[10px]">
+                  {t("credits", { value: primary.credits })}
+                </span>
+              )}
             </p>
           </div>
           <Button
@@ -189,7 +209,11 @@ export function AccountConnection({
         )}
       </div>
       {channelId && (
-        <AccountChannelPanel channelId={channelId} onChanged={onRefresh} />
+        <AccountChannelPanel
+          channelId={channelId}
+          onChanged={onRefresh}
+          onPrimary={setPrimary}
+        />
       )}
       <div className="space-y-1.5">
         <Label>{t("model")}</Label>

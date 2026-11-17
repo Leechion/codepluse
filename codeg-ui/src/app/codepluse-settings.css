@@ -74,6 +74,29 @@
   letter-spacing: -0.025em;
 }
 
+/* Keep functional subtitles to one line without clipping unrelated detail
+   text, alerts, log viewers, or dialog descriptions. */
+[data-settings-shell] [data-settings-description],
+[data-settings-shell] .cp-settings-content p.text-muted-foreground {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Some shared descriptions append a second inline note as a block span. Keep
+   that note in the same truncated line rather than letting it wrap below. */
+[data-settings-shell] [data-settings-description] > * {
+  display: inline;
+  margin: 0;
+}
+
+[data-settings-shell] [data-settings-description] > * + * {
+  margin-inline-start: 0.25rem;
+}
+
 [data-settings-shell] [data-settings-card] {
   position: relative;
   isolation: isolate;

@@ -172,9 +172,12 @@ export function AgentConfigSection({
       </div>
     )
   }
-  // Mirror the composer: when an agent exposes both modes AND config options,
-  // hide the standalone mode row (some agents surface mode as a config option).
-  const showMode = hasModes && !hasOptions
+  // Hide the standalone mode row only when the agent also exposes a "mode"-
+  // category config option (its own permission selector). A model-only config
+  // option must NOT hide legacy modes — account agents (WorkBuddy/Qoder)
+  // publish both a model option and a `modes` permission list.
+  const hasModeOption = snapshot.config_options.some((o) => o.category === "mode")
+  const showMode = hasModes && !hasModeOption
   const modes = showMode ? snapshot.modes : null
 
   if (inline) {
@@ -294,13 +297,13 @@ export function effectiveSelections(
     if (!(id in config)) config[id] = value
   }
 
-  // Mirror `showMode = hasModes && !hasOptions`: the standalone mode row is only
-  // shown — and thus only pinnable — when the agent has modes but no config
-  // options; otherwise leave the user's mode choice (incl. null) untouched.
+  // Mirror the render path's gate: the standalone mode row is shown — and thus
+  // pinnable — whenever the agent has modes and no "mode"-category option;
+  // a model-only option leaves the legacy modes (the permission selector) in.
   const hasModes = !!snapshot.modes && snapshot.modes.available_modes.length > 0
-  const hasOptions = snapshot.config_options.length > 0
+  const hasModeOption = snapshot.config_options.some((o) => o.category === "mode")
   const mode_id =
-    modeId ?? (hasModes && !hasOptions ? snapshot.modes!.current_mode_id : null)
+    modeId ?? (hasModes && !hasModeOption ? snapshot.modes!.current_mode_id : null)
 
   return { mode_id, config_values: config }
 }

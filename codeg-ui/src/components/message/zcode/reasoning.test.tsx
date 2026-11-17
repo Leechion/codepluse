@@ -38,4 +38,19 @@ describe("ZCode reasoning", () => {
     view.rerender(tree("first\nsecond\nthird\nfourth"))
     expect(scroll.scrollTop).toBe(500)
   })
+
+  it("lets the activity timeline replace the inline brain with its rail icon", () => {
+    const tree = (showIcon: boolean) => (
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <Reasoning>
+          <ReasoningTrigger showIcon={showIcon} />
+        </Reasoning>
+      </NextIntlClientProvider>
+    )
+    const view = render(tree(true))
+    expect(view.container.querySelector(".lucide-brain")).not.toBeNull()
+
+    view.rerender(tree(false))
+    expect(view.container.querySelector(".lucide-brain")).toBeNull()
+  })
 })

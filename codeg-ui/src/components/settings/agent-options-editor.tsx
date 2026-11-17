@@ -114,19 +114,20 @@ export function findModelRow(rows: readonly OptionRow[]): OptionRow | null {
  * it is picked then land below it, instead of pushing it down under the
  * pointer.
  *
- * The standalone mode row only appears when the agent advertises modes and NO
- * config options — the chat composer's rule (`message-input.tsx`): agents that
- * have both expose the mode as one of the config options, and a second "Mode"
- * row would duplicate it.
+ * The standalone mode row appears when the agent advertises modes and has no
+ * "mode"-category config option of its own (the composer's rule, see
+ * `message-input.tsx`). A model-only config option must NOT hide it — account
+ * agents (WorkBuddy/Qoder) publish a `modes` permission list plus a model
+ * option, and gating on "any config option" dropped their Mode entirely.
  */
 export function buildOptionRows(
   snapshot: AgentOptionsSnapshot,
   vocabulary: Vocabulary
 ): OptionRow[] {
   const modes = snapshot.modes?.available_modes ?? []
-  const hasOptions = snapshot.config_options.length > 0
+  const hasModeOption = snapshot.config_options.some((o) => o.category === "mode")
   const rows: OptionRow[] = []
-  if (modes.length > 0 && !hasOptions && snapshot.modes) {
+  if (modes.length > 0 && !hasModeOption && snapshot.modes) {
     rows.push({
       kind: "mode",
       id: MODE_ROW_ID,
@@ -508,11 +509,6 @@ export function RequiredOptionRow({
 
   const badges = (
     <>
-      {mark?.kind === "new" ? (
-        <Badge variant="secondary" className={MARK_CLASS}>
-          {ta("optionNew")}
-        </Badge>
-      ) : null}
       {mark?.kind === "unavailable" ? (
         <UnavailableMark label={mark.savedLabel} />
       ) : null}

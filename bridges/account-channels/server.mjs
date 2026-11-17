@@ -105,17 +105,152 @@ export async function createRuntime(dataDir) {
       throw Object.assign(new Error("不支持的账号渠道"), { statusCode: 400 });
     return entry;
   };
+  /**
+   * 账号资料缓存（昵称 / 头像 / 积分）。上游资料接口每次返回**重新签名**的头像地址，
+   * 所以缓存必须带 TTL：太长会让头像链接过期，太短会拖慢设置页。失败也要缓存，
+   * 否则每次刷新都会重复打上游。
+   */
+  const profileCache = new Map();
+  const PROFILE_TTL_MS = 10 * 60 * 1000;
+
+  function profileOrigin(product, credential) {
+    const domain =
+      typeof credential.domain === "string" ? credential.domain.trim() : "";
+    return `https://${domain.length > 0 ? domain : product.apiDomain}`;
+  }
+
+  async function readCredential(ref) {
+    try {
+      const resolved = await credentials.resolve(ref);
+      return resolved?.value ? JSON.parse(resolved.value) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 积分字段名各产品不同，也只在上游真的下发时才有。 */
+  function pickCredits(data) {
+    const keys = [
+      "credits",
+      "credit",
+      "creditBalance",
+      "balance",
+      "remainingCredits",
+      "creditsRemaining",
+      "quota",
+    ];
+    for (const key of keys) {
+      const value = data[key];
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value.trim()))
+        return Number(value);
+    }
+    return undefined;
+  }
+
+  async function requestProfile(product, credential) {
+    const origin = profileOrigin(product, credential);
+    const domain =
+      typeof credential.domain === "string" && credential.domain.length > 0
+        ? credential.domain
+        : product.apiDomain;
+    const headers = {
+      "X-Domain": domain,
+      Authorization: `Bearer ${credential.access_token}`,
+      "User-Agent": product.userAgent,
+      Accept: "application/json",
+    };
+    if (
+      typeof credential.enterprise_id === "string" &&
+      credential.enterprise_id.length > 0
+    ) {
+      headers["X-Enterprise-Id"] = credential.enterprise_id;
+      headers["X-Tenant-Id"] = credential.enterprise_id;
+    }
+    for (const path of ["/console/account", "/v2/plugin/account"]) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10_000);
+      try {
+        const response = await fetch(origin + path, {
+          headers,
+          signal: controller.signal,
+        });
+        if (!response.ok) continue;
+        const body = await response.json();
+        const data = body?.data ?? body;
+        if (typeof data !== "object" || data === null) continue;
+        const nickname =
+          typeof data.nickname === "string" ? data.nickname.trim() : "";
+        const avatarUrl =
+          typeof data.avatarUrl === "string" ? data.avatarUrl : "";
+        const credits = pickCredits(data);
+        return {
+          ...(nickname.length > 0 ? { nickname } : {}),
+          ...(avatarUrl.length > 0 ? { avatarUrl } : {}),
+          ...(credits !== void 0 ? { credits } : {}),
+        };
+      } catch {
+        continue;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return void 0;
+  }
+
+  /**
+   * 账号资料：先问上游，失败再退回凭据里登录时写入的昵称。
+   *
+   * 为什么要兜底：账号索引里存的是通道自己生成的 UUID（`nickname` 字段只是
+   * id 的镜像），真实昵称在凭据文档里；上游不可达时仍应显示用户名而不是裸 UUID。
+   */
+  async function accountProfile(product, credentialRef) {
+    if (typeof credentialRef !== "string" || credentialRef.length === 0)
+      return void 0;
+    const cached = profileCache.get(credentialRef);
+    if (cached !== void 0 && Date.now() - cached.at < PROFILE_TTL_MS)
+      return cached.profile;
+    const credential = await readCredential(credentialRef);
+    let profile =
+      credential === void 0
+        ? void 0
+        : await requestProfile(product, credential);
+    if (
+      profile === void 0 &&
+      typeof credential?.nickname === "string" &&
+      credential.nickname.length > 0
+    ) {
+      profile = { nickname: credential.nickname };
+    }
+    profileCache.set(credentialRef, { at: Date.now(), profile });
+    return profile;
+  }
+
   async function status() {
     return Promise.all(
       products.map(async ({ product, name }) => {
-        const accounts = pool
-          .listAccountsByProvider(product.id)
-          .map(({ id, nickname, enabled, expiresAt }) => ({
-            id,
-            nickname,
-            enabled,
-            expiresAt,
-          }));
+        const accounts = await Promise.all(
+          pool.listAccountsByProvider(product.id).map(async (entry) => {
+            const profile = await accountProfile(product, entry.credentialRef);
+            // 索引里的 nickname 是 id 镜像，只有和 id 不同才值得采信。
+            const stored =
+              typeof entry.nickname === "string" && entry.nickname !== entry.id
+                ? entry.nickname
+                : "";
+            const display = profile?.nickname || stored || entry.nickname || entry.id;
+            return {
+              id: entry.id,
+              nickname: display,
+              ...(profile?.nickname || stored
+                ? { username: profile?.nickname || stored }
+                : {}),
+              ...(profile?.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}),
+              ...(profile?.credits !== void 0 ? { credits: profile.credits } : {}),
+              enabled: entry.enabled,
+              expiresAt: entry.expiresAt,
+            };
+          }),
+        );
         const models = (
           await adapters.get(product.id).listModels(product.id)
         ).map((row) => ({
@@ -444,8 +579,15 @@ export async function serve({ dataDir, key, runtime, port = 0 }) {
           (usage.cacheReadTokens ?? 0) +
           (usage.cacheWriteTokens ?? 0)
         : 0;
-      if (!text.trim() && !calls.length)
-        throw new Error("模型未返回正文或工具调用");
+      if (!text.trim() && !calls.length) {
+        const detail =
+          finish === "length"
+            ? "输出 token 额度已用尽，通常是被思考内容占满"
+            : `finish_reason=${finish}`;
+        throw new Error(
+          `模型未返回正文或工具调用（${detail}；思考 ${reasoning.length} 字符）`,
+        );
+      }
       const output = usage?.outputTokens ?? 0;
       const usageOut = usage
         ? {

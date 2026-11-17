@@ -87,6 +87,17 @@ pub struct Options {
     pub model: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub mode: String,
+    /// Harness-side session to resume. Set when this process did NOT create
+    /// that session — reopening a conversation from an earlier run: the
+    /// transcript is already on disk, so the record is seeded with it and
+    /// `ensure` issues `session/load` (or `session/resume`) instead of
+    /// `session/new`.
+    #[serde(
+        rename = "nativeSessionId",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub native_session_id: String,
     #[serde(rename = "chatId", default, skip_serializing_if = "String::is_empty")]
     pub chat_id: String,
     #[serde(
@@ -1701,28 +1712,49 @@ impl Runtime {
         let key = format!("{}|{}|{}", o.options_key(), agent.id, permission);
         let rec = {
             let mut inner = self.inner.lock().unwrap();
-            let existing = inner.records.iter().find(|cand| cand.key == key).cloned();
-            existing.unwrap_or_else(|| {
-                let rec = Arc::new(SessionRecord {
-                    id: format!("session_{}", short_id()),
-                    key: key.clone(),
-                    agent_id: agent.id.clone(),
-                    cwd: o.workdir.clone(),
-                    turn_lock: AsyncMutex::new(()),
-                    data: Mutex::new(RecordData {
-                        chat_id: o.chat_id.clone(),
-                        mission_id: o.mission_id.clone(),
-                        task_id: o.task_id.clone(),
-                        role: o.role.clone(),
-                        permission: permission.clone(),
-                        state: "connecting".into(),
-                        created_at: unix_millis(),
-                        ..RecordData::default()
-                    }),
-                });
-                inner.records.push(rec.clone());
-                rec
-            })
+            let by_key = inner.records.iter().find(|cand| cand.key == key).cloned();
+            // A native session already loaded by this runtime owns its record:
+            // a second caller asking for the same transcript must attach to it,
+            // not start a `session/load` the harness would reject as a duplicate.
+            let by_native = if o.native_session_id.is_empty() {
+                None
+            } else {
+                inner
+                    .records
+                    .iter()
+                    .find(|cand| {
+                        let data = cand.data.lock().unwrap();
+                        data.native_session_id == o.native_session_id
+                            && cand.cwd == o.workdir
+                            && data.permission == permission
+                    })
+                    .cloned()
+            };
+            match by_key.or(by_native) {
+                Some(rec) => rec,
+                None => {
+                    let rec = Arc::new(SessionRecord {
+                        id: format!("session_{}", short_id()),
+                        key: key.clone(),
+                        agent_id: agent.id.clone(),
+                        cwd: o.workdir.clone(),
+                        turn_lock: AsyncMutex::new(()),
+                        data: Mutex::new(RecordData {
+                            chat_id: o.chat_id.clone(),
+                            mission_id: o.mission_id.clone(),
+                            task_id: o.task_id.clone(),
+                            role: o.role.clone(),
+                            permission: permission.clone(),
+                            state: "connecting".into(),
+                            created_at: unix_millis(),
+                            native_session_id: o.native_session_id.clone(),
+                            ..RecordData::default()
+                        }),
+                    });
+                    inner.records.push(rec.clone());
+                    rec
+                }
+            }
         };
         self.emit_changed(&rec);
 
@@ -1823,7 +1855,7 @@ impl Runtime {
             }
         }
         driver.add_session(&rec);
-        let wanted = {
+        let mut wanted = {
             let data = rec.data.lock().unwrap();
             let mut wanted = data.native_mode.clone();
             if wanted.is_empty() {
@@ -1848,22 +1880,30 @@ impl Runtime {
                     .unwrap_or(false)
             };
             if modes_known {
-                let found = rec
-                    .data
-                    .lock()
-                    .unwrap()
-                    .modes
-                    .as_ref()
-                    .unwrap()
-                    .available_modes
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|m| m.get("id").and_then(Value::as_str) == Some(wanted.as_str()));
-                if !found {
-                    let err = format!("该 Harness 未提供所需权限模式：{permission}");
-                    self.set_state(&rec, "error", &err);
-                    return Err(err);
+                let mode_offered = |name: &str| {
+                    rec.data
+                        .lock()
+                        .unwrap()
+                        .modes
+                        .as_ref()
+                        .and_then(|m| m.available_modes.as_ref())
+                        .map(|a| a.iter().any(|m| m.get("id").and_then(Value::as_str) == Some(name)))
+                        .unwrap_or(false)
+                };
+                if !mode_offered(&wanted) {
+                    // The inherited mode (e.g. the parent's bypassPermissions)
+                    // is not offered by every harness — WorkBuddy only lists
+                    // its own modes. Fall back to the mode the requested
+                    // permission maps to for this harness, which keeps the
+                    // delegation inside the permission scope it was granted.
+                    let fallback = wanted_mode(agent, &permission);
+                    if !fallback.is_empty() && fallback != wanted && mode_offered(&fallback) {
+                        wanted = fallback;
+                    } else {
+                        let err = format!("该 Harness 未提供所需权限模式：{permission}");
+                        self.set_state(&rec, "error", &err);
+                        return Err(err);
+                    }
                 }
             }
             // Hoist the native id: a `rec.data.lock()` temporary inside the
@@ -3407,6 +3447,32 @@ mod tests {
             Some("read-only")
         );
         drop(data);
+        rt.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_connect_loads_a_native_session_it_does_not_own() {
+        let Some((rt, agent, mut options)) = fixture_runtime("native-load", &[]) else {
+            return;
+        };
+        // What a reopened conversation looks like after an app restart: no
+        // wrapper in this runtime, only the transcript's id. The record is
+        // seeded with it, so bring-up must issue `session/load`, not
+        // `session/new` (which would silently drop the conversation's context).
+        options.session_key = "restored".into();
+        options.native_session_id = "native-abc".into();
+        rt.connect(&agent, options.clone()).await.expect("load");
+        let records = rt.records("");
+        assert_eq!(records.len(), 1, "one record per native session");
+        assert_eq!(
+            records[0].data.lock().unwrap().native_session_id,
+            "native-abc"
+        );
+        assert_eq!(records[0].data.lock().unwrap().state, "idle");
+        // A second caller asking for the same transcript attaches to that
+        // record instead of loading it twice.
+        rt.prompt(&agent, "again", options).await;
+        assert_eq!(rt.records("").len(), 1, "no duplicate record");
         rt.shutdown().await;
     }
 

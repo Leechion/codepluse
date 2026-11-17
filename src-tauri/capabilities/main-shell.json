@@ -17,6 +17,12 @@
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
-    "core:window:allow-start-resize-dragging"
+    "core:window:allow-start-resize-dragging",
+    "allow-open-external",
+    "allow-window-open",
+    "allow-window-close",
+    "allow-window-minimize",
+    "allow-window-toggle-maximize",
+    "allow-window-begin-drag"
   ]
 }

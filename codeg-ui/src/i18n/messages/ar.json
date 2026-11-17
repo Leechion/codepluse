@@ -35,7 +35,8 @@
     "deleteProfile": "Delete this model configuration?",
     "bareHarness": "تدير هذه المنصّة مزوّدها ونموذجها بنفسها. لا تزال المحادثات الجديدة تبدأ عليها، ويمكن للوكيل الرئيسي التفويض إليها كما هي.",
     "bareDelegation": "تدير هذه المنصّات مزوّدها ونموذجها بنفسها، فلا يوجد ما تُعدّله هنا — يفوّض إليها الوكيل الرئيسي مباشرة: {harnesses}",
-    "immutableHarness": "Create a new configuration to use another harness."
+    "immutableHarness": "Create a new configuration to use another harness.",
+    "mainUnset": "غير مهيأ"
   },
   "SettingsNavigation": {
     "skills": "المهارات",
@@ -95,7 +96,7 @@
     "nav": {
       "general": "عام",
       "appearance": "المظهر",
-      "agents": "الوكلاء",
+      "agents": "المزوّدون",
       "mcp": "MCP",
       "skills": "Skills",
       "shortcuts": "الاختصارات",
@@ -7712,7 +7713,7 @@
     }
   },
   "Connections": {
-    "title": "Agents",
+    "title": "المزوّدون",
     "description": "Manage API providers, native accounts, and models for each harness.",
     "harness": "Agent",
     "chooseHarness": "Choose an agent",
@@ -7733,6 +7734,7 @@
     "modelName": "Display name (optional)",
     "accountDefault": "Use the account default model",
     "nativeAccount": "Native official account",
+    "credits": "الرصيد {value}",
     "credentialsFound": "Native sign-in credentials found",
     "accountManaged": "Sign-in is managed by the native client",
     "loginRequired": "No native sign-in found. Sign in with the native client first.",

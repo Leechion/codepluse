@@ -926,6 +926,15 @@ export function MessageInput({
   )
   const hasConfigOptions = availableConfigOptions.length > 0
   const hasModes = availableModes.length > 0
+  // A "mode"-category config option is the agent's OWN permission selector; the
+  // legacy `modes` list must yield to it to avoid two permission controls. Any
+  // OTHER config option (e.g. the model picker) must NOT hide the legacy modes —
+  // account agents (WorkBuddy/Qoder) publish both a model config option and a
+  // `modes` permission list, and gating on `hasConfigOptions` dropped their
+  // permission selector entirely, leaving them stuck on "ask every time".
+  const hasModeConfigOption = availableConfigOptions.some(
+    (option) => option.category === "mode"
+  )
 
   const effectiveModeId = useMemo(() => {
     if (!hasModes) return null
@@ -938,7 +947,7 @@ export function MessageInput({
     return availableModes[0]?.id ?? null
   }, [hasModes, selectedModeId, availableModes])
   const showModeSelector =
-    hasModes && Boolean(effectiveModeId) && !hasConfigOptions
+    hasModes && Boolean(effectiveModeId) && !hasModeConfigOption
   const showModeLoading = modeLoading && !hasConfigOptions && !showModeSelector
   const showConfigLoading = configOptionsLoading && !hasConfigOptions
   const showSelectorsLoading = showConfigLoading || showModeLoading
@@ -1859,9 +1868,9 @@ export function MessageInput({
   const boxMinHeight = composerBoxMinHeight(tall)
   const editableMinHeight = composerEditableMinHeight(tall, hasImageAttachments)
 
-  // The agent's settings — its config options, or the legacy mode list for an
-  // agent that publishes none (the two never show together, see
-  // `showModeSelector`) — as the one ordered list the settings chip edits.
+  // The agent's settings — its config options, plus (when it publishes no
+  // "mode"-category option) its legacy mode list as the permission control —
+  // as the one ordered list the settings chip edits.
   const sessionSettings = useMemo(
     () =>
       buildSessionSettings({

@@ -35,6 +35,7 @@ import { FolderAliasLabel } from "@/components/conversations/folder-alias-label"
 import { FolderOptionItem } from "@/components/shared/folder-select"
 import { BranchDropdown } from "@/components/layout/branch-dropdown"
 import { pickDirectory } from "@/lib/api"
+import { toErrorMessage } from "@/lib/app-error"
 
 interface ConversationContextBarProps {
   extraContent?: React.ReactNode
@@ -328,7 +329,9 @@ export const ConversationFolderBranchPicker = memo(
           "[ConversationFolderBranchPicker] system picker failed:",
           err
         )
-        toast.error("无法打开系统文件夹选择器")
+        // 这里不止「选择器打不开」：选完目录后绑定工作区失败也会落到这条分支
+        // （比如后端拒绝该路径）。原来固定文案会把真实原因盖掉，现在直出后端消息。
+        toast.error(toErrorMessage(err) || "无法打开系统文件夹选择器")
       }
     }, [override, ownTab, openNewConversationTab, t])
 

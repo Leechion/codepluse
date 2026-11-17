@@ -2,8 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Bot, Layers, Plus, RefreshCw, Trash2 } from "lucide-react"
+import {
+  Bot,
+  Layers,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react"
 import { toast } from "sonner"
+import { AgentIcon } from "@/components/agent-icon"
+import { getAgentLabel } from "@/lib/custom-agents"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -76,7 +85,7 @@ function sourceChoice(
 
 export function HarnessProfiles({
   mode = "all",
-}: { mode?: "all" | "main" | "instances" } = {}) {
+}: { mode?: "all" | "main" | "instances" | "card" } = {}) {
   const t = useTranslations("HarnessProfiles")
   const c = useTranslations("Connections")
   const [providers, setProviders] = useState<HarnessProviderInfo[]>([])
@@ -85,6 +94,10 @@ export function HarnessProfiles({
   const [instances, setInstances] = useState<HarnessInstance[]>([])
   const [main, setMain] = useState<ConnectionChoice>(emptyChoice)
   const [savedMain, setSavedMain] = useState("")
+  /** Draft of the main agent's card editor: the row shows the SAVED choice, the
+   *  dialog edits this and only writes it back on save. */
+  const [mainDraft, setMainDraft] = useState<ConnectionChoice>(emptyChoice)
+  const [mainEditorOpen, setMainEditorOpen] = useState(false)
   const [profile, setProfile] = useState<ConnectionChoice>(emptyChoice)
   const [name, setName] = useState("")
   const [editing, setEditing] = useState<HarnessInstance | null>(null)
@@ -168,6 +181,32 @@ export function HarnessProfiles({
   }
   const onRefresh = () =>
     void refresh().catch((e) => toast.error(toErrorMessage(e)))
+  const saveMain = (choice: ConnectionChoice, done: () => void) =>
+    void run(
+      () =>
+        nativeOnly(choice)
+          ? saveMainBot(choice.agentType, "", "")
+          : saveMainBot(
+              choice.agentType,
+              choice.model.trim(),
+              choice.authMode === "api" ? choice.providerId : "",
+              choice.authMode
+            ),
+      done
+    )
+  // The card's summary reads off the SAVED choice, so a cancelled edit leaves the
+  // row exactly as it was.
+  const mainProvider = providers.find((p) => p.id === main.providerId)
+  const mainSummary = main.agentType
+    ? [
+        main.authMode === "subscription"
+          ? c("subscription")
+          : mainProvider?.name || c("nativeConnection"),
+        main.model.trim() || c("accountDefault"),
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : ""
   const fields = (
     value: ConnectionChoice,
     onChange: (value: ConnectionChoice) => void
@@ -192,7 +231,96 @@ export function HarnessProfiles({
           {warning}
         </p>
       )}
-      {mode !== "instances" && (
+      {mode === "card" && (
+        <SettingsSection
+          icon={Bot}
+          title={t("mainTitle")}
+          description={t("mainDescription")}
+        >
+          {/* 与「子智能体配置」同一套界面语言：一行（图标 + 名称 + 当前
+              供应商与模型摘要 + 编辑），改动在弹层里完成。 */}
+          <div className="divide-y divide-border/60 rounded-xl border border-border/70 bg-muted/40">
+            <div className="flex items-center gap-3 p-3">
+              {main.agentType ? (
+                <AgentIcon
+                  agentType={main.agentType}
+                  className="size-6 shrink-0"
+                />
+              ) : (
+                <Bot
+                  className="size-6 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">
+                  {/* 首次读取要等连接目录扫一遍本机（冷启动可达数秒），
+                      这期间说「未配置」会误导成真的没配。 */}
+                  {loading
+                    ? c("loading")
+                    : main.agentType
+                      ? getAgentLabel(main.agentType)
+                      : t("mainUnset")}
+                </div>
+                <p className="mt-1 truncate text-xs text-muted-foreground">
+                  {loading
+                    ? t("mainDescription")
+                    : main.agentType
+                      ? mainSummary
+                      : t("mainDescription")}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t("edit")}
+                disabled={loading}
+                onClick={() => {
+                  setMainDraft(main)
+                  setMainEditorOpen(true)
+                }}
+              >
+                <Pencil className="size-4" />
+              </Button>
+            </div>
+          </div>
+          <Dialog
+            open={mainEditorOpen}
+            onOpenChange={(open) => {
+              if (!busy) setMainEditorOpen(open)
+            }}
+          >
+            <DialogContent className="max-w-xl">
+              <DialogHeader>
+                <DialogTitle>{t("mainTitle")}</DialogTitle>
+              </DialogHeader>
+              {fields(mainDraft, setMainDraft)}
+              <DialogFooter>
+                <Button
+                  variant="ghost"
+                  onClick={() => setMainEditorOpen(false)}
+                  disabled={busy}
+                >
+                  {t("cancel")}
+                </Button>
+                <Button
+                  disabled={busy || !valid(mainDraft)}
+                  onClick={() =>
+                    saveMain(mainDraft, () => {
+                      setMain(mainDraft)
+                      setSavedMain(JSON.stringify(mainDraft))
+                      setMainEditorOpen(false)
+                    })
+                  }
+                >
+                  {t("saveMain")}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </SettingsSection>
+      )}
+      {mode !== "instances" && mode !== "card" && (
         <SettingsSection
           icon={Bot}
           title={t("mainTitle")}
@@ -226,7 +354,7 @@ export function HarnessProfiles({
           </Button>
         </SettingsSection>
       )}
-      {mode !== "main" && (
+      {mode !== "main" && mode !== "card" && (
         <SettingsSection
           icon={Layers}
           title={t("subTitle")}

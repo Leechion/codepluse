@@ -133,6 +133,7 @@ export async function runAgent({
         id: session.id,
         cwd: session.cwd,
         model: session.model,
+        effort: session.effort,
         messages: session.messages,
       }),
       { mode: 0o600 },
@@ -147,11 +148,24 @@ export async function runAgent({
     },
     modes: {
       currentModeId: session.mode,
+      // Both permission modes are always offered. `session.mode` — not the
+      // launch-time `permission` — is what gates tools (see the `session.mode`
+      // checks below), so offering both lets the user switch readonly <->
+      // workspace freely; the launch permission only picks the initial mode.
+      // (Previously workspace was hidden unless launched with it, which made
+      // the mode unreachable: connect defaults to readonly, so it was never
+      // advertised and set_mode rejected it.)
       availableModes: [
-        { id: "readonly", name: "只读" },
-        ...(permission === "workspace"
-          ? [{ id: "workspace", name: "工作区" }]
-          : []),
+        {
+          id: "readonly",
+          name: "每次询问",
+          description: "执行命令、修改工作区外文件或访问网络前，始终询问",
+        },
+        {
+          id: "workspace",
+          name: "完全访问",
+          description: "不再询问，可自由访问你的文件、终端和网络",
+        },
       ],
     },
     configOptions: [
@@ -165,6 +179,23 @@ export async function runAgent({
           value: row.id,
           name: row.name,
         })),
+      },
+      {
+        // A reasoning-effort level, so account agents offer the same Effort
+        // selector the native harnesses do. Stored on the session; the account
+        // endpoint is OpenAI-compatible and may ignore it, but the choice is
+        // selectable and persisted rather than structurally impossible.
+        id: "effort",
+        name: "Effort",
+        category: "thought_level",
+        type: "select",
+        currentValue: session.effort ?? "default",
+        options: [
+          { value: "default", name: "Default" },
+          { value: "low", name: "Low" },
+          { value: "medium", name: "Medium" },
+          { value: "high", name: "High" },
+        ],
       },
     ],
   });
@@ -194,6 +225,7 @@ export async function runAgent({
       model: saved?.model ?? model,
       messages: saved?.messages ?? [],
       mode: permission === "workspace" ? "workspace" : "readonly",
+      effort: saved?.effort ?? "default",
       mcp: [],
       tools: new Map(),
       active: null,
@@ -267,6 +299,23 @@ export async function runAgent({
     }
     return target;
   }
+  // "每次询问" mode: ask the user before a side-effectful tool call. Used only
+  // outside "workspace" (完全访问), which runs directly without asking.
+  async function requestPermission(session, call, signal, args, kind, title) {
+    const approval = await rpc.call(
+      "session/request_permission",
+      {
+        sessionId: session.id,
+        toolCall: { toolCallId: call.id, title, kind, rawInput: args },
+        options: [
+          { optionId: "allow_once", name: "允许这次", kind: "allow_once" },
+          { optionId: "reject_once", name: "拒绝", kind: "reject_once" },
+        ],
+      },
+      signal,
+    );
+    return approval.outcome?.optionId === "allow_once";
+  }
   async function execute(session, call, signal) {
     if (signal.aborted) throw new Error("Cancelled")
     const args = JSON.parse(call.function.arguments || "{}");
@@ -289,8 +338,17 @@ export async function runAgent({
         signal,
       );
     if (name === "write_file") {
-      if (session.mode !== "workspace")
-        throw new Error("Read-only session cannot write files");
+      if (session.mode !== "workspace") {
+        const ok = await requestPermission(
+          session,
+          call,
+          signal,
+          args,
+          "edit",
+          `write_file ${args.path}`,
+        );
+        if (!ok) throw new Error("User declined file write");
+      }
       return rpc.call(
         "fs/write_text_file",
         {
@@ -310,27 +368,17 @@ export async function runAgent({
         .slice(0, 500)
         .map((entry) => ({ name: entry.name, directory: entry.isDirectory() }));
     if (name !== "run_shell") throw new Error("Unknown tool");
-    if (session.mode !== "workspace")
-      throw new Error("Read-only session cannot execute shell commands");
-    const approval = await rpc.call(
-      "session/request_permission",
-      {
-        sessionId: session.id,
-        toolCall: {
-          toolCallId: call.id,
-          title: args.command,
-          kind: "execute",
-          rawInput: args,
-        },
-        options: [
-          { optionId: "allow_once", name: "允许这次", kind: "allow_once" },
-          { optionId: "reject_once", name: "拒绝", kind: "reject_once" },
-        ],
-      },
-      signal,
-    );
-    if (approval.outcome?.optionId !== "allow_once")
-      throw new Error("User declined shell execution");
+    if (session.mode !== "workspace") {
+      const ok = await requestPermission(
+        session,
+        call,
+        signal,
+        args,
+        "execute",
+        args.command,
+      );
+      if (!ok) throw new Error("User declined shell execution");
+    }
     if (signal.aborted) throw new Error("Cancelled")
     return new Promise((resolve, reject) => {
       const child =
@@ -423,7 +471,6 @@ export async function runAgent({
               ...session.messages,
             ],
             tools,
-            max_tokens: 8192,
           }),
         });
         if (!response.ok) {
@@ -561,15 +608,17 @@ export async function runAgent({
       return {};
     }
     if (method === "session/set_mode") {
-      if (
-        ![
-          "readonly",
-          ...(permission === "workspace" ? ["workspace"] : []),
-        ].includes(params.modeId)
-      )
+      if (!["readonly", "workspace"].includes(params.modeId))
         throw new Error("Unsupported permission mode");
       session.mode = params.modeId;
       return {};
+    }
+    if (method === "session/set_config_option" && params.configId === "effort") {
+      if (!["default", "low", "medium", "high"].includes(params.value))
+        throw new Error("Unsupported effort level");
+      session.effort = params.value;
+      await save(session);
+      return config(session);
     }
     if (
       method === "session/set_model" ||

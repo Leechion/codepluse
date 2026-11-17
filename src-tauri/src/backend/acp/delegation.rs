@@ -47,6 +47,8 @@ pub struct Delegation {
     pub parent_tool_use_id: String,
     pub split_id: String,
     pub title: String,
+    pub assistant_id: i64,
+    pub assistant_name: String,
     pub inbox: Vec<Value>,
 }
 
@@ -58,6 +60,10 @@ pub fn task_report(task: &Delegation) -> Value {
         "agent_type": task.agent_type,
         "task_preview": task.task,
     });
+    if task.assistant_id != 0 {
+        row["assistant_id"] = json!(task.assistant_id);
+        row["assistant_name"] = json!(task.assistant_name);
+    }
     if !task.split_id.is_empty() {
         row["split_id"] = json!(task.split_id);
     }
@@ -86,6 +92,37 @@ pub fn task_report(task: &Delegation) -> Value {
 /// The registry file (Go `saveDelegationsLocked`).
 fn registry_path(root: &Path) -> std::path::PathBuf {
     root.join(".data").join("delegations.json")
+}
+
+/// The 子智能体配置 rows — the single source for delegation targets. Lives in
+/// the workspace JSON "assistants" array; deleted rows (soft `deleted_at`)
+/// never surface.
+pub fn assistant_rows(root: &Path) -> Vec<Value> {
+    let path = root.join(".data").join("codeg-workspace.json");
+    crate::backend::store_file::read_json(&path)
+        .ok()
+        .flatten()
+        .and_then(|doc| {
+            doc.get("assistants")
+                .and_then(|value| value.as_array())
+                .cloned()
+        })
+        .unwrap_or_default()
+}
+
+/// One enabled, not-deleted 子智能体 row by its numeric id.
+pub fn assistant_by_id(root: &Path, id: i64) -> Option<Value> {
+    assistant_rows(root).into_iter().find(|row| {
+        row.get("id").and_then(Value::as_i64) == Some(id)
+            && row
+                .get("deleted_at")
+                .map(|value| value.is_null())
+                .unwrap_or(true)
+            && row
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(true)
+    })
 }
 
 /// Reads the persisted registry back into the layer state.
@@ -140,6 +177,11 @@ pub fn load(root: &Path, into: &mut HashMap<String, Delegation>) {
                 parent_tool_use_id: text("parent_tool_use_id"),
                 split_id: text("split_id"),
                 title: text("title"),
+                assistant_id: row
+                    .get("assistant_id")
+                    .and_then(|value| value.as_i64())
+                    .unwrap_or(0),
+                assistant_name: text("assistant_name"),
                 inbox: Vec::new(),
             },
         );
@@ -174,6 +216,8 @@ pub fn save(root: &Path, tasks: &HashMap<String, Delegation>) -> Result<(), Stri
             "parent_tool_use_id": task.parent_tool_use_id,
             "split_id": task.split_id,
             "title": task.title,
+            "assistant_id": task.assistant_id,
+            "assistant_name": task.assistant_name,
         }));
     }
     let path = registry_path(root);
@@ -201,13 +245,59 @@ impl Layer {
         if task.is_empty() || task.len() > 120_000 {
             return Err("子任务必须包含完整目标，且不超过 120000 字节".into());
         }
-        let agent = agents::pick(&self.root, &agent_type)
-            .ok_or_else(|| format!("执行端不可用：{agent_type}"))?;
-        let model = args
+        let mut agent_type = args
+            .get("agent_type")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        let mut model = args
             .get("model")
             .and_then(|value| value.as_str())
             .unwrap_or("")
             .to_string();
+        // A named 子智能体 decides its own harness and model: its configured
+        // agent_config wins over the call's agent_type/model arguments.
+        let mut assistant_id = 0i64;
+        let mut assistant_name = String::new();
+        let mut instructions = String::new();
+        let asked_assistant = args.get("assistant_id").and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+        });
+        if let Some(id) = asked_assistant {
+            let Some(row) = assistant_by_id(&self.root, id) else {
+                return Err("子智能体不存在".into());
+            };
+            assistant_id = id;
+            assistant_name = row
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            if let Some(configured) = row
+                .get("agent_type")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+            {
+                agent_type = configured.to_string();
+            }
+            if let Some(configured) = row
+                .pointer("/agent_options/config_values/model")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+            {
+                model = configured.to_string();
+            }
+            instructions = row
+                .get("instructions")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+        }
+        let agent = agents::pick(&self.root, &agent_type)
+            .ok_or_else(|| format!("执行端不可用：{agent_type}"))?;
 
         // The child inherits the parent's working directory and permission
         // level (Go `delegateScope`).
@@ -264,6 +354,8 @@ impl Layer {
             status: "running".into(),
             parent_conversation_id: parent_conversation,
             depth: caller.depth + 1,
+            assistant_id,
+            assistant_name: assistant_name.clone(),
             ..Delegation::default()
         };
         record.parent_tool_use_id = record.id.clone();
@@ -301,10 +393,15 @@ impl Layer {
         }
 
         // Prompt the child; the turn runs in the background, so a watcher
-        // collects the result.
+        // collects the result. A named 子智能体 leads with its instructions.
+        let child_task = if instructions.is_empty() {
+            task.clone()
+        } else {
+            format!("{instructions}\n\n{task}")
+        };
         let prompt = json!({
             "connectionId": cid,
-            "blocks": [{"type": "text", "text": task}],
+            "blocks": [{"type": "text", "text": child_task}],
         });
         if let Err(error) = self.prompt(&prompt).await {
             self.finish_delegation(&record.id, "failed", "", &error);
@@ -320,8 +417,45 @@ impl Layer {
         };
         self.watch_delegation(record.id.clone(), cid.clone(), run_seq);
 
-        let state = self.state.lock().unwrap();
-        let record = state.delegations.get(&record.id).cloned().unwrap_or(record);
+        // Announce the live binding so the parent UI can attach the child
+        // connection to the `delegate_to_agent` card mid-flight.
+        let (child_conversation, record, task_preview) = {
+            let state = self.state.lock().unwrap();
+            let child_conversation = state
+                .connections
+                .get(&cid)
+                .map(|conn| conn.lock().unwrap().conversation_id)
+                .unwrap_or(0);
+            let record = state.delegations.get(&record.id).cloned().unwrap_or(record);
+            let preview = {
+                let mut preview = record.task.trim_end().to_string();
+                if preview.chars().count() > 500 {
+                    preview = preview
+                        .char_indices()
+                        .nth(500)
+                        .map(|(i, _)| preview[..i].to_string())
+                        .unwrap_or(preview);
+                }
+                preview
+            };
+            (child_conversation, record, preview)
+        };
+        self.event(
+            &caller.connection_id,
+            json!({
+                "type": "delegation_started",
+                "parent_connection_id": record.parent,
+                "parent_tool_use_id": record.parent_tool_use_id,
+                "child_connection_id": record.connection_id,
+                "child_conversation_id": child_conversation,
+                "agent_type": record.agent_type,
+                "task_id": record.id,
+                "task_preview": task_preview,
+                "assistant_id": record.assistant_id,
+                "assistant_name": record.assistant_name,
+            }),
+        );
+        self.publish_session(&caller.connection_id).await;
         Ok(task_report(&record))
     }
 
@@ -395,6 +529,8 @@ impl Layer {
                 "child_conversation_id": snapshot.conversation_id,
                 "agent_type": snapshot.agent_type,
                 "task_id": snapshot.id,
+                "assistant_id": snapshot.assistant_id,
+                "assistant_name": snapshot.assistant_name,
                 "result": {
                     "kind": if snapshot.status == "completed" { "ok" } else { "err" },
                     "error_code": if snapshot.status == "completed" { Value::Null } else { json!(snapshot.status) },

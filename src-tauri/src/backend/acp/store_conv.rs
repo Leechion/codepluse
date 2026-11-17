@@ -253,15 +253,39 @@ pub fn prompt_side_write(
     prompt_text: &str,
     user_blocks: &[Value],
     native_session_id: &str,
+    parent_conversation_id: i64,
 ) -> Result<StoreOutcome, String> {
     crate::backend::turn_store::ensure_initialized(root)?;
     let (_guard, mut doc) = locked_doc(root)?;
     let mut conversation_id = conversation_id_arg;
     let mut folder_id = folder_id_arg;
     if conversation_id == 0 {
-        let folder = open_folder_locked(&mut doc, workdir, "regular");
-        folder_id = folder;
-        conversation_id = create_conversation_locked(&mut doc, folder, agent_type, prompt_text, 0);
+        let folder = if parent_conversation_id > 0 {
+            // A delegated child nests under its parent conversation: it lives
+            // in the parent's folder and never shows up as a top-level row.
+            doc.get("conversations")
+                .and_then(Value::as_array)
+                .and_then(|rows| {
+                    rows.iter()
+                        .find(|row| number(row.get("id")) == parent_conversation_id)
+                        .and_then(|row| row.get("folder_id").and_then(Value::as_i64))
+                })
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        folder_id = if folder > 0 {
+            folder
+        } else {
+            open_folder_locked(&mut doc, workdir, "regular")
+        };
+        conversation_id = create_conversation_locked(
+            &mut doc,
+            folder_id,
+            agent_type,
+            prompt_text,
+            parent_conversation_id,
+        );
     }
     let mut row = None;
     for candidate in rows_mut(&mut doc, "conversations").iter() {
@@ -499,6 +523,45 @@ mod tests {
     }
 
     #[test]
+    fn delegated_child_nests_under_parent_conversation() {
+        let root = temp_root("delegate-nest");
+        seed(&root);
+        // A delegated child arrives with no conversation of its own; the store
+        // must create it under the PARENT's conversation (and folder), never
+        // as a top-level row.
+        let out = prompt_side_write(
+            &root,
+            0,
+            0,
+            "E:/ws/elsewhere",
+            "claude_code",
+            "子任务",
+            &[json!({"type": "text", "text": "子任务"})],
+            "native-child",
+            2,
+        )
+        .expect("write");
+        assert_eq!(out.folder_id, 1, "child inherits the parent's folder");
+        let doc = store_file::read_json(&store_path(&root)).unwrap().unwrap();
+        let row = doc["conversations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"].as_i64() == Some(out.conversation_id))
+            .expect("child row");
+        assert_eq!(row["parent_id"], 2);
+        assert_eq!(row["kind"], "delegate");
+        let parent = doc["conversations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"].as_i64() == Some(2))
+            .expect("parent row");
+        assert_eq!(parent["child_count"], 1);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
     fn prompt_side_write_creates_and_updates() {
         let root = temp_root("prompt");
         seed(&root);
@@ -514,6 +577,7 @@ mod tests {
                 json!({"type": "image", "data": "x"}),
             ],
             "native-1",
+            0,
         )
         .expect("write");
         // new folder allocated from next=3, conversation 4
@@ -569,6 +633,7 @@ mod tests {
             "你好",
             &[json!({"type": "text", "text": "你好"})],
             "native-1",
+            0,
         )
         .expect("prompt must see the row create_conversation just wrote");
         assert_eq!(out.conversation_id, id);
@@ -604,6 +669,7 @@ mod tests {
             "问",
             &[json!({"type": "text", "text": "问"})],
             "native-9",
+            0,
         )
         .expect("prompt write");
         let events = completion_side_write(
@@ -658,6 +724,7 @@ mod tests {
             "q",
             &[json!({"type": "text", "text": "q"})],
             "n1",
+            0,
         )
         .unwrap();
         completion_side_write(

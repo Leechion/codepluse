@@ -35,7 +35,8 @@
     "deleteProfile": "Delete this model configuration?",
     "bareHarness": "이 하네스는 제공자와 모델을 스스로 관리합니다. 새 대화는 여전히 이 하네스에서 시작하며, 메인 에이전트가 그대로 위임할 수 있습니다.",
     "bareDelegation": "다음 하네스는 제공자와 모델을 스스로 관리하므로 여기에 설정이 필요 없습니다. 메인 에이전트가 직접 위임합니다: {harnesses}",
-    "immutableHarness": "Create a new configuration to use another harness."
+    "immutableHarness": "Create a new configuration to use another harness.",
+    "mainUnset": "설정되지 않음"
   },
   "SettingsNavigation": {
     "skills": "스킬",
@@ -95,7 +96,7 @@
     "nav": {
       "general": "일반",
       "appearance": "외관",
-      "agents": "에이전트",
+      "agents": "공급자",
       "mcp": "MCP",
       "skills": "Skills",
       "shortcuts": "단축키",
@@ -7712,7 +7713,7 @@
     }
   },
   "Connections": {
-    "title": "Agents",
+    "title": "공급자",
     "description": "Manage API providers, native accounts, and models for each harness.",
     "harness": "Agent",
     "chooseHarness": "Choose an agent",
@@ -7733,6 +7734,7 @@
     "modelName": "Display name (optional)",
     "accountDefault": "Use the account default model",
     "nativeAccount": "Native official account",
+    "credits": "크레딧 {value}",
     "credentialsFound": "Native sign-in credentials found",
     "accountManaged": "Sign-in is managed by the native client",
     "loginRequired": "No native sign-in found. Sign in with the native client first.",

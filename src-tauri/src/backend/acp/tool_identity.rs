@@ -28,7 +28,7 @@ pub fn tool_definitions() -> Vec<Value> {
     vec![
         tool(
             "list_agents",
-            "列出可委派的 Harness 配置；每个 agent_type 对应已保存的供应商与 default_model。同一个 Harness 可有多个模型配置，请按任务选择具体 agent_type。",
+            "列出子智能体配置中可委派的子智能体；每项含 assistant_id、名称、agent_type（它配置的执行端）与 model。委派时传 assistant_id。",
             json!([]),
             json!({}),
         ),
@@ -40,9 +40,9 @@ pub fn tool_definitions() -> Vec<Value> {
         ),
         tool(
             "delegate_to_agent",
-            "异步委派完整、自包含的子任务，立即返回 task_id。子代理没有你的对话上下文。可多次调用并行分工，再查询状态收集结果。用户点名执行端时使用指定目标。",
-            json!(["agent_type", "task"]),
-            json!({"agent_type": property("string", "list_agents 返回的 agent_type"), "task": property("string", "完整任务、相关路径、约束、预期结果"), "working_dir": property("string", "可选工作目录，默认继承父会话"), "model": property("string", "可选，目标 Harness 支持的模型 ID"), "task_id": property("string", "可选，指定已有任务以复用原子对话"), "new_task": property("boolean", "明确创建不同的新任务；继续中断任务时不要设置")}),
+            "异步委派完整、自包含的子任务，立即返回 task_id。子代理没有你的对话上下文。可多次调用并行分工，再查询状态收集结果。优先传 list_agents 返回的 assistant_id（由该子智能体配置决定执行端与模型）；用户点名某个子智能体时用它的 assistant_id。",
+            json!(["task"]),
+            json!({"assistant_id": property("string", "list_agents 返回的 assistant_id；传入后由该子智能体配置决定执行端与模型"), "agent_type": property("string", "可选，未传 assistant_id 时直接指定执行端"), "task": property("string", "完整任务、相关路径、约束、预期结果"), "working_dir": property("string", "可选工作目录，默认继承父会话"), "model": property("string", "可选，目标 Harness 支持的模型 ID"), "task_id": property("string", "可选，指定已有任务以复用原子对话"), "new_task": property("boolean", "明确创建不同的新任务；继续中断任务时不要设置")}),
         ),
         tool(
             "get_delegation_status",
@@ -70,9 +70,9 @@ pub fn tool_definitions() -> Vec<Value> {
         ),
         tool(
             "propose_task_split",
-            "把整体任务拆成 1–8 个子任务交给用户确认：返回 split_id 并在界面展示卡片，用户确认后由系统并行派发，无需你逐条调用 delegate_to_agent。每个子任务可指定 agent_type（list_agents 中的 agent_type；留空=自动选择）与 model（留空=该执行端钉住的默认模型）。调用后立即返回：卡片已在用户界面展示，用户确认后由系统自动派发全部子任务。本轮到此结束即可，不要结束前自行执行这些子任务，也禁止再调用 delegate_to_agent 重复派发；若用户随后发来新消息，先查看上方任务状态，切勿重复提案。无需用户挑选目标的单独立项仍用 delegate_to_agent。",
+            "把整体任务拆成 1–8 个子任务交给用户确认：返回 split_id 并在界面展示卡片，用户确认后由系统并行派发，无需你逐条调用 delegate_to_agent。每个子任务可指定 assistant_id（list_agents 中的 assistant_id，由该子智能体配置决定执行端）或 agent_type（留空=自动选择）与 model（留空=该执行端钉住的默认模型）。调用后立即返回：卡片已在用户界面展示，用户确认后由系统自动派发全部子任务。本轮到此结束即可，不要结束前自行执行这些子任务，也禁止再调用 delegate_to_agent 重复派发；若用户随后发来新消息，先查看上方任务状态，切勿重复提案。无需用户挑选目标的单独立项仍用 delegate_to_agent。",
             json!(["tasks"]),
-            json!({"tasks": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "object", "required": ["prompt"], "properties": {"title": property("string", "一句话任务名，用于卡片展示"), "prompt": property("string", "完整、自包含的子任务指令（子代理没有你的上下文）"), "agent_type": property("string", "list_agents 中的 agent_type；留空由系统自动选择"), "model": property("string", "可选，目标 Harness 支持的模型 ID；留空使用钉住的默认模型")}}}}),
+            json!({"tasks": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "object", "required": ["prompt"], "properties": {"title": property("string", "一句话任务名，用于卡片展示"), "prompt": property("string", "完整、自包含的子任务指令（子代理没有你的上下文）"), "assistant_id": property("string", "list_agents 返回的 assistant_id；传入后由该子智能体配置决定执行端"), "agent_type": property("string", "未指定 assistant_id 时的执行端；留空由系统自动选择"), "model": property("string", "可选，目标 Harness 支持的模型 ID；留空使用钉住的默认模型")}}}}),
         ),
         tool(
             "send_agent_message",

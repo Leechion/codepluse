@@ -148,7 +148,7 @@ test("independent ACP agent executes a real host file tool, preserves tool histo
   assert.equal(changed.models.currentModelId, "qoder/b");
 });
 
-test("workspace agent honors rejected shell permission and returns the real refusal to the model", async (t) => {
+test("ask-every-time agent honors rejected shell permission and returns the real refusal to the model", async (t) => {
   const app = await setup(
     t,
     async (body, res, turn) => {
@@ -170,7 +170,7 @@ test("workspace agent honors rejected shell permission and returns the real refu
         sse(res, { content: "权限已拒绝" });
       }
     },
-    "workspace",
+    "readonly",
   );
   await app.host.call("session/prompt", {
     sessionId: app.session.sessionId,

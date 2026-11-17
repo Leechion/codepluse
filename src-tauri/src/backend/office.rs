@@ -99,7 +99,39 @@ fn base_name(dir: &Path) -> String {
         .unwrap_or_default()
 }
 
-fn list_skills(root: &Path) -> Value {
+/// Which matrix group a skill belongs to. The store only guarantees a `.md`
+/// file per skill, so the group comes from the format the file name names.
+fn category_for(name: &str) -> &'static str {
+    let stem = name.rsplit_once('-').map(|(head, _)| head).unwrap_or(name);
+    for token in stem.split(['-', '_', '.']) {
+        match token.to_ascii_lowercase().as_str() {
+            "docx" | "doc" | "word" | "pdf" | "markdown" | "md" => return "documents",
+            "xlsx" | "xls" | "csv" | "sheet" | "spreadsheet" => return "spreadsheets",
+            "pptx" | "ppt" | "slide" | "slides" | "presentation" => return "presentations",
+            _ => {}
+        }
+    }
+    "general"
+}
+
+/// Icon names are the ones `ICON_MAP` in `office-tools-settings.tsx` resolves;
+/// anything else falls back to its generic mark.
+fn icon_for(category: &str) -> &'static str {
+    match category {
+        "documents" => "FileText",
+        "spreadsheets" => "FileSpreadsheet",
+        "presentations" => "Presentation",
+        _ => "FileStack",
+    }
+}
+
+/// The skills a pack can offer, as a bare array of the UI's `OfficecliSkill`.
+///
+/// Two shapes here are contract, not style: the caller maps the answer directly
+/// (`skills.map`), and it fills every field it declares. The localized maps carry
+/// the file name under `en` — the display name IS the skill name in this store,
+/// and `pickLocalized` falls back to `en` for every other locale.
+fn list_skills(root: &Path) -> Vec<Value> {
     let mut skills: Vec<Value> = Vec::new();
     let mut seen: Vec<String> = Vec::new();
     for dir in skill_dirs(root) {
@@ -118,15 +150,61 @@ fn list_skills(root: &Path) -> Value {
                 continue;
             }
             seen.push(name.clone());
+            let source = base_name(&dir);
+            let category = category_for(&name);
             skills.push(json!({
                 "id": format!("office-skill-{name}"),
                 "name": name,
-                "source": base_name(&dir),
+                "source": source,
                 "path": dir.join(&file_name).to_string_lossy(),
+                "category": category,
+                "icon": icon_for(category),
+                "sortOrder": skills.len(),
+                // Only the copy shipped in `codeg-assets` is centrally provided;
+                // one that exists solely in the user's directory is theirs.
+                "installedCentrally": source == "codeg-assets",
+                "displayName": { "en": name },
+                "description": { "en": "" },
             }));
         }
     }
-    json!({ "skills": skills })
+    skills
+}
+
+/// Copy the centrally shipped skills into the store agents read, and report
+/// what happened as `SkillSyncReport { synced, errors }`.
+///
+/// Nothing is overwritten: a file already in the target store stays as it is,
+/// so a sync can be repeated without losing a local edit.
+fn sync_skills(root: &Path) -> Value {
+    let assets = root.join("codeg-assets");
+    let target_dir = root.join(".data").join("office-skills");
+    let mut synced = 0u32;
+    let mut errors: Vec<String> = Vec::new();
+    if let Err(err) = std::fs::create_dir_all(&target_dir) {
+        errors.push(format!("无法创建技能目录：{err}"));
+        return json!({ "synced": synced, "errors": errors });
+    }
+    let entries = match std::fs::read_dir(&assets) {
+        Ok(entries) => entries,
+        Err(_) => return json!({ "synced": synced, "errors": errors }),
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy().into_owned();
+        if !name.ends_with(".md") || !entry.path().is_file() {
+            continue;
+        }
+        let target = target_dir.join(&file_name);
+        if target.exists() {
+            continue;
+        }
+        match std::fs::copy(entry.path(), &target) {
+            Ok(_) => synced += 1,
+            Err(err) => errors.push(format!("{name}：{err}")),
+        }
+    }
+    json!({ "synced": synced, "errors": errors })
 }
 
 /// Skill ids are flat directory entries, never paths: anything with a
@@ -144,6 +222,9 @@ fn valid_skill_name(name: &str) -> bool {
         .all(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b == b'-')
 }
 
+/// The file's own text, as a bare string: the matrix's detail drawer renders
+/// what this returns directly, so an envelope object would print as
+/// `[object Object]`.
 fn skill_content(root: &Path, skill_id: &str) -> Result<Value, String> {
     let Some(name) = skill_id.strip_prefix("office-skill-") else {
         return Err(format!("未知的技能：{skill_id}"));
@@ -153,11 +234,7 @@ fn skill_content(root: &Path, skill_id: &str) -> Result<Value, String> {
     }
     for dir in skill_dirs(root) {
         if let Ok(data) = std::fs::read(dir.join(format!("{name}.md"))) {
-            return Ok(json!({
-                "id": skill_id,
-                "name": name,
-                "content": String::from_utf8_lossy(&data),
-            }));
+            return Ok(json!(String::from_utf8_lossy(&data)));
         }
     }
     Err(format!("技能文件不存在：{name}"))
@@ -175,7 +252,8 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
         "officecli_uninstall" => {
             Ok(json!({"uninstalled": true, "message": "未托管安装，无需卸载"}))
         }
-        "officecli_list_skills" | "officecli_sync_skills" => Ok(list_skills(root)),
+        "officecli_list_skills" => Ok(json!(list_skills(root))),
+        "officecli_sync_skills" => Ok(sync_skills(root)),
         "officecli_skill_read_content" => {
             let skill_id = args.get("skillId").and_then(|v| v.as_str()).unwrap_or("");
             skill_content(root, skill_id)
@@ -232,17 +310,51 @@ mod tests {
         fs::create_dir_all(assets.join("nested.md")).unwrap();
 
         let out = call(&root, "officecli_list_skills", json!({})).unwrap();
-        let skills = out["skills"].as_array().unwrap();
+        // Contract: a bare array (the UI calls `skills.map` on it), not an
+        // envelope object.
+        let skills = out.as_array().expect("list_skills must be an array");
         assert_eq!(skills.len(), 2, "{out}");
         assert_eq!(skills[0]["id"], "office-skill-docx");
         assert_eq!(skills[0]["source"], "codeg-assets");
+        // Every field `OfficecliSkill` declares is present and of the right sort.
+        assert_eq!(skills[0]["category"], "documents");
+        assert_eq!(skills[0]["icon"], "FileText");
+        assert_eq!(skills[0]["sortOrder"], 0);
+        assert_eq!(skills[0]["installedCentrally"], true);
+        assert_eq!(skills[0]["displayName"]["en"], "docx");
+        assert_eq!(skills[0]["description"]["en"], "");
         assert_eq!(skills[1]["id"], "office-skill-xlsx");
         assert_eq!(skills[1]["source"], "office-skills");
-        // sync_skills answers with the same payload.
+        assert_eq!(skills[1]["category"], "spreadsheets");
+        // A skill only in the user's directory is not centrally installed.
+        assert_eq!(skills[1]["installedCentrally"], false);
+    }
+
+    #[test]
+    fn sync_skills_reports_counts_and_leaves_existing_copies_alone() {
+        let root = temp_root("sync");
+        let assets = root.join("codeg-assets");
+        let user = root.join(".data").join("office-skills");
+        fs::create_dir_all(&assets).unwrap();
+        fs::write(assets.join("docx.md"), "# docx").unwrap();
+        fs::write(assets.join("pptx.md"), "# pptx").unwrap();
+
+        let first = call(&root, "officecli_sync_skills", json!({})).unwrap();
+        assert_eq!(first["synced"], 2, "{first}");
+        assert_eq!(first["errors"], json!([]));
+        assert!(user.join("docx.md").is_file());
+
+        // Re-syncing must not clobber the copy that is already there.
+        fs::write(user.join("docx.md"), "# edited locally").unwrap();
+        let second = call(&root, "officecli_sync_skills", json!({})).unwrap();
+        assert_eq!(second["synced"], 0, "{second}");
         assert_eq!(
-            call(&root, "officecli_sync_skills", json!({})).unwrap(),
-            out
+            fs::read_to_string(user.join("docx.md")).unwrap(),
+            "# edited locally"
         );
+
+        // The report is `SkillSyncReport`, not the skill list.
+        assert!(second.get("skills").is_none());
     }
 
     #[test]
@@ -258,7 +370,8 @@ mod tests {
             json!({"skillId": "office-skill-docx"}),
         )
         .unwrap();
-        assert_eq!(out["content"], "# docx");
+        // Contract: the raw text, because the drawer renders it directly.
+        assert_eq!(out, json!("# docx"));
 
         for bad in [
             "officecli-docx",

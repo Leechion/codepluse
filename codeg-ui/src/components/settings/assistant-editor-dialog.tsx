@@ -499,8 +499,15 @@ function AssistantEditorBody({
                 <AgentSelect
                   value={agentType}
                   onChange={pickAgent}
+                  // 只列供应商（内置 harness + 账号渠道 + 自定义智能体）。
+                  // `inst_*` 是主智能体那份配置里手动建出来的命名副本，把它
+                  // 们再当成子智能体的可选智能体，等于让一套配置在另一个
+                  // 下拉里重复出现；子智能体要挑的是「谁来跑」，不是「哪个
+                  // 已命名的主智能体副本」。当前值若正好是这类实例，仍由
+                  // fallbackLabel 显示，不会被从这里静默抹掉。
                   agents={agents.filter(
-                    (a) => a.enabled || a.agent_type === agentType
+                    (a) =>
+                      !a.instance && (a.enabled || a.agent_type === agentType)
                   )}
                   fallbackLabel={assistant?.label_snapshot.agent}
                   disabled={saving}

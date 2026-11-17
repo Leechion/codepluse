@@ -633,6 +633,13 @@ const MONO_ICONS: Partial<Record<AgentType, AnyIcon>> = {
   cursor: CursorMonoIcon,
   qoder: QoderMonoIcon,
   antigravity: AntigravityMonoIcon,
+  // 账号智能体的 wire 名（agents.rs `wire_agent`：`account_<channel>`）。
+  // wb 两版共用 CodeBuddy 官方标记，qoder 两版共用 Qoder 的 Q 标记——
+  // 与各自的内置 harness（code_buddy / qoder）同源，只是登录渠道不同。
+  account_buddy: CodeBuddyMonoIcon,
+  account_workbuddy: CodeBuddyMonoIcon,
+  account_qoder: QoderMonoIcon,
+  account_qodercn: QoderMonoIcon,
 }
 
 // Per-agent color override for mono marks, layered on top of the default

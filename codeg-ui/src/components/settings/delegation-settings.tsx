@@ -47,7 +47,7 @@ import { subscribe } from "@/lib/platform"
 import { DELEGATION_SETTINGS_CHANGED_EVENT } from "@/lib/types"
 import type { AgentDelegationDefaults, AgentType } from "@/lib/types"
 import { AssistantsPanel } from "./assistants-panel"
-import { HarnessInstanceSection } from "./harness-instance-settings"
+import { HarnessProfiles } from "./harness-profiles"
 
 type DelegationTab = "general" | "mainAgent" | "agentDefaults"
 
@@ -369,8 +369,9 @@ export function DelegationSettingsSection() {
         </TabsContent>
 
         <TabsContent value="mainAgent" className="pt-2">
-          {/* 主智能体：新建对话默认使用的执行端 + 模型。 */}
-          <HarnessInstanceSection mode="main" />
+          {/* 主智能体：与「子智能体配置」同一套界面 —— 一行摘要 + 编辑弹层，
+              而不是把连接方式的每个字段直接铺在页面上。 */}
+          <HarnessProfiles mode="card" />
         </TabsContent>
 
         <TabsContent value="agentDefaults" className="pt-2">

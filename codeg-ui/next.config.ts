@@ -33,6 +33,11 @@ const withNextIntl = createNextIntlPlugin({
 
 const nextConfig: NextConfig = {
   output: "export",
+  // 这台机器 12 核、空闲内存常年不足 5GB：Next 默认按核数起 worker 时会把
+  // 构建进程 OOM 掉（young object promotion failed / exit 134）。限到 2 个。
+  experimental: {
+    cpus: 2,
+  },
   // The build type-checks tsconfig.json minus the test files; that file says
   // why. ignoreBuildErrors：src/zcode 是上游 ZCode 的非 strict vendor 树，被页面
   // 传递导入后无法按目录豁免类型检查；运行时类型已擦除，行为不受影响。

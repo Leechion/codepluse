@@ -992,7 +992,7 @@ impl Bridge {
     }
 }
 
-/// 读取工作区 JSON 的小助手（只读；写入走 store_writes 的跨进程锁）。
+/// 读取工作区 JSON 的小工具（只读；写入走 store_writes 的跨进程锁）。
 fn workspace_doc(root: &Path) -> Option<Value> {
     store_file::read_json(&root.join(".data").join("codeg-workspace.json")).ok()?
 }

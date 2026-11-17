@@ -29743,9 +29743,10 @@ var FileStore = class {
     }
   }
 };
+// codepluse patch: 未注入 ctx 时（死模型记录、永久锁定开关的模块级旁路）不再抛错，
+// 返回 undefined 让三个调用点走各自已有的「退化到内存存储」分支。
 function resolveChannelPackHome(ctx) {
-  if (typeof ctx.platform?.channelHome !== "string") throw new Error("独立渠道缺少数据目录");
-  return ctx.platform.channelHome;
+  return typeof ctx?.platform?.channelHome === "string" ? ctx.platform.channelHome : void 0;
 }
 function createChannelPackStore(ctx) {
   const settings = settingsOf(ctx);

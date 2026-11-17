@@ -180,7 +180,7 @@ describe("buildReferenceGroups", () => {
     const labels = {
       file: "文件",
       agent: "智能体",
-      assistant: "助手",
+      assistant: "子智能体",
       session: "会话",
       commit: "提交",
       skill: "技能",

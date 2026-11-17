@@ -55,6 +55,7 @@ import type {
   OfficecliInfo,
   OfficecliSkill,
 } from "@/lib/types"
+import { isProviderAgent } from "@/lib/custom-agents"
 import { piUsesCustomAgentDir } from "@/lib/pi-config"
 import { toErrorMessage } from "@/lib/app-error"
 
@@ -306,7 +307,10 @@ export function OfficeToolsBody({
       // default-dir skill store, so it doesn't get a column here.
       setAgents(
         agentList.filter(
-          (agent) => agent.skills_capable && !piUsesCustomAgentDir(agent)
+          (agent) =>
+            agent.skills_capable &&
+            isProviderAgent(agent) &&
+            !piUsesCustomAgentDir(agent)
         )
       )
       // Remount the matrix so it re-fetches the authoritative status snapshot

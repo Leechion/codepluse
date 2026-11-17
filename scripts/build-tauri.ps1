@@ -1,4 +1,4 @@
-<#
+﻿<#
     Builds the codepluse desktop shell.
 
     Layout: one binary. Tauri is the window, the Rust backend in
@@ -91,16 +91,22 @@ if (!(Test-Path -LiteralPath (Join-Path $ui 'out\workspace.html'))) {
 # The installed shell resolves its workspace root from this manifest (see
 # resolve_root in src/main.rs). Forward slashes keep the JSON readable and are
 # accepted by Windows path APIs.
+# serde_json rejects a UTF-8 BOM, and PowerShell 5.1's `-Encoding utf8`
+# writes one — the shell would then fall back to its own directory and fail
+# to find codeg-ui\out. Write the manifest without a BOM.
+function Write-WorkspaceManifest([string] $Path) {
+    $json = @{ root = ($root -replace '\\', '/') } | ConvertTo-Json
+    [IO.File]::WriteAllText($Path, $json, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 $resources = Join-Path $tauriDir 'resources'
 New-Item -ItemType Directory -Path $resources -Force | Out-Null
-@{ root = ($root -replace '\\', '/') } | ConvertTo-Json |
-    Set-Content -LiteralPath (Join-Path $resources 'workspace.json') -Encoding utf8
+Write-WorkspaceManifest (Join-Path $resources 'workspace.json')
 # 开发/发布构建直接运行时，仓库根也要在旁边（安装包走 resources/）。
 $profileDir = if ($DebugBuild) { 'target\debug' } else { 'target\release' }
 $profileDir = Join-Path $tauriDir $profileDir
 if (Test-Path -LiteralPath $profileDir) {
-    @{ root = ($root -replace '\\', '/') } | ConvertTo-Json |
-        Set-Content -LiteralPath (Join-Path $profileDir 'workspace.json') -Encoding utf8
+    Write-WorkspaceManifest (Join-Path $profileDir 'workspace.json')
 }
 # 桌面快捷方式指向 dist\codepluse\codepluse.exe（旧的 Go WebView2 外壳在
 # Phase 4 删掉了，那个位置现在是本仓库的启动入口）——每次构建都同步一份，
@@ -111,8 +117,7 @@ if (Test-Path -LiteralPath $launcherDir) {
     if (Test-Path -LiteralPath $builtExe) {
         Copy-Item -LiteralPath $builtExe -Destination (Join-Path $launcherDir 'codepluse.exe') -Force
     }
-    @{ root = ($root -replace '\\', '/') } | ConvertTo-Json |
-        Set-Content -LiteralPath (Join-Path $launcherDir 'workspace.json') -Encoding utf8
+    Write-WorkspaceManifest (Join-Path $launcherDir 'workspace.json')
 }
 
 # Run the CLI from the repository root so it finds ./src-tauri.
