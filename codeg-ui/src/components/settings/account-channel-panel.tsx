@@ -238,6 +238,9 @@ function AccountAvatar({
   name?: string
 }) {
   const [broken, setBroken] = useState(false)
+  useEffect(() => {
+    setBroken(false)
+  }, [account.avatarUrl])
   if (account.avatarUrl && !broken) {
     return (
       // eslint-disable-next-line @next/next/no-img-element

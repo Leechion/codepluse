@@ -170,7 +170,33 @@ async fn run(root: &Path, command: &str, a: &Value) -> Result<Outcome, String> {
             })
         }
         "browser_reload" => browser_simple(root, a, "Page.reload").await,
-        "browser_go_back" => browser_simple(root, a, "Page.navigateToHistoryEntry").await,
+        "browser_go_back" => {
+            let browser = ensure_browser(root).await?;
+            let mut tab = browser.tab_by_ref(&go_text(&a["tabId"])).await?;
+            browser.attach(&mut tab).await?;
+            let history = browser
+                .call(&tab.session_id, "Page.getNavigationHistory", Value::Null)
+                .await?;
+            let current = int_of(&history["currentIndex"]);
+            if current > 0 {
+                if let Some(entries) = history["entries"].as_array() {
+                    if let Some(prev) = entries.get((current - 1) as usize) {
+                        let entry_id = int_of(&prev["id"]);
+                        browser
+                            .call(
+                                &tab.session_id,
+                                "Page.navigateToHistoryEntry",
+                                json!({ "entryId": entry_id }),
+                            )
+                            .await?;
+                    }
+                }
+            }
+            Ok(Outcome {
+                result: Value::Null,
+                events: Vec::new(),
+            })
+        }
         "browser_stop" => Ok(Outcome {
             result: Value::Null,
             events: Vec::new(),

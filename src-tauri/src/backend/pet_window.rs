@@ -123,9 +123,20 @@ fn load_doc(root: &Path) -> Value {
         .unwrap_or_else(default_doc)
 }
 
-fn save_doc(root: &Path, doc: &Value) -> Result<(), String> {
-    let _lock = store_file::lock(&settings_path(root))?;
-    store_file::write_json(&settings_path(root), doc)
+fn mutate_doc<R>(
+    root: &Path,
+    mutate: impl FnOnce(&mut Value) -> Result<R, String>,
+) -> Result<R, String> {
+    let path = settings_path(root);
+    let _lock = store_file::lock(&path)?;
+    let mut doc = store_file::read_json(&path)
+        .ok()
+        .flatten()
+        .filter(Value::is_object)
+        .unwrap_or_else(default_doc);
+    let out = mutate(&mut doc)?;
+    store_file::write_json(&path, &doc)?;
+    Ok(out)
 }
 
 /// 对外配置视图：只暴露 `PetWindowConfig` 的六个字段。
@@ -162,18 +173,20 @@ fn validate_pet_id(raw: Option<&Value>, field: &str) -> Result<String, String> {
 /// 子窗口。这里只把 `enabled` 置真并广播 `pet://window`，由单窗口内的前端路由
 /// 决定是否渲染宠物；不返回“窗口已打开”的伪造成功态。
 fn open_window(root: &Path) -> Result<Value, String> {
-    let mut doc = load_doc(root);
-    doc["enabled"] = json!(true);
-    save_doc(root, &doc)?;
+    mutate_doc(root, |doc| {
+        doc["enabled"] = json!(true);
+        Ok(())
+    })?;
     crate::backend::emit_event("pet://window", json!({ "open": true, "limited": true }));
     Ok(Value::Null)
 }
 
 /// `limited: 同上，无法关闭一个本层没有句柄的子窗口；仅落 `enabled=false` 并广播。
 fn close_window(root: &Path) -> Result<Value, String> {
-    let mut doc = load_doc(root);
-    doc["enabled"] = json!(false);
-    save_doc(root, &doc)?;
+    mutate_doc(root, |doc| {
+        doc["enabled"] = json!(false);
+        Ok(())
+    })?;
     crate::backend::emit_event("pet://window", json!({ "open": false, "limited": true }));
     Ok(Value::Null)
 }
@@ -192,10 +205,11 @@ fn resize_panel(root: &Path, args: &Value) -> Result<Value, String> {
     if height < 0.0 {
         return Err("height 不能为负数".into());
     }
-    let mut doc = load_doc(root);
-    doc["panelOpen"] = json!(true);
-    doc["panelHeight"] = json!(height);
-    save_doc(root, &doc)?;
+    mutate_doc(root, |doc| {
+        doc["panelOpen"] = json!(true);
+        doc["panelHeight"] = json!(height);
+        Ok(())
+    })?;
     crate::backend::emit_event(
         "pet://panel",
         json!({ "open": true, "height": height, "limited": true }),
@@ -205,21 +219,24 @@ fn resize_panel(root: &Path, args: &Value) -> Result<Value, String> {
 
 /// 翻转面板展开/收起标记并广播；竞态（点错图标随即失焦）由前端既有守卫处理。
 fn toggle_panel(root: &Path) -> Result<Value, String> {
-    let mut doc = load_doc(root);
-    let next = !doc.get("panelOpen").and_then(Value::as_bool).unwrap_or(false);
-    doc["panelOpen"] = json!(next);
-    save_doc(root, &doc)?;
+    let (next, height) = mutate_doc(root, |doc| {
+        let next = !doc.get("panelOpen").and_then(Value::as_bool).unwrap_or(false);
+        doc["panelOpen"] = json!(next);
+        let height = doc.get("panelHeight").cloned().unwrap_or(Value::Null);
+        Ok((next, height))
+    })?;
     crate::backend::emit_event(
         "pet://panel",
-        json!({ "open": next, "height": doc.get("panelHeight").cloned().unwrap_or(Value::Null), "limited": true }),
+        json!({ "open": next, "height": height, "limited": true }),
     );
     Ok(Value::Null)
 }
 
 fn close_panel(root: &Path) -> Result<Value, String> {
-    let mut doc = load_doc(root);
-    doc["panelOpen"] = json!(false);
-    save_doc(root, &doc)?;
+    mutate_doc(root, |doc| {
+        doc["panelOpen"] = json!(false);
+        Ok(())
+    })?;
     crate::backend::emit_event("pet://panel", json!({ "open": false, "limited": true }));
     Ok(Value::Null)
 }
@@ -281,17 +298,18 @@ fn celebrate(args: &Value) -> Result<Value, String> {
 // ── 当前宠物与窗口状态 ──────────────────────────────────────────────────────
 
 fn set_active(root: &Path, args: &Value) -> Result<Value, String> {
-    let mut doc = load_doc(root);
-    match args.get("petId") {
-        Some(Value::Null) | None => doc["activePetId"] = Value::Null,
+    let next_id = match args.get("petId") {
+        Some(Value::Null) | None => Value::Null,
         Some(Value::String(_)) => {
             let id = validate_pet_id(args.get("petId"), "petId")?;
-            doc["activePetId"] = json!(id);
+            json!(id)
         }
         Some(_) => return Err("petId 必须是字符串或 null".into()),
-    }
-    save_doc(root, &doc)?;
-    let config = config_view(&doc);
+    };
+    let config = mutate_doc(root, |doc| {
+        doc["activePetId"] = next_id;
+        Ok(config_view(doc))
+    })?;
     crate::backend::emit_event("pet://active-changed", config.clone());
     Ok(config)
 }
@@ -300,44 +318,42 @@ fn save_window_state(root: &Path, args: &Value) -> Result<Value, String> {
     let patch = args
         .as_object()
         .ok_or_else(|| "窗口状态必须是对象".to_string())?;
-    let mut doc = load_doc(root);
-
-    if let Some(x) = patch.get("x") {
-        match x {
-            Value::Null => doc["x"] = Value::Null,
-            Value::Number(_) => doc["x"] = x.clone(),
-            _ => return Err("x 必须是数字或 null".into()),
+    let config = mutate_doc(root, |doc| {
+        if let Some(x) = patch.get("x") {
+            match x {
+                Value::Null => doc["x"] = Value::Null,
+                Value::Number(_) => doc["x"] = x.clone(),
+                _ => return Err("x 必须是数字或 null".into()),
+            }
         }
-    }
-    if let Some(y) = patch.get("y") {
-        match y {
-            Value::Null => doc["y"] = Value::Null,
-            Value::Number(_) => doc["y"] = y.clone(),
-            _ => return Err("y 必须是数字或 null".into()),
+        if let Some(y) = patch.get("y") {
+            match y {
+                Value::Null => doc["y"] = Value::Null,
+                Value::Number(_) => doc["y"] = y.clone(),
+                _ => return Err("y 必须是数字或 null".into()),
+            }
         }
-    }
-    if let Some(scale) = patch.get("scale") {
-        let scale = scale
-            .as_f64()
-            .filter(|value| *value > 0.0 && *value <= 10.0)
-            .ok_or_else(|| "scale 必须是 0 到 10 之间的正数".to_string())?;
-        doc["scale"] = json!(scale);
-    }
-    if let Some(always_on_top) = patch.get("alwaysOnTop") {
-        doc["alwaysOnTop"] = always_on_top
-            .as_bool()
-            .map(Value::Bool)
-            .ok_or_else(|| "alwaysOnTop 必须是布尔值".to_string())?;
-    }
-    if let Some(enabled) = patch.get("enabled") {
-        doc["enabled"] = enabled
-            .as_bool()
-            .map(Value::Bool)
-            .ok_or_else(|| "enabled 必须是布尔值".to_string())?;
-    }
-
-    save_doc(root, &doc)?;
-    let config = config_view(&doc);
+        if let Some(scale) = patch.get("scale") {
+            let scale = scale
+                .as_f64()
+                .filter(|value| *value > 0.0 && *value <= 10.0)
+                .ok_or_else(|| "scale 必须是 0 到 10 之间的正数".to_string())?;
+            doc["scale"] = json!(scale);
+        }
+        if let Some(always_on_top) = patch.get("alwaysOnTop") {
+            doc["alwaysOnTop"] = always_on_top
+                .as_bool()
+                .map(Value::Bool)
+                .ok_or_else(|| "alwaysOnTop 必须是布尔值".to_string())?;
+        }
+        if let Some(enabled) = patch.get("enabled") {
+            doc["enabled"] = enabled
+                .as_bool()
+                .map(Value::Bool)
+                .ok_or_else(|| "enabled 必须是布尔值".to_string())?;
+        }
+        Ok(config_view(doc))
+    })?;
     crate::backend::emit_event("pet://settings", config.clone());
     Ok(config)
 }
@@ -345,10 +361,11 @@ fn save_window_state(root: &Path, args: &Value) -> Result<Value, String> {
 fn record_position(root: &Path, args: &Value) -> Result<Value, String> {
     let x = number_field(args, "x")?;
     let y = number_field(args, "y")?;
-    let mut doc = load_doc(root);
-    doc["x"] = json!(x);
-    doc["y"] = json!(y);
-    save_doc(root, &doc)?;
+    mutate_doc(root, |doc| {
+        doc["x"] = json!(x);
+        doc["y"] = json!(y);
+        Ok(())
+    })?;
     Ok(Value::Null)
 }
 
@@ -427,7 +444,9 @@ fn replace_sprite(root: &Path, args: &Value) -> Result<Value, String> {
     }
     let mime = mime_of(&bytes).ok_or("仅支持 PNG、JPEG、WebP 或 GIF 精灵图")?;
 
-    let doc = store_file::read_json(&pet_path(root, &id))
+    let pet_file = pet_path(root, &id);
+    let _lock = store_file::lock(&pet_file)?;
+    let mut doc = store_file::read_json(&pet_file)
         .ok()
         .flatten()
         .filter(Value::is_object)
@@ -447,10 +466,8 @@ fn replace_sprite(root: &Path, args: &Value) -> Result<Value, String> {
     let path = dir.join(&asset_name);
     store_file::write_bytes(&path, &bytes)?;
 
-    let mut doc = doc;
     doc["spritesheetPath"] = json!(asset_name);
-    let _lock = store_file::lock(&pet_path(root, &id))?;
-    store_file::write_json(&pet_path(root, &id), &doc)?;
+    store_file::write_json(&pet_file, &doc)?;
     Ok(Value::Null)
 }
 
@@ -473,6 +490,11 @@ fn safe_asset_url(raw: Option<&Value>) -> Result<Url, String> {
     {
         return Err("url 包含非法凭证信息".into());
     }
+    #[cfg(not(test))]
+    {
+        let host = parsed.host_str().unwrap_or("");
+        crate::backend::provider_catalog::host_is_safe(host)?;
+    }
     Ok(parsed)
 }
 
@@ -486,7 +508,14 @@ fn marketplace_asset(args: &Value) -> Result<Value, String> {
     if !response.status().is_success() {
         return Err(format!("下载宠物素材失败：HTTP {}", response.status()));
     }
-    let bytes = response.bytes().map_err(|err| format!("读取宠物素材失败：{err}"))?;
+    let mut bytes = Vec::new();
+    {
+        use std::io::Read;
+        response
+            .take((MAX_ASSET_BYTES as u64) + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|err| format!("读取宠物素材失败：{err}"))?;
+    }
     if bytes.is_empty() {
         return Err("宠物素材内容为空".into());
     }

@@ -169,6 +169,7 @@ fn read_meta(path: &Path) -> Result<Option<Value>, String> {
 }
 
 fn write_meta(path: &Path, value: &Value) -> Result<(), String> {
+    let _lock = store_file::lock(path)?;
     store_file::write_json(path, value).map_err(|e| format!("写入备份元数据失败：{e}"))
 }
 
@@ -254,19 +255,24 @@ fn cancel(root: &Path, args: &Value) -> Result<Value, String> {
         .filter(|v| !v.is_empty())
         .ok_or_else(|| "缺少 opId 参数".to_string())?
         .to_string();
-    let Some(mut state) = read_meta(&state_path(root))? else {
-        return Ok(json!(false));
-    };
-    if state.get("opId").and_then(Value::as_str) != Some(op_id.as_str()) {
-        return Ok(json!(false));
+    let path = state_path(root);
+    {
+        let _lock = store_file::lock(&path)?;
+        let Some(mut state) = read_meta(&path)? else {
+            return Ok(json!(false));
+        };
+        if state.get("opId").and_then(Value::as_str) != Some(op_id.as_str()) {
+            return Ok(json!(false));
+        }
+        let phase = state.get("phase").and_then(Value::as_str).unwrap_or("");
+        if matches!(phase, "done" | "cancelled" | "error") {
+            return Ok(json!(false));
+        }
+        state["phase"] = json!("cancelled");
+        state["cancelled"] = json!(true);
+        store_file::write_json(&path, &state)
+            .map_err(|e| format!("写入备份元数据失败：{e}"))?;
     }
-    let phase = state.get("phase").and_then(Value::as_str).unwrap_or("");
-    if matches!(phase, "done" | "cancelled" | "error") {
-        return Ok(json!(false));
-    }
-    state["phase"] = json!("cancelled");
-    state["cancelled"] = json!(true);
-    write_meta(&state_path(root), &state)?;
     crate::backend::emit_event(
         "backup://progress",
         json!({

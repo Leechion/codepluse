@@ -1,0 +1,45 @@
+npm warn Unknown project config "public-hoist-pattern". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+(node:9904) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+⎯⎯⎯⎯⎯⎯⎯ Startup Error ⎯⎯⎯⎯⎯⎯⎯⎯
+Error: Failed to load custom Reporter from basic
+    at loadCustomReporterModule (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:11429:9)
+    at async file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:11445:23
+    ... 3 lines matching cause stack trace ...
+    at async _createServer (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vite@8.3.4_@types+node@25.2_36b93ca7e9312e0295180b61806f3fcf/node_modules/vite/dist/node/chunks/node.js:25093:84)
+    at async createViteServer (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:8902:17)
+    at async createVitest (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:14288:18)
+    at async prepareVitest (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:14655:14)
+    at async startVitest (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:14598:14) {
+  [cause]: Error: Failed to load url basic (resolved id: basic). Does the file exist?
+      at reviveInvokeError (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vite@8.3.4_@types+node@25.2_36b93ca7e9312e0295180b61806f3fcf/node_modules/vite/dist/node/module-runner.js:556:14)
+      at Object.invoke (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vite@8.3.4_@types+node@25.2_36b93ca7e9312e0295180b61806f3fcf/node_modules/vite/dist/node/module-runner.js:572:33)
+      at async ServerModuleRunner.getModuleInformation (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vite@8.3.4_@types+node@25.2_36b93ca7e9312e0295180b61806f3fcf/node_modules/vite/dist/node/module-runner.js:1228:7)
+      at async ServerModuleRunner.import (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vite@8.3.4_@types+node@25.2_36b93ca7e9312e0295180b61806f3fcf/node_modules/vite/dist/node/module-runner.js:1149:23)
+      at async loadCustomReporterModule (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:11427:26)
+      at async file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:11445:23
+      at async Promise.all (index 0)
+      at async Vitest._setServer (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:13244:138)
+      at async BasicMinimalPluginContext.handler (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:14258:5)
+      at async _createServer (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vite@8.3.4_@types+node@25.2_36b93ca7e9312e0295180b61806f3fcf/node_modules/vite/dist/node/chunks/node.js:25093:84) {
+    code: 'ERR_LOAD_URL',
+    runnerError: Error: RunnerError
+        at reviveInvokeError (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vite@8.3.4_@types+node@25.2_36b93ca7e9312e0295180b61806f3fcf/node_modules/vite/dist/node/module-runner.js:557:64)
+        at Object.invoke (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vite@8.3.4_@types+node@25.2_36b93ca7e9312e0295180b61806f3fcf/node_modules/vite/dist/node/module-runner.js:572:33)
+        at async ServerModuleRunner.getModuleInformation (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vite@8.3.4_@types+node@25.2_36b93ca7e9312e0295180b61806f3fcf/node_modules/vite/dist/node/module-runner.js:1228:7)
+        at async ServerModuleRunner.import (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vite@8.3.4_@types+node@25.2_36b93ca7e9312e0295180b61806f3fcf/node_modules/vite/dist/node/module-runner.js:1149:23)
+        at async loadCustomReporterModule (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:11427:26)
+        at async file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:11445:23
+        at async Promise.all (index 0)
+        at async Vitest._setServer (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:13244:138)
+        at async BasicMinimalPluginContext.handler (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vitest@4.1.11_@opentelemetr_48ed8bd430317368878de5d19b9aaad0/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:14258:5)
+        at async _createServer (file:///E:/code/codepluse/codeg-ui/node_modules/.pnpm/vite@8.3.4_@types+node@25.2_36b93ca7e9312e0295180b61806f3fcf/node_modules/vite/dist/node/chunks/node.js:25093:84)
+  }
+}
+
+
+

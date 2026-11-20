@@ -1318,10 +1318,11 @@ pub(crate) fn host_is_safe(host: &str) -> Result<(), String> {
         Ok(list) => list.collect(),
         Err(error) => return Err(error.to_string()),
     };
-    let tried = addresses
-        .iter()
-        .any(|address| !blocked_fetch_ip(&address.ip()));
-    if !tried {
+    let safe = !addresses.is_empty()
+        && addresses
+            .iter()
+            .all(|address| !blocked_fetch_ip(&address.ip()));
+    if !safe {
         return Err(format!("目标地址不允许访问：{host}"));
     }
     Ok(())

@@ -171,10 +171,32 @@ async fn forward_commands(state: &ProxyState, forwards: &[(String, Value)]) {
 
 /// Starts the front door. Returns once the listener is bound.
 pub async fn serve(cfg: Config) -> std::io::Result<()> {
-    git::load_settings(&cfg.root);
-    if let Err(error) = desktop_settings::apply_proxy_from_store(&cfg.root) {
-        eprintln!("[backend] 忽略无效的应用代理设置：{error}");
-    }
+    serve_with_ready(cfg, None).await
+}
+
+pub async fn serve_with_ready(
+    cfg: Config,
+    ready: Option<std::sync::mpsc::Sender<Result<(), String>>>,
+) -> std::io::Result<()> {
+    let listener = match tokio::net::TcpListener::bind(("127.0.0.1", cfg.listen_port)).await {
+        Ok(listener) => listener,
+        Err(err) => {
+            if let Some(tx) = ready {
+                let _ = tx.send(Err(format!("端口 {} 绑定失败：{err}", cfg.listen_port)));
+            }
+            return Err(err);
+        }
+    };
+
+    let init_root = cfg.root.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        git::load_settings(&init_root);
+        if let Err(error) = desktop_settings::apply_proxy_from_store(&init_root) {
+            eprintln!("[backend] 忽略无效的应用代理设置：{error}");
+        }
+    })
+    .await;
+
     // The work task engine still lives in the sidecar; its handlers learn the
     // upstream address here so Rust-owned commands can hand work back to it.
     let upstream_http = cfg
@@ -241,7 +263,9 @@ pub async fn serve(cfg: Config) -> std::io::Result<()> {
 
     let app = app_router(state);
 
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", cfg.listen_port)).await?;
+    if let Some(tx) = ready {
+        let _ = tx.send(Ok(()));
+    }
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -535,25 +559,37 @@ async fn api_dispatch(
             Err(message) => fail(message),
         };
     }
-    if let Some(outcome) = providers::handle(&st.root, &command, &args) {
-        // Go returns structs here (`[]Info` / `Info`), whose field order is
-        // part of the wire shape; `update_model_provider` returns a Row (a
-        // map), whose keys Go sorts.
+    if providers::owns(&command) {
+        let root = st.root.clone();
+        let owned = command.clone();
+        let owned_args = args.clone();
+        let outcome =
+            tokio::task::spawn_blocking(move || providers::handle(&root, &owned, &owned_args))
+                .await;
         let shape = if command == "update_model_provider" {
             go_json
         } else {
             go_json_struct
         };
         return match outcome {
-            Ok(value) => shape(value),
-            Err(message) => fail(message),
+            Ok(Some(Ok(value))) => shape(value),
+            Ok(Some(Err(message))) => fail(message),
+            Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
+            Err(join) => fail(format!("供应商命令执行失败：{join}")),
         };
     }
-    if let Some(outcome) = exec_providers::handle(&st.root, &command, &args) {
-        // `codepluse_provider_save` answers with the Provider struct.
+    if exec_providers::owns(&command) {
+        let root = st.root.clone();
+        let owned = command.clone();
+        let owned_args = args.clone();
+        let outcome =
+            tokio::task::spawn_blocking(move || exec_providers::handle(&root, &owned, &owned_args))
+                .await;
         return match outcome {
-            Ok(value) => go_json_struct(value),
-            Err(message) => fail(message),
+            Ok(Some(Ok(value))) => go_json_struct(value),
+            Ok(Some(Err(message))) => fail(message),
+            Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
+            Err(join) => fail(format!("供应商命令执行失败：{join}")),
         };
     }
     // updater / forge / provider_catalog / acp_registry do blocking HTTPS via
@@ -588,22 +624,22 @@ async fn api_dispatch(
             Err(join) => fail(format!("命令执行失败：{join}")),
         };
     }
-    if let Some(outcome) = office::handle(&st.root, &command, &args) {
+    if office::owns(&command) || experts::owns(&command) || files::owns(&command) || store_reads::owns(&command) {
+        let root = st.root.clone();
+        let owned = command.clone();
+        let owned_args = args.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            office::handle(&root, &owned, &owned_args)
+                .or_else(|| experts::handle(&root, &owned, &owned_args))
+                .or_else(|| files::handle(&root, &owned, &owned_args))
+                .or_else(|| store_reads::handle(&root, &owned, &owned_args))
+        })
+        .await;
         return match outcome {
-            Ok(value) => go_json(value),
-            Err(message) => fail(message),
-        };
-    }
-    if let Some(outcome) = experts::handle(&st.root, &command, &args) {
-        return match outcome {
-            Ok(value) => go_json(value),
-            Err(message) => fail(message),
-        };
-    }
-    if let Some(outcome) = files::handle(&st.root, &command, &args) {
-        return match outcome {
-            Ok(value) => go_json(value),
-            Err(message) => fail(message),
+            Ok(Some(Ok(value))) => go_json(value),
+            Ok(Some(Err(message))) => fail(message),
+            Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
+            Err(join) => fail(format!("命令执行失败：{join}")),
         };
     }
     if folder_links::owns(&command) {
@@ -621,12 +657,6 @@ async fn api_dispatch(
             Ok(Some(Err(message))) => fail(message),
             Ok(None) => forward_parts(&st, parts.method, &parts.uri, parts.headers, body).await,
             Err(join) => fail(format!("文件夹链接命令失败：{join}")),
-        };
-    }
-    if let Some(outcome) = store_reads::handle(&st.root, &command, &args) {
-        return match outcome {
-            Ok(value) => go_json(value),
-            Err(message) => fail(message),
         };
     }
     // Store writes return events (and Go-bound side calls) on top of the HTTP

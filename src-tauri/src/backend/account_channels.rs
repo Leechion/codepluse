@@ -127,9 +127,30 @@ struct Entry {
 }
 
 static REGISTRY: OnceLock<Mutex<HashMap<String, Entry>>> = OnceLock::new();
+static START_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static HTTP_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
 
 fn registry() -> &'static Mutex<HashMap<String, Entry>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn start_lock() -> &'static Mutex<()> {
+    START_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn http_client() -> Result<&'static reqwest::blocking::Client, String> {
+    if let Some(client) = HTTP_CLIENT.get() {
+        return Ok(client);
+    }
+    let built = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(45))
+        // 协议进程永远在环回地址上：系统代理（HTTP_PROXY/HTTPS_PROXY）不能
+        // 介入，否则请求会被送到代理手里而失败。
+        .no_proxy()
+        .build()
+        .map_err(|error| format!("账号渠道不可达: {error}"))?;
+    let _ = HTTP_CLIENT.set(built);
+    Ok(HTTP_CLIENT.get().unwrap())
 }
 
 /// `.data/account-channels` 目录。
@@ -181,8 +202,9 @@ fn running(root: &Path) -> Option<Client> {
 pub fn ensure(root: &Path) -> Result<Client, String> {
     let root = absolute(root)?;
     let key = root.to_string_lossy().to_string();
-    // 查缓存：锁只用来读写这张表，启动协议进程时不持有它 —— 否则一次最长
-    // 30 秒的等待会把所有并发调用者一起堵住。
+    // 串行化同一进程内的冷启动检查与拉起，防止预热线程与首个 UI 请求并发拉起两个
+    // server.mjs 进程撞上 service.lock。
+    let _start_guard = start_lock().lock().unwrap();
     let mut reuse: Option<Client> = None;
     let mut stale = false;
     {
@@ -351,13 +373,7 @@ fn hide_process(_command: &mut Command) {}
 impl Client {
     /// Go `Client.Call`：一次带 Bearer 密钥的本地 HTTP 调用。
     pub fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(45))
-            // 协议进程永远在环回地址上：系统代理（HTTP_PROXY/HTTPS_PROXY）不能
-            // 介入，否则请求会被送到代理手里而失败。
-            .no_proxy()
-            .build()
-            .map_err(|error| format!("账号渠道不可达: {error}"))?;
+        let client = http_client()?;
         let mut request = client
             .request(
                 reqwest::Method::from_bytes(method.as_bytes())

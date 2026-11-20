@@ -167,12 +167,31 @@ fn authed_get(
         reqwest::blocking::RequestBuilder,
     ) -> reqwest::blocking::RequestBuilder,
 ) -> Result<(u16, Value), String> {
+    let parsed = url::Url::parse(url).map_err(|_| "服务器地址无效".to_string())?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("服务器地址仅支持 http/https".into());
+    }
+    #[cfg(not(test))]
+    {
+        let host = parsed.host_str().unwrap_or("");
+        crate::backend::provider_catalog::host_is_safe(host)?;
+    }
     let builder = net::client().get(url).timeout(REQUEST_TIMEOUT);
     let response = apply(builder)
         .send()
         .map_err(|error| error.to_string())?;
     let status = response.status().as_u16();
-    let body = response.bytes().map_err(|error| error.to_string())?;
+    let mut body = Vec::new();
+    {
+        use std::io::Read;
+        response
+            .take((1 << 20) + 1)
+            .read_to_end(&mut body)
+            .map_err(|error| error.to_string())?;
+    }
+    if body.len() > (1 << 20) {
+        return Err("服务器响应过大".into());
+    }
     let user = serde_json::from_slice(&body).unwrap_or(Value::Null);
     Ok((status, user))
 }

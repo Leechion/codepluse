@@ -392,7 +392,11 @@ pub fn spawn_scheduler(root: PathBuf) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-            crate::backend::worktask_engine::tick(&root);
+            let root = root.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                crate::backend::worktask_engine::tick(&root);
+            })
+            .await;
         }
     });
 }

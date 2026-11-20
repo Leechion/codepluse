@@ -191,6 +191,9 @@ import type {
   PackageManagerInfo,
   HyperframesSkillAgent,
   GitSettings,
+  GitUserConfig,
+  GitSshKey,
+  GitHubAccount,
   GitHubAccountsSettings,
   GitHubTokenValidation,
   McpAppType,
@@ -2406,8 +2409,47 @@ export async function updateGitSettings(
   return getTransport().call("update_git_settings", { settings })
 }
 
+export async function getGitUserConfig(path?: string): Promise<GitUserConfig> {
+  return getTransport().call("get_git_user_config", { path })
+}
+
+export async function setGitUserConfig(params: {
+  scope: "global" | "local"
+  name?: string | null
+  email?: string | null
+  default_branch?: string
+  autocrlf?: string
+  path?: string
+}): Promise<GitUserConfig> {
+  return getTransport().call("set_git_user_config", params)
+}
+
+export async function addGitSafeDirectory(
+  path?: string
+): Promise<{ success: boolean; path: string }> {
+  return getTransport().call("add_git_safe_directory", { path })
+}
+
+export async function getGitSshKeys(): Promise<{ keys: GitSshKey[] }> {
+  return getTransport().call("get_git_ssh_keys")
+}
+
+export async function generateGitSshKey(
+  email: string,
+  keyType?: "ed25519" | "rsa"
+): Promise<GitSshKey> {
+  return getTransport().call("generate_git_ssh_key", {
+    email,
+    key_type: keyType,
+  })
+}
+
 export async function getGitHubAccounts(): Promise<GitHubAccountsSettings> {
-  return getTransport().call("get_github_accounts")
+  const res = await getTransport().call<GitHubAccountsSettings | GitHubAccount[]>("get_github_accounts")
+  if (Array.isArray(res)) {
+    return { accounts: res }
+  }
+  return res && Array.isArray(res.accounts) ? res : { accounts: [] }
 }
 
 export async function validateGitHubToken(
@@ -2447,7 +2489,14 @@ export async function validateCnbToken(
 export async function updateGitHubAccounts(
   settings: GitHubAccountsSettings
 ): Promise<GitHubAccountsSettings> {
-  return getTransport().call("update_github_accounts", { settings })
+  const res = await getTransport().call<GitHubAccountsSettings | null | undefined>(
+    "update_github_accounts",
+    { settings }
+  )
+  if (res && Array.isArray(res.accounts)) {
+    return res
+  }
+  return settings
 }
 
 export async function saveAccountToken(

@@ -124,7 +124,10 @@ test("independent ACP agent executes a real host file tool, preserves tool histo
   );
   assert.ok(app.updates.some((update) => update.content?.text === "读取完成"));
   assert.ok(
-    !app.bodies[0].tools.some((tool) => tool.function.name === "run_shell"),
+    app.bodies[0].tools.some((tool) => tool.function.name === "run_shell"),
+  );
+  assert.ok(
+    app.bodies[0].tools.some((tool) => tool.function.name === "write_file"),
   );
   const restored = await app.host.call("session/load", {
     sessionId: app.session.sessionId,

@@ -99,6 +99,81 @@ fn port_open(port: u16) -> bool {
     TcpStream::connect(("127.0.0.1", port)).is_ok()
 }
 
+fn is_backend_healthy(port: u16) -> bool {
+    use std::io::{Read, Write};
+    if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) {
+        let _ = stream.set_read_timeout(Some(Duration::from_millis(600)));
+        let _ = stream.set_write_timeout(Some(Duration::from_millis(600)));
+        let req = format!("GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+        if stream.write_all(req.as_bytes()).is_ok() {
+            let mut buf = [0u8; 128];
+            if let Ok(n) = stream.read(&mut buf) {
+                let head = String::from_utf8_lossy(&buf[..n]);
+                return head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200");
+            }
+        }
+    }
+    false
+}
+
+#[cfg(windows)]
+fn activate_existing_window() -> bool {
+    use std::sync::atomic::AtomicBool;
+    static ACTIVATED: AtomicBool = AtomicBool::new(false);
+    ACTIVATED.store(false, Ordering::SeqCst);
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumWindows(
+            callback: Option<unsafe extern "system" fn(isize, isize) -> i32>,
+            l_param: isize,
+        ) -> i32;
+        fn GetWindowTextW(hwnd: isize, buffer: *mut u16, max: i32) -> i32;
+        fn IsWindowVisible(hwnd: isize) -> i32;
+        fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
+        fn SetForegroundWindow(hwnd: isize) -> i32;
+    }
+
+    unsafe extern "system" fn enum_callback(hwnd: isize, _l_param: isize) -> i32 {
+        if IsWindowVisible(hwnd) != 0 {
+            let mut buf = [0u16; 256];
+            let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), 256);
+            if len > 0 {
+                let title = String::from_utf16_lossy(&buf[..len as usize]);
+                if title == "codepluse" || title.ends_with("- codepluse") {
+                    ShowWindow(hwnd, 9); // SW_RESTORE
+                    SetForegroundWindow(hwnd);
+                    ACTIVATED.store(true, Ordering::SeqCst);
+                    return 0; // stop enumerating
+                }
+            }
+        }
+        1 // continue
+    }
+
+    unsafe {
+        let _ = EnumWindows(Some(enum_callback), 0);
+    }
+    ACTIVATED.load(Ordering::SeqCst)
+}
+
+#[cfg(windows)]
+fn show_error_dialog(title: &str, message: &str) {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    let wide_title: Vec<u16> = OsStr::new(title).encode_wide().chain(std::iter::once(0)).collect();
+    let wide_msg: Vec<u16> = OsStr::new(message).encode_wide().chain(std::iter::once(0)).collect();
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn MessageBoxW(hwnd: isize, text: *const u16, caption: *const u16, utype: u32) -> i32;
+    }
+    unsafe {
+        MessageBoxW(0, wide_msg.as_ptr(), wide_title.as_ptr(), 0x10 /* MB_ICONERROR */);
+    }
+}
+
 /// The one port this process serves. The migration used to add one (a proxy
 /// in front of the Go sidecar); a single process needs a single port.
 fn backend_port() -> u16 {
@@ -293,7 +368,18 @@ fn main() {
         run_headless();
         return;
     }
-    let app = tauri::Builder::default()
+
+    let port = backend_port();
+    if port_open(port) && is_backend_healthy(port) {
+        #[cfg(windows)]
+        {
+            if activate_existing_window() {
+                return;
+            }
+        }
+    }
+
+    let app = match tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             window_close,
             window_minimize,
@@ -312,25 +398,33 @@ fn main() {
             let root = resolve_root(exe_dir, resource_dir.as_deref());
             ensure_frontend(&root)?;
 
-            // The backend runs inside this process: same binary, same event
-            // loop, no sidecar to start, stop or roll back to.
-            let server_root = root.clone();
-            tauri::async_runtime::spawn(async move {
-                let cfg = backend::Config {
-                    listen_port: port,
-                    upstream_port: None,
-                    root: server_root,
-                };
-                if let Err(err) = backend::serve(cfg).await {
-                    eprintln!("[backend] stopped: {err}");
+            let backend_already_running = port_open(port) && is_backend_healthy(port);
+            if !backend_already_running {
+                let server_root = root.clone();
+                let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+                tauri::async_runtime::spawn(async move {
+                    let cfg = backend::Config {
+                        listen_port: port,
+                        upstream_port: None,
+                        root: server_root,
+                    };
+                    if let Err(err) = backend::serve_with_ready(cfg, Some(ready_tx)).await {
+                        eprintln!("[backend] stopped: {err}");
+                    }
+                });
+                match ready_rx.recv_timeout(READY_TIMEOUT) {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => return Err(err.into()),
+                    Err(_) => {
+                        if !wait_port(port, Duration::from_secs(1)) {
+                            return Err(format!(
+                                "后台未在 {} 秒内就绪（端口 {port}）",
+                                READY_TIMEOUT.as_secs()
+                            )
+                            .into());
+                        }
+                    }
                 }
-            });
-            if !wait_port(port, READY_TIMEOUT) {
-                return Err(format!(
-                    "后台未在 {} 秒内就绪（端口 {port}）",
-                    READY_TIMEOUT.as_secs()
-                )
-                .into());
             }
 
             app.manage(Backend {
@@ -343,7 +437,15 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("failed to build the codepluse shell");
+    {
+        Ok(app) => app,
+        Err(err) => {
+            #[cfg(windows)]
+            show_error_dialog("codepluse 启动失败", &err.to_string());
+            eprintln!("failed to build the codepluse shell: {err}");
+            std::process::exit(1);
+        }
+    };
 
     app.run(|_app_handle, _event| {});
 }

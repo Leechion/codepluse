@@ -150,9 +150,20 @@ fn load_store(root: &Path) -> Value {
         .unwrap_or_else(|| json!({}))
 }
 
-fn save_store(root: &Path, doc: &Value) -> Result<(), String> {
-    let _lock = store_file::lock(&servers_path(root))?;
-    store_file::write_json(&servers_path(root), doc)
+fn mutate_store<R>(
+    root: &Path,
+    mutate: impl FnOnce(&mut Value) -> Result<R, String>,
+) -> Result<R, String> {
+    let path = servers_path(root);
+    let _lock = store_file::lock(&path)?;
+    let mut doc = store_file::read_json(&path)
+        .ok()
+        .flatten()
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    let out = mutate(&mut doc)?;
+    store_file::write_json(&path, &doc)?;
+    Ok(out)
 }
 
 // ── 参数校验 ────────────────────────────────────────────────────────────
@@ -252,32 +263,38 @@ fn upsert_local_server(root: &Path, args: &Value) -> Result<Value, String> {
     // `shownSpec` 是上游产品留给“按服务器保留私有设置”的线索；本工作台没有这类
     // 按服务器的私有设置，因此不参与合并，原样忽略。
 
-    let mut doc = load_store(root);
-    let obj = doc
-        .as_object_mut()
-        .ok_or_else(|| "本地 MCP 清单格式无效".to_string())?;
-    let arr = obj
-        .entry("servers")
-        .or_insert_with(|| json!([]))
-        .as_array_mut()
-        .ok_or_else(|| "本地 MCP 清单格式无效".to_string())?;
-    let row = server_row(&server_id, spec, apps);
-    match arr
-        .iter_mut()
-        .find(|existing| existing.get("id").and_then(Value::as_str) == Some(server_id.as_str()))
-    {
-        Some(existing) => *existing = row.clone(),
-        None => arr.push(row.clone()),
-    }
-    save_store(root, &doc)?;
-    Ok(row)
+    mutate_store(root, |doc| {
+        let obj = doc
+            .as_object_mut()
+            .ok_or_else(|| "本地 MCP 清单格式无效".to_string())?;
+        let arr = obj
+            .entry("servers")
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .ok_or_else(|| "本地 MCP 清单格式无效".to_string())?;
+        let row = server_row(&server_id, spec, apps);
+        match arr
+            .iter_mut()
+            .find(|existing| existing.get("id").and_then(Value::as_str) == Some(server_id.as_str()))
+        {
+            Some(existing) => *existing = row.clone(),
+            None => arr.push(row.clone()),
+        }
+        Ok(row)
+    })
 }
 
 fn set_server_apps(root: &Path, args: &Value) -> Result<Value, String> {
     let server_id = validate_id(args.get("serverId"), "serverId")?;
     let apps = normalize_apps(args.get("apps"))?;
 
-    let mut doc = load_store(root);
+    let path = servers_path(root);
+    let _lock = store_file::lock(&path)?;
+    let mut doc = store_file::read_json(&path)
+        .ok()
+        .flatten()
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
     let record = match doc
         .get_mut("servers")
         .and_then(Value::as_array_mut)
@@ -291,7 +308,7 @@ fn set_server_apps(root: &Path, args: &Value) -> Result<Value, String> {
         }
         None => return Ok(Value::Null),
     };
-    save_store(root, &doc)?;
+    store_file::write_json(&path, &doc)?;
     Ok(record)
 }
 
@@ -300,22 +317,22 @@ fn remove_server(root: &Path, args: &Value) -> Result<Value, String> {
     // `apps` 是“只从部分智能体摘除”的可选入参；本工作台的持久清单按服务器整体
     // 记录分配关系，摘除即整服务器移除，apps 入参保留兼容但不拆分。
 
-    let mut doc = load_store(root);
-    if let Some(arr) = doc.get_mut("servers").and_then(Value::as_array_mut) {
-        arr.retain(|row| row.get("id").and_then(Value::as_str) != Some(server_id.as_str()));
-    }
-    // 扫描来的外部条目不在持久清单里：记入 hidden，下次扫描不再冒出来；重复移除幂等。
-    let Ok(obj) = doc.as_object_mut().ok_or_else(|| "本地 MCP 清单格式无效".to_string()) else {
-        return Err("本地 MCP 清单格式无效".into());
-    };
-    let hidden = obj.entry("hidden").or_insert_with(|| json!([]));
-    if let Some(hidden) = hidden.as_array_mut() {
-        if !hidden.iter().any(|item| item.as_str() == Some(server_id.as_str())) {
-            hidden.push(json!(server_id));
+    mutate_store(root, |doc| {
+        if let Some(arr) = doc.get_mut("servers").and_then(Value::as_array_mut) {
+            arr.retain(|row| row.get("id").and_then(Value::as_str) != Some(server_id.as_str()));
         }
-    }
-    save_store(root, &doc)?;
-    Ok(json!(true))
+        // 扫描来的外部条目不在持久清单里：记入 hidden，下次扫描不再冒出来；重复移除幂等。
+        let Ok(obj) = doc.as_object_mut().ok_or_else(|| "本地 MCP 清单格式无效".to_string()) else {
+            return Err("本地 MCP 清单格式无效".into());
+        };
+        let hidden = obj.entry("hidden").or_insert_with(|| json!([]));
+        if let Some(hidden) = hidden.as_array_mut() {
+            if !hidden.iter().any(|item| item.as_str() == Some(server_id.as_str())) {
+                hidden.push(json!(server_id));
+            }
+        }
+        Ok(json!(true))
+    })
 }
 
 // ── 本机扫描 ───────────────────────────────────────────────────────────
@@ -532,7 +549,17 @@ fn http_get_json(url: &str) -> Result<Value, String> {
     if status != 200 {
         return Err(format!("MCP 市场返回错误：HTTP {status}"));
     }
-    let body = response.bytes().map_err(|err| format!("读取 MCP 市场响应失败：{err}"))?;
+    let mut body = Vec::new();
+    {
+        use std::io::Read;
+        response
+            .take((4 << 20) + 1)
+            .read_to_end(&mut body)
+            .map_err(|err| format!("读取 MCP 市场响应失败：{err}"))?;
+    }
+    if body.len() > (4 << 20) {
+        return Err("MCP 市场响应过大".into());
+    }
     serde_json::from_slice::<Value>(&body).map_err(|err| format!("MCP 市场响应 JSON 无效：{err}"))
 }
 
@@ -805,25 +832,25 @@ fn install_validated(
     }
     let spec = validate_spec(&spec)?;
 
-    let mut doc = load_store(root);
-    let obj = doc
-        .as_object_mut()
-        .ok_or_else(|| "本地 MCP 清单格式无效".to_string())?;
-    let arr = obj
-        .entry("servers")
-        .or_insert_with(|| json!([]))
-        .as_array_mut()
-        .ok_or_else(|| "本地 MCP 清单格式无效".to_string())?;
-    let row = server_row(server_id, spec, apps);
-    match arr
-        .iter_mut()
-        .find(|existing| existing.get("id").and_then(Value::as_str) == Some(server_id))
-    {
-        Some(existing) => *existing = row.clone(),
-        None => arr.push(row.clone()),
-    }
-    save_store(root, &doc)?;
-    Ok(row)
+    mutate_store(root, |doc| {
+        let obj = doc
+            .as_object_mut()
+            .ok_or_else(|| "本地 MCP 清单格式无效".to_string())?;
+        let arr = obj
+            .entry("servers")
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .ok_or_else(|| "本地 MCP 清单格式无效".to_string())?;
+        let row = server_row(server_id, spec, apps);
+        match arr
+            .iter_mut()
+            .find(|existing| existing.get("id").and_then(Value::as_str) == Some(server_id))
+        {
+            Some(existing) => *existing = row.clone(),
+            None => arr.push(row.clone()),
+        }
+        Ok(row)
+    })
 }
 
 // ── 工具组开关 / 伴生服务 ────────────────────────────────────────────────

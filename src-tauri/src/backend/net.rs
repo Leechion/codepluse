@@ -31,8 +31,17 @@ pub fn client() -> Client {
 /// client also makes a settings change take effect without restarting.
 pub fn configure_proxy(proxy: Option<&str>, no_proxy: Option<&str>) -> Result<(), String> {
     let updated = build_client(proxy, no_proxy)?;
-    let lock = CLIENT.get_or_init(|| RwLock::new(updated.clone()));
-    *lock.write().map_err(|_| "HTTP 客户端锁失败")? = updated;
+    if let Some(lock) = CLIENT.get() {
+        let old = std::mem::replace(
+            &mut *lock.write().map_err(|_| "HTTP 客户端锁失败")?,
+            updated,
+        );
+        if tokio::runtime::Handle::try_current().is_ok() {
+            std::thread::spawn(move || drop(old));
+        }
+    } else {
+        let _ = CLIENT.set(RwLock::new(updated));
+    }
     Ok(())
 }
 

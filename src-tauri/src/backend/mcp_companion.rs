@@ -198,7 +198,7 @@ fn serve(endpoint: &str, token: &str) -> i32 {
         }
     };
     let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout();
+    let stdout = std::sync::Arc::new(std::sync::Mutex::new(stdout_handle()));
     let mut workers: Vec<std::thread::JoinHandle<()>> = Vec::new();
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
@@ -221,7 +221,7 @@ fn serve(endpoint: &str, token: &str) -> i32 {
         match method.as_str() {
             "initialize" => {
                 write_message(
-                    &mut stdout,
+                    &stdout,
                     id,
                     Ok(json!({
                         "protocolVersion": "2024-11-05",
@@ -230,9 +230,9 @@ fn serve(endpoint: &str, token: &str) -> i32 {
                     })),
                 );
             }
-            "ping" => write_message(&mut stdout, id, Ok(json!({}))),
+            "ping" => write_message(&stdout, id, Ok(json!({}))),
             "tools/list" => {
-                write_message(&mut stdout, id, Ok(json!({ "tools": tool_definitions() })));
+                write_message(&stdout, id, Ok(json!({ "tools": tool_definitions() })));
             }
             "tools/call" => {
                 // Go answers tool calls concurrently; each call is a separate
@@ -240,7 +240,6 @@ fn serve(endpoint: &str, token: &str) -> i32 {
                 let endpoint = endpoint.to_string();
                 let token = token.to_string();
                 let client = client.clone();
-                let stdout = std::sync::Arc::new(std::sync::Mutex::new(stdout_handle()));
                 let writer = stdout.clone();
                 workers.push(std::thread::spawn(move || {
                     let body = serde_json::to_vec(&params).unwrap_or_default();
@@ -268,15 +267,16 @@ fn serve(endpoint: &str, token: &str) -> i32 {
                             "error": { "code": -32603, "message": error.to_string() }
                         }),
                     };
-                    let mut guard = writer.lock().unwrap();
-                    let _ = guard.write_all(go_json_line(&message).as_bytes());
-                    let _ = guard.flush();
+                    if let Ok(mut guard) = writer.lock() {
+                        let _ = guard.write_all(go_json_line(&message).as_bytes());
+                        let _ = guard.flush();
+                    }
                 }));
             }
             other => {
                 // Go answers an unsupported method with a JSON-RPC error.
                 write_message(
-                    &mut stdout,
+                    &stdout,
                     id,
                     Err(format!("unsupported MCP method: {other}")),
                 );
@@ -304,14 +304,20 @@ fn stdout_handle() -> std::io::Stdout {
 }
 
 /// Go's `write` closure (companion.go:64): one JSON-RPC message per line.
-fn write_message(stdout: &mut std::io::Stdout, id: Value, outcome: Result<Value, String>) {
+fn write_message(
+    stdout: &std::sync::Arc<std::sync::Mutex<std::io::Stdout>>,
+    id: Value,
+    outcome: Result<Value, String>,
+) {
     let mut message = json!({ "jsonrpc": "2.0", "id": id });
     match outcome {
         Ok(value) => message["result"] = value,
         Err(error) => message["error"] = json!({ "code": -32603, "message": error }),
     }
-    let _ = stdout.write_all(go_json_line(&message).as_bytes());
-    let _ = stdout.flush();
+    if let Ok(mut guard) = stdout.lock() {
+        let _ = guard.write_all(go_json_line(&message).as_bytes());
+        let _ = guard.flush();
+    }
 }
 
 // ── the server side: one tool call ─────────────────────────────────────────
@@ -501,7 +507,20 @@ pub fn fetch_url(args: &Value) -> Result<Value, String> {
 
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(25))
-        .redirect(reqwest::redirect::Policy::limited(FETCH_MAX_REDIRECT))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= FETCH_MAX_REDIRECT {
+                return attempt.error("重定向次数过多");
+            }
+            let next = attempt.url();
+            if next.scheme() != "http" && next.scheme() != "https" {
+                return attempt.error("重定向目标只支持 http/https");
+            }
+            let host = next.host_str().unwrap_or("");
+            if host.is_empty() || crate::backend::provider_catalog::host_is_safe(host).is_err() {
+                return attempt.error("重定向目标地址不允许访问");
+            }
+            attempt.follow()
+        }))
         .build()
         .map_err(|error| format!("抓取失败：{error}"))?;
     let response = client
@@ -521,9 +540,14 @@ pub fn fetch_url(args: &Value) -> Result<Value, String> {
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_string();
-    let body = response
-        .bytes()
-        .map_err(|error| format!("读取响应失败：{error}"))?;
+    let mut body = Vec::new();
+    {
+        use std::io::Read;
+        response
+            .take((FETCH_MAX_BYTES as u64) + 1)
+            .read_to_end(&mut body)
+            .map_err(|error| format!("读取响应失败：{error}"))?;
+    }
     if body.len() > FETCH_MAX_BYTES {
         return Err(format!("页面过大（超过 {FETCH_MAX_BYTES} 字节）"));
     }
@@ -554,8 +578,13 @@ pub fn fetch_url(args: &Value) -> Result<Value, String> {
 
 /// Go `looksLikeHTML` (webfetch.go:123).
 fn looks_like_html(body: &str) -> bool {
-    let head = body.to_lowercase();
-    let head = &head[..head.len().min(2048)];
+    let end = body
+        .char_indices()
+        .map(|(i, c)| i + c.len_utf8())
+        .take_while(|&end| end <= 2048)
+        .last()
+        .unwrap_or(0);
+    let head = body[..end].to_ascii_lowercase();
     head.contains("<html")
         || head.contains("<body")
         || head.contains("<div")
@@ -565,7 +594,7 @@ fn looks_like_html(body: &str) -> bool {
 /// Go `htmlToText` (webfetch.go:136): scripts, styles and comments go; block
 /// tags become line breaks; entities are decoded.
 fn html_to_text(body: &str) -> String {
-    let lower = body.to_lowercase();
+    let lower = body.to_ascii_lowercase();
     let mut out = String::with_capacity(body.len() / 2);
     let mut skip_until = String::new();
     let bytes = body.as_bytes();
@@ -753,5 +782,16 @@ mod tests {
     #[test]
     fn entities_are_decoded() {
         assert_eq!(decode_entities("a&amp;b&#39;c"), "a&b'c");
+    }
+
+    #[test]
+    fn multibyte_utf8_at_2048_boundary_and_unicode_case_do_not_panic() {
+        let mut body = "a".repeat(2047);
+        body.push_str("中文<div>内容</div>");
+        assert!(!looks_like_html(&body));
+        let html = format!("<html><body>İ{}<script>x()</script><p>好</p></body></html>", "中".repeat(700));
+        assert!(looks_like_html(&html));
+        let extracted = html_to_text(&html);
+        assert!(extracted.contains("好"));
     }
 }

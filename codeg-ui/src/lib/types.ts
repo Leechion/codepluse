@@ -4703,6 +4703,30 @@ export interface HyperframesSkillAgent {
 
 export interface GitSettings {
   custom_path: string | null
+  auto_fetch?: boolean
+  fetch_interval_minutes?: number
+  prune_on_fetch?: boolean
+  default_branch?: string
+  auto_crlf?: string
+}
+
+export interface GitUserConfig {
+  global_name: string | null
+  global_email: string | null
+  default_branch: string | null
+  autocrlf: string | null
+  local_name: string | null
+  local_email: string | null
+  is_repo: boolean
+  is_safe_directory: boolean
+}
+
+export interface GitSshKey {
+  name: string
+  path: string
+  key_type: string
+  public_key: string
+  comment: string
 }
 
 /** A stored forge credential. Despite the name (kept for the wire format),

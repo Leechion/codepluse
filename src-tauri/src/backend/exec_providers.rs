@@ -410,6 +410,10 @@ pub fn delete(root: &Path, args: &Value) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
+pub fn owns(command: &str) -> bool {
+    matches!(command, "codepluse_provider_delete" | "codepluse_provider_save")
+}
+
 /// `None` means "not mine" and the caller forwards to the sidecar.
 pub fn handle(root: &Path, command: &str, args: &Value) -> Option<Result<Value, String>> {
     match command {

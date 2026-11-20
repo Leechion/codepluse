@@ -251,6 +251,16 @@ pub fn delete(root: &Path, args: &Value) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
+pub fn owns(command: &str) -> bool {
+    matches!(
+        command,
+        "list_model_providers"
+            | "create_model_provider"
+            | "update_model_provider"
+            | "delete_model_provider"
+    )
+}
+
 /// Dispatches the four commands this module owns. `None` means "not mine" and
 /// the caller forwards to the Go backend.
 pub fn handle(root: &Path, command: &str, args: &Value) -> Option<Result<Value, String>> {

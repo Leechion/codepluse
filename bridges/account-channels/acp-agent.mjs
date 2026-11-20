@@ -295,6 +295,9 @@ export async function runAgent({
           throw new Error("Path is outside the workspace");
       } catch (error) {
         if (error.code !== "ENOENT") throw error;
+        const stat = await fs.lstat(target).catch(() => null);
+        if (stat?.isSymbolicLink())
+          throw new Error("Path is outside the workspace");
       }
     }
     return target;
@@ -392,11 +395,22 @@ export async function runAgent({
               cwd: session.cwd,
               env: childEnv(),
             });
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
       let result = "",
         truncated = false;
       const collect = (chunk) => {
-        if (result.length < 128_000) result += chunk;
-        else truncated = true;
+        if (result.length < 128_000) {
+          const remaining = 128_000 - result.length;
+          if (chunk.length > remaining) {
+            result += chunk.slice(0, remaining);
+            truncated = true;
+          } else {
+            result += chunk;
+          }
+        } else {
+          truncated = true;
+        }
       };
       child.stdout.on("data", collect);
       child.stderr.on("data", collect);
@@ -440,18 +454,13 @@ export async function runAgent({
     }
     session.messages.push({ role: "user", content: userContent });
     try {
-      const tools = [
-        ...localTools.filter(
-          (tool) =>
-            session.mode === "workspace" ||
-            !["write_file", "run_shell"].includes(tool.name),
-        ),
-        ...session.tools.values(),
-      ].map(({ name, description, parameters }) => ({
-        type: "function",
-        function: { name, description, parameters },
-      }));
       for (let step = 0; step < 64; step++) {
+        const tools = [...localTools, ...session.tools.values()].map(
+          ({ name, description, parameters }) => ({
+            type: "function",
+            function: { name, description, parameters },
+          }),
+        );
         let text = "",
           reasoning = "";
         const calls = [];

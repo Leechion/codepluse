@@ -88,21 +88,19 @@ pub async fn dispatch(
 ) -> Result<Value, String> {
     let layer =
         LAYER.get_or_init(|| crate::backend::acp::connections::init_layer(root, base_url, sink));
-    if let Some(result) = crate::backend::acp::pi_trust::handle(&layer.root, command, args) {
-        return result;
-    }
-    if let Some(result) = crate::backend::acp::pi_config::handle(&layer.root, command, args) {
-        return result;
-    }
-    if let Some(result) = crate::backend::acp::diagnostics::handle(&layer.root, command, args) {
-        return result;
-    }
-    if crate::backend::acp::native_commands::owns(command) {
+    if crate::backend::acp::pi_trust::owns(command)
+        || crate::backend::acp::pi_config::owns(command)
+        || crate::backend::acp::diagnostics::owns(command)
+        || crate::backend::acp::native_commands::owns(command)
+    {
         let root = layer.root.clone();
         let command = command.to_string();
         let args = args.clone();
         return tokio::task::spawn_blocking(move || {
-            crate::backend::acp::native_commands::handle(&root, &command, &args)
+            crate::backend::acp::pi_trust::handle(&root, &command, &args)
+                .or_else(|| crate::backend::acp::pi_config::handle(&root, &command, &args))
+                .or_else(|| crate::backend::acp::diagnostics::handle(&root, &command, &args))
+                .or_else(|| crate::backend::acp::native_commands::handle(&root, &command, &args))
                 .unwrap_or_else(|| Err("ACP 本地命令未注册".into()))
         })
         .await
@@ -219,48 +217,61 @@ pub async fn dispatch(
                 .stop_async_task(&runtime_id, &text(args.get("taskId")))
                 .await?)
         }
-        "acp_list_agents" => Ok(json!(agents_rows(&layer.root))),
-        "acp_reorder_agents" => {
-            reorder_agents(&layer.root, args)?;
-            Ok(Value::Null)
-        }
-        "acp_get_agent_status" => {
-            let want = text(args.get("agentType"));
-            for row in agents_rows(&layer.root) {
-                if text(row.get("agent_type")) == want {
-                    return Ok(row);
+        "acp_list_agents"
+        | "acp_reorder_agents"
+        | "acp_get_agent_status"
+        | "acp_detect_agent_local_version"
+        | "acp_preflight"
+        | "acp_update_agent_env"
+        | "acp_update_agent_config"
+        | "acp_update_agent_preferences" => {
+            let layer = layer.clone();
+            let command = command.to_string();
+            let args = args.clone();
+            tokio::task::spawn_blocking(move || match command.as_str() {
+                "acp_list_agents" => Ok(json!(agents_rows(&layer.root))),
+                "acp_reorder_agents" => {
+                    reorder_agents(&layer.root, &args)?;
+                    Ok(Value::Null)
                 }
-            }
-            Ok(json!({
-                "agent_type": want, "available": false, "enabled": false,
-                "installed_version": Value::Null, "is_acp_adapter": true,
-            }))
+                "acp_get_agent_status" => {
+                    let want = text(args.get("agentType"));
+                    for row in agents_rows(&layer.root) {
+                        if text(row.get("agent_type")) == want {
+                            return Ok(row);
+                        }
+                    }
+                    Ok(json!({
+                        "agent_type": want, "available": false, "enabled": false,
+                        "installed_version": Value::Null, "is_acp_adapter": true,
+                    }))
+                }
+                "acp_detect_agent_local_version" => {
+                    match agents::pick(&layer.root, &text(args.get("agentType"))) {
+                        Some(agent) => Ok(json!(agents::installed_version(&layer.root, &agent))),
+                        None => Ok(Value::Null),
+                    }
+                }
+                "acp_preflight" => preflight(&layer.root, &text(args.get("agentType"))),
+                "acp_update_agent_env" => {
+                    let live = update_agent_settings(&layer.root, &layer, &args, true)?;
+                    Ok(json!(live))
+                }
+                "acp_update_agent_config" => {
+                    let live = update_agent_settings(&layer.root, &layer, &args, false)?;
+                    Ok(json!(live))
+                }
+                "acp_update_agent_preferences" => {
+                    let live = update_agent_settings(&layer.root, &layer, &args, true)?;
+                    update_agent_settings(&layer.root, &layer, &args, false)?;
+                    Ok(json!(live))
+                }
+                _ => unreachable!(),
+            })
+            .await
+            .map_err(|e| format!("命令执行失败：{e}"))?
         }
-        "acp_detect_agent_local_version" => {
-            match agents::pick(&layer.root, &text(args.get("agentType"))) {
-                Some(agent) => Ok(json!(agents::installed_version(&layer.root, &agent))),
-                None => Ok(Value::Null),
-            }
-        }
-        "acp_preflight" => preflight(&layer.root, &text(args.get("agentType"))),
         "acp_describe_agent_options" => describe_agent_options(&layer, args).await,
-        "acp_update_agent_env" => {
-            let live = update_agent_settings(&layer.root, &layer, args, true)?;
-            Ok(json!(live))
-        }
-        "acp_update_agent_config" => {
-            let live = update_agent_settings(&layer.root, &layer, args, false)?;
-            Ok(json!(live))
-        }
-        "acp_update_agent_preferences" => {
-            // Settings UI saves env, enablement and provider selection together
-            // with optional provider-specific config. Persist both halves
-            // through the same overlay writer, then report the active-session
-            // count once (the value is stable across these two writes).
-            let live = update_agent_settings(&layer.root, &layer, args, true)?;
-            update_agent_settings(&layer.root, &layer, args, false)?;
-            Ok(json!(live))
-        }
         "acp_prepare_npx_agent"
         | "acp_uninstall_agent"
         | "acp_clear_binary_cache"
@@ -591,12 +602,14 @@ async fn describe_agent_options(layer: &Arc<Layer>, args: &Value) -> Result<Valu
         )
         .await?;
     let view = layer.runtime_view(&rid).await;
+    let prompt_capabilities = layer.runtime().prompt_capabilities(&rid);
+    layer.runtime().forget_session(&rid);
     Ok(json!({
         "modes": crate::backend::acp::wire::mode_wire(view.get("modes").unwrap_or(&Value::Null)),
         "config_options": crate::backend::acp::wire::config_wire(&view),
         "available_commands": [],
         "unapplied_config_ids": [],
-        "prompt_capabilities": layer.runtime().prompt_capabilities(&rid),
+        "prompt_capabilities": prompt_capabilities,
     }))
 }
 
@@ -712,6 +725,7 @@ async fn custom_install_command(
         let d = d.clone();
         let args = args.clone();
         let command = command.to_string();
+        let handle = tokio::runtime::Handle::current();
         move || {
             if !text(args.get("version")).is_empty() && text(args.get("version")) != d.version {
                 return Err(
@@ -748,11 +762,9 @@ async fn custom_install_command(
                 for cid in &cids {
                     let layer = layer.clone();
                     let cid = cid.clone();
-                    tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(async move {
-                            layer.disconnect(&cid).await?;
-                            Ok::<(), String>(())
-                        })
+                    handle.block_on(async move {
+                        layer.disconnect(&cid).await?;
+                        Ok::<(), String>(())
                     })?;
                 }
                 custom_install::validate_custom_def(&d)?;

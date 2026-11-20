@@ -1,0 +1,10 @@
+?   	harnesshub/cmd/desktop	[no test files]
+ok  	harnesshub/cmd/serve	1.514s
+ok  	harnesshub/internal/acp	6.850s
+ok  	harnesshub/internal/codeg	23.234s
+ok  	harnesshub/internal/extra	2.493s
+ok  	harnesshub/internal/hub	2.329s
+ok  	harnesshub/internal/mcpserver	(cached)
+?   	harnesshub/internal/modelproviders	[no test files]
+ok  	harnesshub/internal/orch	(cached)
+ok  	harnesshub/internal/providers	3.445s

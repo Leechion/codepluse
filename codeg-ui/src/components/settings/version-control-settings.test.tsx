@@ -7,6 +7,11 @@ vi.mock("@/lib/api", () => ({
   getGitSettings: vi.fn(),
   updateGitSettings: vi.fn(),
   testGitPath: vi.fn(),
+  getGitUserConfig: vi.fn(),
+  setGitUserConfig: vi.fn(),
+  addGitSafeDirectory: vi.fn(),
+  getGitSshKeys: vi.fn(),
+  generateGitSshKey: vi.fn(),
   getGitHubAccounts: vi.fn(),
   updateGitHubAccounts: vi.fn(),
   validateGitHubToken: vi.fn(),
@@ -18,18 +23,33 @@ vi.mock("@/lib/api", () => ({
   saveAccountToken: vi.fn(),
 }))
 
+vi.mock("@/contexts/active-folder-context", () => ({
+  useActiveFolder: () => ({
+    activeFolder: { id: 1, name: "repo", path: "/test/repo" },
+    activeFolderId: 1,
+  }),
+}))
+
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
 import { VersionControlSettings } from "./version-control-settings"
 import enMessages from "@/i18n/messages/en.json"
-import { detectGit, getGitSettings, getGitHubAccounts } from "@/lib/api"
+import {
+  detectGit,
+  getGitSettings,
+  getGitHubAccounts,
+  getGitUserConfig,
+  getGitSshKeys,
+} from "@/lib/api"
 import type { GitHubAccount } from "@/lib/types"
 
 const mockDetectGit = vi.mocked(detectGit)
 const mockGetGitSettings = vi.mocked(getGitSettings)
 const mockGetGitHubAccounts = vi.mocked(getGitHubAccounts)
+const mockGetGitUserConfig = vi.mocked(getGitUserConfig)
+const mockGetGitSshKeys = vi.mocked(getGitSshKeys)
 
 function account(overrides: Partial<GitHubAccount> = {}): GitHubAccount {
   return {
@@ -62,6 +82,27 @@ describe("VersionControlSettings account avatars", () => {
       path: "/usr/bin/git",
     })
     mockGetGitSettings.mockResolvedValue({ custom_path: null })
+    mockGetGitUserConfig.mockResolvedValue({
+      global_name: "Global User",
+      global_email: "global@example.com",
+      default_branch: "main",
+      autocrlf: "false",
+      local_name: null,
+      local_email: null,
+      is_repo: true,
+      is_safe_directory: true,
+    })
+    mockGetGitSshKeys.mockResolvedValue({
+      keys: [
+        {
+          name: "id_ed25519.pub",
+          path: "/home/user/.ssh/id_ed25519.pub",
+          key_type: "ssh-ed25519",
+          public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@example.com",
+          comment: "test@example.com",
+        },
+      ],
+    })
   })
 
   /**
@@ -129,6 +170,27 @@ describe("VersionControlSettings forge sections", () => {
       path: "/usr/bin/git",
     })
     mockGetGitSettings.mockResolvedValue({ custom_path: null })
+    mockGetGitUserConfig.mockResolvedValue({
+      global_name: "Global User",
+      global_email: "global@example.com",
+      default_branch: "main",
+      autocrlf: "false",
+      local_name: null,
+      local_email: null,
+      is_repo: true,
+      is_safe_directory: true,
+    })
+    mockGetGitSshKeys.mockResolvedValue({
+      keys: [
+        {
+          name: "id_ed25519.pub",
+          path: "/home/user/.ssh/id_ed25519.pub",
+          key_type: "ssh-ed25519",
+          public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@example.com",
+          comment: "test@example.com",
+        },
+      ],
+    })
   })
 
   /**
@@ -174,5 +236,71 @@ describe("VersionControlSettings forge sections", () => {
     await waitFor(() =>
       expect(screen.getByText("No Gitea account yet")).toBeInTheDocument()
     )
+  })
+})
+
+describe("VersionControlSettings extended features", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockDetectGit.mockResolvedValue({
+      installed: true,
+      version: "git version 2.39.0",
+      path: "/usr/bin/git",
+    })
+    mockGetGitSettings.mockResolvedValue({
+      custom_path: null,
+      auto_fetch: true,
+      fetch_interval_minutes: 15,
+      prune_on_fetch: true,
+      default_branch: "main",
+      auto_crlf: "input",
+    })
+    mockGetGitHubAccounts.mockResolvedValue({ accounts: [] })
+    mockGetGitUserConfig.mockResolvedValue({
+      global_name: "Alice Developer",
+      global_email: "alice@example.com",
+      default_branch: "main",
+      autocrlf: "input",
+      local_name: "Project Alice",
+      local_email: "project-alice@example.com",
+      is_repo: true,
+      is_safe_directory: true,
+    })
+    mockGetGitSshKeys.mockResolvedValue({
+      keys: [
+        {
+          name: "id_ed25519.pub",
+          path: "/home/user/.ssh/id_ed25519.pub",
+          key_type: "ssh-ed25519",
+          public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 alice@example.com",
+          comment: "alice@example.com",
+        },
+      ],
+    })
+  })
+
+  it("renders git commit identity, behavior, and ssh key sections", async () => {
+    renderWithIntl()
+
+    // 1. Identity section rendered with values
+    await waitFor(() => {
+      expect(screen.getByText("Git Commit Identity")).toBeInTheDocument()
+      expect(screen.getByDisplayValue("Alice Developer")).toBeInTheDocument()
+      expect(screen.getByDisplayValue("alice@example.com")).toBeInTheDocument()
+      expect(screen.getByDisplayValue("Project Alice")).toBeInTheDocument()
+      expect(
+        screen.getByDisplayValue("project-alice@example.com")
+      ).toBeInTheDocument()
+    })
+
+    // 2. Preferences & behavior
+    expect(screen.getByText("Preferences & Behavior")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("main")).toBeInTheDocument()
+    expect(screen.getByText("Safe Directory Trust")).toBeInTheDocument()
+
+    // 3. SSH Keys
+    expect(screen.getByText("SSH Keys")).toBeInTheDocument()
+    expect(screen.getByText("id_ed25519.pub")).toBeInTheDocument()
+    expect(screen.getByText("Copy Public Key")).toBeInTheDocument()
   })
 })

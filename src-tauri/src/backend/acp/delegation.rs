@@ -182,7 +182,11 @@ pub fn load(root: &Path, into: &mut HashMap<String, Delegation>) {
                     .and_then(|value| value.as_i64())
                     .unwrap_or(0),
                 assistant_name: text("assistant_name"),
-                inbox: Vec::new(),
+                inbox: row
+                    .get("inbox")
+                    .and_then(|value| value.as_array())
+                    .cloned()
+                    .unwrap_or_default(),
             },
         );
     }
@@ -218,6 +222,7 @@ pub fn save(root: &Path, tasks: &HashMap<String, Delegation>) -> Result<(), Stri
             "title": task.title,
             "assistant_id": task.assistant_id,
             "assistant_name": task.assistant_name,
+            "inbox": task.inbox,
         }));
     }
     let path = registry_path(root);
@@ -361,11 +366,12 @@ impl Layer {
         record.parent_tool_use_id = record.id.clone();
 
         // Register before launching: a cancel that races in must find the row.
-        {
+        let snapshot_tasks = {
             let mut state = self.state.lock().unwrap();
             state.delegations.insert(record.id.clone(), record.clone());
-        }
-        let _ = save(&self.root, &self.state.lock().unwrap().delegations);
+            state.delegations.clone()
+        };
+        let _ = save(&self.root, &snapshot_tasks);
 
         // Launch the child session.
         let connect_args = json!({
@@ -505,7 +511,7 @@ impl Layer {
 
     /// Records the outcome of a delegation.
     pub fn finish_delegation(&self, task_id: &str, status: &str, result: &str, error: &str) {
-        let snapshot = {
+        let (snapshot, snapshot_tasks) = {
             let mut state = self.state.lock().unwrap();
             let Some(record) = state.delegations.get_mut(task_id) else {
                 return;
@@ -516,9 +522,9 @@ impl Layer {
             record.status = status.to_string();
             record.result = result.to_string();
             record.error = error.to_string();
-            record.clone()
+            (record.clone(), state.delegations.clone())
         };
-        let _ = save(&self.root, &self.state.lock().unwrap().delegations);
+        let _ = save(&self.root, &snapshot_tasks);
         self.event(
             &snapshot.parent,
             json!({
@@ -598,7 +604,7 @@ impl Layer {
 
     /// Go `cancel_delegation`.
     pub async fn cancel_delegation(&self, caller: &Caller, task_id: &str) -> Result<Value, String> {
-        let (connection_id, already) = {
+        let (connection_id, already, snapshot_tasks) = {
             let mut state = self.state.lock().unwrap();
             let Some(task) = state.delegations.get_mut(task_id) else {
                 return Err("任务不存在".into());
@@ -607,13 +613,13 @@ impl Layer {
                 return Err("任务不存在".into());
             }
             if task.status != "running" {
-                (task.connection_id.clone(), true)
+                (task.connection_id.clone(), true, state.delegations.clone())
             } else {
                 task.status = "canceled".into();
-                (task.connection_id.clone(), false)
+                (task.connection_id.clone(), false, state.delegations.clone())
             }
         };
-        let _ = save(&self.root, &self.state.lock().unwrap().delegations);
+        let _ = save(&self.root, &snapshot_tasks);
         if already {
             let state = self.state.lock().unwrap();
             let record = state.delegations.get(task_id).cloned();
@@ -697,7 +703,7 @@ impl Layer {
         if body.is_empty() || body.len() > 12_000 {
             return Err("消息需要 1–12000 字节".into());
         }
-        {
+        let snapshot_tasks = {
             let mut state = self.state.lock().unwrap();
             let Some(task) = state.delegations.get_mut(task_id) else {
                 return Err("目标任务不存在或不属于当前协作".into());
@@ -711,8 +717,9 @@ impl Layer {
                 "text": body,
                 "at": crate::backend::goformat::timestamp(),
             }));
-        }
-        let _ = save(&self.root, &self.state.lock().unwrap().delegations);
+            state.delegations.clone()
+        };
+        let _ = save(&self.root, &snapshot_tasks);
         Ok(json!({ "delivered": true, "task_id": task_id }))
     }
 

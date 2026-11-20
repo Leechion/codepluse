@@ -89,6 +89,11 @@ pub fn owns(command: &str) -> bool {
             | "test_git_path"
             | "get_git_settings"
             | "update_git_settings"
+            | "get_git_user_config"
+            | "set_git_user_config"
+            | "add_git_safe_directory"
+            | "get_git_ssh_keys"
+            | "generate_git_ssh_key"
             | "open_commit_window"
             | "open_push_window"
             | "open_stash_window"
@@ -124,7 +129,7 @@ pub fn load_settings(root: &Path) {
     *CUSTOM_GIT_PROGRAM.write().unwrap() = configured;
 }
 
-fn git_program() -> std::ffi::OsString {
+pub(crate) fn git_program() -> std::ffi::OsString {
     CUSTOM_GIT_PROGRAM
         .read()
         .unwrap()
@@ -392,15 +397,232 @@ pub(crate) struct GitOut {
     pub(crate) stdout: Vec<u8>,
 }
 
+fn user_home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .map(PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
+}
+
+fn git_config_get(repo: Option<&Path>, key: &str, is_global: bool) -> Option<String> {
+    let mut args = vec!["config"];
+    if is_global {
+        args.push("--global");
+    } else {
+        args.push("--local");
+    }
+    args.push("--get");
+    args.push(key);
+
+    let target_repo = if is_global {
+        Path::new("")
+    } else {
+        repo.unwrap_or_else(|| Path::new(""))
+    };
+    git_string(target_repo, &args)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn git_config_set(
+    repo: Option<&Path>,
+    key: &str,
+    value: Option<&str>,
+    is_global: bool,
+) -> Result<(), String> {
+    let target_repo = if is_global {
+        Path::new("")
+    } else {
+        repo.unwrap_or_else(|| Path::new(""))
+    };
+    match value {
+        Some(v) if !v.trim().is_empty() => {
+            let trimmed = v.trim();
+            let mut args = vec!["config"];
+            if is_global {
+                args.push("--global");
+            } else {
+                args.push("--local");
+            }
+            args.push(key);
+            args.push(trimmed);
+            git_run(target_repo, &args).map(|_| ())
+        }
+        _ => {
+            let mut args = vec!["config"];
+            if is_global {
+                args.push("--global");
+            } else {
+                args.push("--local");
+            }
+            args.push("--unset-all");
+            args.push(key);
+            let _ = git_run(target_repo, &args);
+            Ok(())
+        }
+    }
+}
+
+fn check_safe_directory(dir: &Path) -> bool {
+    let normalized = dir.to_string_lossy().replace('\\', "/").to_lowercase();
+    if let Ok(out) = git_string(
+        Path::new(""),
+        &["config", "--global", "--get-all", "safe.directory"],
+    ) {
+        for line in out.lines() {
+            let l = line.trim().replace('\\', "/").to_lowercase();
+            if l == "*" || l == normalized {
+                return true;
+            }
+        }
+    }
+    git_run(dir, &["status", "--porcelain"]).is_ok()
+}
+
+fn add_safe_directory(path: &str) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("路径不能为空".into());
+    }
+    let normalized = trimmed.replace('\\', "/");
+    git_run(
+        Path::new(""),
+        &["config", "--global", "--add", "safe.directory", &normalized],
+    )
+    .map(|_| ())
+}
+
+fn get_ssh_keys() -> Result<Value, String> {
+    let Some(home) = user_home_dir() else {
+        return Ok(json!({"keys": []}));
+    };
+    let ssh_dir = home.join(".ssh");
+    if !ssh_dir.is_dir() {
+        return Ok(json!({"keys": []}));
+    }
+    let mut keys = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&ssh_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("pub") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let trimmed = content.trim();
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    let key_type = parts.first().copied().unwrap_or("ssh-unknown");
+                    let comment = if parts.len() > 2 {
+                        parts[2..].join(" ")
+                    } else {
+                        String::new()
+                    };
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("key.pub");
+                    keys.push(json!({
+                        "name": name,
+                        "path": path.to_string_lossy(),
+                        "key_type": key_type,
+                        "public_key": trimmed,
+                        "comment": comment,
+                    }));
+                }
+            }
+        }
+    }
+    keys.sort_by(|a, b| {
+        a["name"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(b["name"].as_str().unwrap_or(""))
+    });
+    Ok(json!({"keys": keys}))
+}
+
+fn generate_ssh_key(email: &str, key_type: Option<&str>) -> Result<Value, String> {
+    let email = email.trim();
+    if email.is_empty() {
+        return Err("邮箱地址不能为空".into());
+    }
+    let Some(home) = user_home_dir() else {
+        return Err("无法定位用户目录".into());
+    };
+    let ssh_dir = home.join(".ssh");
+    if !ssh_dir.exists() {
+        std::fs::create_dir_all(&ssh_dir).map_err(|e| format!("创建 .ssh 目录失败: {e}"))?;
+    }
+    let k_type = match key_type.unwrap_or("ed25519") {
+        "rsa" => "rsa",
+        _ => "ed25519",
+    };
+    let filename = if k_type == "rsa" {
+        "id_rsa"
+    } else {
+        "id_ed25519"
+    };
+    let key_path = ssh_dir.join(filename);
+    let pub_path = ssh_dir.join(format!("{filename}.pub"));
+    if key_path.exists() || pub_path.exists() {
+        return Err(format!("密钥文件 {} 已存在，请勿覆盖已有密钥", filename));
+    }
+
+    let mut cmd = std::process::Command::new("ssh-keygen");
+    cmd.args(&[
+        "-t",
+        k_type,
+        "-C",
+        email,
+        "-f",
+        &key_path.to_string_lossy(),
+        "-N",
+        "",
+    ]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let output = cmd
+        .output()
+        .map_err(|e| format!("执行 ssh-keygen 失败: {e}"))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("ssh-keygen 错误: {}", err.trim()));
+    }
+
+    let pub_content = std::fs::read_to_string(&pub_path)
+        .map_err(|e| format!("读取生成的公钥失败: {e}"))?;
+    let trimmed = pub_content.trim();
+    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    let actual_type = parts.first().copied().unwrap_or(k_type);
+
+    Ok(json!({
+        "name": format!("{filename}.pub"),
+        "path": pub_path.to_string_lossy(),
+        "key_type": actual_type,
+        "public_key": trimmed,
+        "comment": email,
+    }))
+}
+
 fn git_spawn(repo: &str, args: &[&str]) -> Result<GitOut, String> {
     let mut argv: Vec<&str> = vec![
         "--no-optional-locks",
         "--literal-pathspecs",
         "-c",
         "core.quotePath=false",
-        "-C",
-        repo,
     ];
+    let trimmed_repo = repo.trim();
+    if !trimmed_repo.is_empty() {
+        argv.push("-C");
+        argv.push(trimmed_repo);
+    }
     argv.extend_from_slice(args);
 
     let mut cmd = std::process::Command::new(git_program());
@@ -637,7 +859,16 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
                 .get("settings")
                 .and_then(|s| s.get("get_git_settings"))
                 .cloned()
-                .unwrap_or_else(|| json!({"custom_path":Value::Null})));
+                .unwrap_or_else(|| {
+                    json!({
+                        "custom_path": Value::Null,
+                        "auto_fetch": false,
+                        "fetch_interval_minutes": 10,
+                        "prune_on_fetch": true,
+                        "default_branch": "main",
+                        "auto_crlf": "false"
+                    })
+                }));
         }
         "update_git_settings" => {
             let settings = a
@@ -653,9 +884,26 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
                     }
                     json!(path)
                 }
+                Some(Value::String(path)) if path.trim().is_empty() => Value::Null,
                 _ => return Err("Git 路径无效".into()),
             };
-            let updated = json!({"custom_path":custom_path});
+
+            let mut updated = json!({
+                "custom_path": custom_path,
+            });
+            let updated_obj = updated.as_object_mut().unwrap();
+            for key in [
+                "auto_fetch",
+                "fetch_interval_minutes",
+                "prune_on_fetch",
+                "default_branch",
+                "auto_crlf",
+            ] {
+                if let Some(v) = settings.get(key) {
+                    updated_obj.insert(key.into(), v.clone());
+                }
+            }
+
             let path = root.join(".data").join("codeg-workspace.json");
             let _guard = store_file::lock(&path)?;
             let mut doc = store_file::read_json(&path)?.unwrap_or_else(|| json!({}));
@@ -669,6 +917,120 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
             *CUSTOM_GIT_PROGRAM.write().unwrap() =
                 updated["custom_path"].as_str().map(PathBuf::from);
             return Ok(updated);
+        }
+        "get_git_user_config" => {
+            let global_name = git_config_get(None, "user.name", true);
+            let global_email = git_config_get(None, "user.email", true);
+            let default_branch = git_config_get(None, "init.defaultBranch", true)
+                .or_else(|| Some("main".to_string()));
+            let autocrlf = git_config_get(None, "core.autocrlf", true);
+
+            let repo_arg = text(a, "path");
+            let (local_name, local_email, is_repo, is_safe_directory) =
+                if !repo_arg.trim().is_empty() {
+                    if let Ok(repo_path) = resolve(root, &repo_arg) {
+                        let is_git =
+                            repo_path.join(".git").exists() || repo_path.join("HEAD").exists();
+                        if is_git {
+                            let lname = git_config_get(Some(&repo_path), "user.name", false);
+                            let lemail = git_config_get(Some(&repo_path), "user.email", false);
+                            let safe = check_safe_directory(&repo_path);
+                            (lname, lemail, true, safe)
+                        } else {
+                            (None, None, false, true)
+                        }
+                    } else {
+                        (None, None, false, true)
+                    }
+                } else {
+                    (None, None, false, true)
+                };
+
+            return Ok(json!({
+                "global_name": global_name,
+                "global_email": global_email,
+                "default_branch": default_branch,
+                "autocrlf": autocrlf,
+                "local_name": local_name,
+                "local_email": local_email,
+                "is_repo": is_repo,
+                "is_safe_directory": is_safe_directory,
+            }));
+        }
+        "set_git_user_config" => {
+            let scope = text(a, "scope");
+            let is_global = scope.trim().to_lowercase() != "local";
+            let repo_path = if !is_global {
+                let repo_arg = text(a, "path");
+                if repo_arg.trim().is_empty() {
+                    return Err("修改局部配置需要传入项目 path".into());
+                }
+                Some(resolve(root, &repo_arg)?)
+            } else {
+                None
+            };
+
+            if let Some(name_val) = a.get("name") {
+                let val_str = name_val.as_str();
+                git_config_set(repo_path.as_deref(), "user.name", val_str, is_global)?;
+            }
+            if let Some(email_val) = a.get("email") {
+                let val_str = email_val.as_str();
+                git_config_set(repo_path.as_deref(), "user.email", val_str, is_global)?;
+            }
+            if is_global {
+                if let Some(branch_val) = a.get("default_branch").and_then(Value::as_str) {
+                    if !branch_val.trim().is_empty() {
+                        git_config_set(None, "init.defaultBranch", Some(branch_val.trim()), true)?;
+                    }
+                }
+                if let Some(autocrlf_val) = a.get("autocrlf").and_then(Value::as_str) {
+                    git_config_set(None, "core.autocrlf", Some(autocrlf_val.trim()), true)?;
+                }
+            }
+
+            let global_name = git_config_get(None, "user.name", true);
+            let global_email = git_config_get(None, "user.email", true);
+            let default_branch = git_config_get(None, "init.defaultBranch", true)
+                .or_else(|| Some("main".to_string()));
+            let autocrlf = git_config_get(None, "core.autocrlf", true);
+            let (local_name, local_email) = if let Some(ref r) = repo_path {
+                (
+                    git_config_get(Some(r), "user.name", false),
+                    git_config_get(Some(r), "user.email", false),
+                )
+            } else {
+                (None, None)
+            };
+
+            return Ok(json!({
+                "global_name": global_name,
+                "global_email": global_email,
+                "default_branch": default_branch,
+                "autocrlf": autocrlf,
+                "local_name": local_name,
+                "local_email": local_email,
+                "is_repo": repo_path.is_some(),
+                "is_safe_directory": repo_path.as_deref().map(check_safe_directory).unwrap_or(true),
+            }));
+        }
+        "add_git_safe_directory" => {
+            let path_arg = text(a, "path");
+            let dir_to_add = if path_arg.trim().is_empty() {
+                root.to_string_lossy().to_string()
+            } else {
+                resolve(root, &path_arg)?.to_string_lossy().to_string()
+            };
+            add_safe_directory(&dir_to_add)?;
+            return Ok(json!({"success": true, "path": dir_to_add}));
+        }
+        "get_git_ssh_keys" => {
+            return get_ssh_keys();
+        }
+        "generate_git_ssh_key" => {
+            let email = text(a, "email");
+            let key_type = a.get("key_type").and_then(Value::as_str);
+            return generate_ssh_key(&email, key_type);
         }
         _ => {}
     }
@@ -2009,5 +2371,63 @@ mod tests {
             "normal folds the directory: {normal}"
         );
         assert_eq!(all.as_array().unwrap().len(), 2, "all lists files: {all}");
+    }
+
+    #[test]
+    fn git_user_config_and_settings_roundtrip() {
+        let root = repo("config-roundtrip");
+        let path = root.to_string_lossy().to_string();
+
+        // 1. Settings roundtrip
+        let settings_init = call(&root, "get_git_settings", json!({})).unwrap();
+        assert!(settings_init.get("auto_fetch").is_some());
+
+        let updated = call(
+            &root,
+            "update_git_settings",
+            json!({
+                "settings": {
+                    "custom_path": "",
+                    "auto_fetch": true,
+                    "fetch_interval_minutes": 15,
+                    "default_branch": "develop",
+                    "auto_crlf": "input"
+                }
+            }),
+        )
+        .unwrap();
+        assert_eq!(updated["auto_fetch"], json!(true));
+        assert_eq!(updated["fetch_interval_minutes"], json!(15));
+        assert_eq!(updated["default_branch"], json!("develop"));
+        assert_eq!(updated["auto_crlf"], json!("input"));
+
+        // 2. Git user config get
+        let user_cfg = call(&root, "get_git_user_config", json!({"path": path})).unwrap();
+        assert_eq!(user_cfg["is_repo"], json!(true));
+        assert_eq!(user_cfg["local_name"], json!("Tester"));
+        assert_eq!(user_cfg["local_email"], json!("test@example.com"));
+
+        // 3. Git user config set (local scope)
+        let updated_cfg = call(
+            &root,
+            "set_git_user_config",
+            json!({
+                "path": path,
+                "scope": "local",
+                "name": "New Tester",
+                "email": "newtester@example.com"
+            }),
+        )
+        .unwrap();
+        assert_eq!(updated_cfg["local_name"], json!("New Tester"));
+        assert_eq!(updated_cfg["local_email"], json!("newtester@example.com"));
+
+        // 4. Safe directory
+        let safe_res = call(&root, "add_git_safe_directory", json!({"path": path})).unwrap();
+        assert_eq!(safe_res["success"], json!(true));
+
+        // 5. SSH keys query
+        let ssh_keys = call(&root, "get_git_ssh_keys", json!({})).unwrap();
+        assert!(ssh_keys["keys"].is_array());
     }
 }

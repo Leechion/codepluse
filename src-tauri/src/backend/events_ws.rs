@@ -130,9 +130,12 @@ pub async fn handle(ws: WebSocketUpgrade, headers: HeaderMap, listen_port: u16) 
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
 
+    let upgrade = ws
+        .max_message_size(MAX_READ_BYTES)
+        .max_frame_size(MAX_READ_BYTES);
     let upgrade = match requested {
-        Some(protocol) => ws.protocols([protocol]),
-        None => ws,
+        Some(protocol) => upgrade.protocols([protocol]),
+        None => upgrade,
     };
 
     upgrade.on_upgrade(move |socket| async move {
@@ -152,11 +155,12 @@ async fn session(socket: WebSocket) -> Result<(), String> {
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Message>();
     let writer = tokio::spawn(async move {
         while let Some(message) = out_rx.recv().await {
-            if sink.send(message).await.is_err() {
-                break;
+            match tokio::time::timeout(WRITE_TIMEOUT, sink.send(message)).await {
+                Ok(Ok(())) => {}
+                _ => break,
             }
         }
-        let _ = sink.close().await;
+        let _ = tokio::time::timeout(WRITE_TIMEOUT, sink.close()).await;
     });
 
     let (subscriber_id, mut events) = hub().subscribe();
@@ -206,6 +210,9 @@ async fn run(
                 };
                 match message {
                     Message::Text(text) => {
+                        if text.len() > MAX_READ_BYTES {
+                            return Ok(());
+                        }
                         let command: Value = match serde_json::from_str(&text) {
                             Ok(value) => value,
                             Err(_) => continue,
@@ -238,10 +245,15 @@ async fn run(
                     None => return Ok(()),
                 };
                 // Every event is broadcast verbatim to every client.
-                let _ = out.send(frame(&json!({
-                    "channel": event.channel,
-                    "payload": goformat::canon(&event.payload),
-                })));
+                if out
+                    .send(frame(&json!({
+                        "channel": event.channel,
+                        "payload": goformat::canon(&event.payload),
+                    })))
+                    .is_err()
+                {
+                    return Ok(());
+                }
                 if event.channel != "acp://event" {
                     continue;
                 }

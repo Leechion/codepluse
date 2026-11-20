@@ -71,6 +71,17 @@ fn save_board(root: &Path, board: &Value) -> Result<(), String> {
     crate::backend::worktask::persist_board(root, board)
 }
 
+fn mutate_board<R>(
+    root: &Path,
+    mutate: impl FnOnce(&mut Value) -> R,
+) -> Result<R, String> {
+    let _lock = crate::backend::store_file::lock(&tasks_file(root))?;
+    let mut board = load_board(root);
+    let out = mutate(&mut board);
+    save_board(root, &board)?;
+    Ok(out)
+}
+
 fn find_task<'a>(board: &'a Value, id: i64) -> Option<&'a Value> {
     board
         .get("tasks")
@@ -239,11 +250,14 @@ fn task_worktree_name(id: i64) -> String {
 }
 
 fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let mut command = std::process::Command::new(crate::backend::git::git_program());
+    command.args(args).current_dir(cwd);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let output = command.output().map_err(|e| e.to_string())?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
@@ -345,38 +359,43 @@ pub fn bind_runtime() {
 
 /// Go `claimTask`：并发上限内把 queued 推进 preparing 并开跑。
 pub async fn claim_task(root: &Path, id: i64) {
-    let mut board = load_board(root);
-    let Some(task) = find_task(&board, id).cloned() else {
+    let claimed = mutate_board(root, |board| {
+        let Some(task) = find_task(board, id).cloned() else {
+            return None;
+        };
+        if task.get("status").and_then(Value::as_str) != Some("queued") {
+            return None;
+        }
+        let folder_id = number(task.get("folder_id"));
+        let settings = folder_settings(board, folder_id);
+        let mut max = number(settings.get("max_concurrent"));
+        if max <= 0 {
+            max = 1;
+        }
+        let running = board
+            .get("tasks")
+            .and_then(Value::as_array)
+            .map(|rows| {
+                rows.iter()
+                    .filter(|row| {
+                        number(row.get("folder_id")) == folder_id
+                            && matches!(
+                                row.get("status").and_then(Value::as_str),
+                                Some("preparing" | "running" | "awaiting_input" | "merging")
+                            )
+                    })
+                    .count() as i64
+            })
+            .unwrap_or(0);
+        if running >= max {
+            return None; // 等 tick 在空出槽位后重试
+        }
+        set_status(board, id, "preparing", "engine", json!({}));
+        Some(folder_id)
+    });
+    let Ok(Some(folder_id)) = claimed else {
         return;
     };
-    if task.get("status").and_then(Value::as_str) != Some("queued") {
-        return;
-    }
-    let folder_id = number(task.get("folder_id"));
-    let settings = folder_settings(&board, folder_id);
-    let mut max = number(settings.get("max_concurrent"));
-    if max <= 0 {
-        max = 1;
-    }
-    let running = board
-        .get("tasks")
-        .and_then(Value::as_array)
-        .map(|rows| {
-            rows.iter()
-                .filter(|row| {
-                    number(row.get("folder_id")) == folder_id
-                        && matches!(
-                            row.get("status").and_then(Value::as_str),
-                            Some("preparing" | "running" | "awaiting_input" | "merging")
-                        )
-                })
-                .count() as i64
-        })
-        .unwrap_or(0);
-    if running >= max {
-        return; // 等 tick 在空出槽位后重试
-    }
-    set_status(&mut board, id, "preparing", "engine", json!({}));
     if let Some(path) = folder_path(root, folder_id) {
         engine()
             .lock()
@@ -384,30 +403,27 @@ pub async fn claim_task(root: &Path, id: i64) {
             .checkout
             .insert(id, PathBuf::from(path));
     }
-    if save_board(root, &board).is_err() {
-        return;
-    }
     if let Err(err) = run_task(root, id).await {
-        let mut board = load_board(root);
-        update_task(&mut board, id, |task| {
-            task["last_error"] = json!(err.to_string());
-            task["failure_reason"] = json!("setup_error");
+        let _ = mutate_board(root, |board| {
+            update_task(board, id, |task| {
+                task["last_error"] = json!(err.to_string());
+                task["failure_reason"] = json!("setup_error");
+            });
+            set_status(
+                board,
+                id,
+                "failed",
+                "engine",
+                json!({"error": err.to_string()}),
+            );
         });
-        set_status(
-            &mut board,
-            id,
-            "failed",
-            "engine",
-            json!({"error": err.to_string()}),
-        );
-        let _ = save_board(root, &board);
     }
 }
 
 /// Go `runTask`：工作树 → 会话 → prompt → 等对话落定。
 async fn run_task(root: &Path, id: i64) -> Result<(), String> {
-    let mut board = load_board(root);
-    let Some(task) = find_task(&board, id).cloned() else {
+    let initial_board = load_board(root);
+    let Some(task) = find_task(&initial_board, id).cloned() else {
         return Ok(());
     };
     let folder_id = number(task.get("folder_id"));
@@ -421,6 +437,9 @@ async fn run_task(root: &Path, id: i64) -> Result<(), String> {
     let is_repo = git_ok(&folder_dir, &["rev-parse", "--is-inside-work-tree"])
         .map(|out| out.trim() == "true")
         .unwrap_or(false);
+    let mut base_branch_patch: Option<String> = None;
+    let mut base_sha_patch: Option<String> = None;
+    let mut work_branch_patch: Option<String> = None;
     if is_repo {
         let target = worktrees.join(&name);
         if !target.is_dir() {
@@ -446,39 +465,50 @@ async fn run_task(root: &Path, id: i64) -> Result<(), String> {
             .insert(id, checkout.clone());
         if task.get("base_branch").map(Value::is_null).unwrap_or(true) {
             if let Some(branch) = git_ok(&folder_dir, &["rev-parse", "--abbrev-ref", "HEAD"]) {
-                update_task(&mut board, id, |task| {
-                    task["base_branch"] = json!(branch.trim());
-                });
+                base_branch_patch = Some(branch.trim().to_string());
             }
         }
         if let Some(sha) = git_ok(&folder_dir, &["rev-parse", "HEAD"]) {
-            update_task(&mut board, id, |task| {
-                task["base_sha"] = json!(sha.trim());
-            });
+            base_sha_patch = Some(sha.trim().to_string());
         }
-        update_task(&mut board, id, |task| {
-            task["work_branch"] = json!(format!("hh/{name}"));
-        });
-    } else {
-        push_event(
-            &mut board,
-            id,
-            "notice",
-            "engine",
-            json!({"text": "非 git 仓库，回退共享目录执行", "folder_path": folder}),
-        );
+        work_branch_patch = Some(format!("hh/{name}"));
     }
     if let Some(branch) = git_ok(&checkout, &["rev-parse", "--abbrev-ref", "HEAD"]) {
         if !branch.trim().is_empty() {
-            update_task(&mut board, id, |task| {
-                task["work_branch"] = json!(branch.trim());
-            });
+            work_branch_patch = Some(branch.trim().to_string());
         }
     }
 
-    let agent_type = resolved_agent(root, &board, &task);
-    set_status(&mut board, id, "running", "engine", json!({}));
-    save_board(root, &board)?;
+    let folder_notice = folder.clone();
+    let agent_type = mutate_board(root, |board| {
+        if !is_repo {
+            push_event(
+                board,
+                id,
+                "notice",
+                "engine",
+                json!({"text": "非 git 仓库，回退共享目录执行", "folder_path": folder_notice}),
+            );
+        }
+        if let Some(branch) = &base_branch_patch {
+            update_task(board, id, |task| {
+                task["base_branch"] = json!(branch);
+            });
+        }
+        if let Some(sha) = &base_sha_patch {
+            update_task(board, id, |task| {
+                task["base_sha"] = json!(sha);
+            });
+        }
+        if let Some(branch) = &work_branch_patch {
+            update_task(board, id, |task| {
+                task["work_branch"] = json!(branch);
+            });
+        }
+        let agent = resolved_agent(root, board, &task);
+        set_status(board, id, "running", "engine", json!({}));
+        agent
+    })?;
 
     let Some(layer) = layer_if_ready() else {
         return Err("连接执行端失败：ACP 连接层未就绪".into());
@@ -488,9 +518,6 @@ async fn run_task(root: &Path, id: i64) -> Result<(), String> {
         .await
         .map_err(|e| format!("连接执行端失败：{e}"))?;
     engine().lock().unwrap().live.insert(id, cid.clone());
-    update_task(&mut board, id, |task| {
-        task["connection_id"] = json!(cid);
-    });
 
     let title = truncate_runes(&text(task.get("title")), 80);
     let conversation_id = crate::backend::acp::store_conv::create_task_conversation(
@@ -499,10 +526,13 @@ async fn run_task(root: &Path, id: i64) -> Result<(), String> {
         &agent_type,
         &title,
     )?;
-    update_task(&mut board, id, |task| {
-        task["conversation_id"] = json!(conversation_id);
-    });
-    save_board(root, &board)?;
+    let cid_for_board = cid.clone();
+    mutate_board(root, |board| {
+        update_task(board, id, |task| {
+            task["connection_id"] = json!(cid_for_board);
+            task["conversation_id"] = json!(conversation_id);
+        });
+    })?;
 
     let first_text = first_task_text(task.get("config"));
     let blocks = json!([{"type": "text", "text": first_text}]);
@@ -545,8 +575,9 @@ async fn run_task(root: &Path, id: i64) -> Result<(), String> {
         if waiting != awaiting {
             awaiting = waiting;
             let status = if waiting { "awaiting_input" } else { "running" };
-            set_status(&mut board, id, status, "engine", json!({}));
-            let _ = save_board(root, &board);
+            let _ = mutate_board(root, |board| {
+                set_status(board, id, status, "engine", json!({}));
+            });
         }
         let status = crate::backend::turn_store::conversation_status(root, conversation_id);
         if status == "pending_review" {
@@ -558,26 +589,26 @@ async fn run_task(root: &Path, id: i64) -> Result<(), String> {
         if status == "cancelled" || status == "failed" {
             let _ = layer.disconnect(&cid).await;
             engine().lock().unwrap().live.remove(&id);
-            let mut board = load_board(root);
-            update_task(&mut board, id, |task| {
-                task["last_error"] = json!("会话执行失败或被取消");
-                task["failure_reason"] = json!("agent_error");
+            let _ = mutate_board(root, |board| {
+                update_task(board, id, |task| {
+                    task["last_error"] = json!("会话执行失败或被取消");
+                    task["failure_reason"] = json!("agent_error");
+                });
+                set_status(board, id, "failed", "engine", json!({}));
             });
-            set_status(&mut board, id, "failed", "engine", json!({}));
-            let _ = save_board(root, &board);
             return Ok(());
         }
         if std::time::Instant::now() > deadline {
             let _ = layer.cancel(&cid).await;
             let _ = layer.disconnect(&cid).await;
             engine().lock().unwrap().live.remove(&id);
-            let mut board = load_board(root);
-            update_task(&mut board, id, |task| {
-                task["failure_reason"] = json!("agent_error");
-                task["last_error"] = json!("运行超过 24 小时上限");
+            let _ = mutate_board(root, |board| {
+                update_task(board, id, |task| {
+                    task["failure_reason"] = json!("agent_error");
+                    task["last_error"] = json!("运行超过 24 小时上限");
+                });
+                set_status(board, id, "failed", "engine", json!({}));
             });
-            set_status(&mut board, id, "failed", "engine", json!({}));
-            let _ = save_board(root, &board);
             return Ok(());
         }
     }
@@ -587,36 +618,41 @@ async fn run_task(root: &Path, id: i64) -> Result<(), String> {
 fn settle_task(root: &Path, id: i64, folder: &str, name: &str, conversation_id: i64) {
     let folder_dir = Path::new(folder);
     let has_worktree = folder_dir.join(".worktrees").join(name).is_dir();
-    let mut board = load_board(root);
-    if has_worktree {
-        if let Some(summary) = last_assistant_text(root, conversation_id) {
-            let trimmed = if summary.len() > 2000 {
+    let worktree_patch = if has_worktree {
+        let trimmed = last_assistant_text(root, conversation_id).map(|summary| {
+            if summary.len() > 2000 {
                 String::from_utf8_lossy(&summary.as_bytes()[..2000]).to_string()
             } else {
                 summary
-            };
-            update_task(&mut board, id, |task| {
-                task["result_summary"] = json!(trimmed);
+            }
+        });
+        let stats = diff_stats(folder, name);
+        Some((trimmed, stats))
+    } else {
+        None
+    };
+    let settled = mutate_board(root, |board| {
+        if let Some((trimmed, (files, additions, deletions))) = &worktree_patch {
+            if let Some(trimmed) = trimmed {
+                update_task(board, id, |task| {
+                    task["result_summary"] = json!(trimmed);
+                });
+            }
+            update_task(board, id, |task| {
+                task["files_changed"] = json!(files);
+                task["additions"] = json!(additions);
+                task["deletions"] = json!(deletions);
             });
         }
-        let (files, additions, deletions) = diff_stats(folder, name);
-        update_task(&mut board, id, |task| {
-            task["files_changed"] = json!(files);
-            task["additions"] = json!(additions);
-            task["deletions"] = json!(deletions);
-        });
-    }
-    set_status(&mut board, id, "review", "engine", json!({}));
-    let _ = save_board(root, &board);
-    let auto_merge = folder_settings(
-        &board,
-        number(find_task(&board, id).and_then(|t| t.get("folder_id"))),
-    )
-    .get("auto_merge")
-    .and_then(Value::as_bool)
-    .unwrap_or(false);
-    if auto_merge {
-        let folder_id = number(find_task(&board, id).and_then(|t| t.get("folder_id")));
+        set_status(board, id, "review", "engine", json!({}));
+        let folder_id = number(find_task(board, id).and_then(|t| t.get("folder_id")));
+        let auto_merge = folder_settings(board, folder_id)
+            .get("auto_merge")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        (auto_merge, folder_id)
+    });
+    if let Ok((true, folder_id)) = settled {
         let root_owned = root.to_path_buf();
         spawn(async move {
             let _ = dispatch_merge(&root_owned, folder_id, id, "", false);
@@ -705,16 +741,16 @@ fn dispatch_merge(
 ) -> Result<bool, String> {
     let lock = merge_lock(folder_id);
     let Ok(guard) = lock.try_lock() else {
-        // 排队（调用方已持 board 锁）。
-        let mut board = load_board(root);
-        update_task(&mut board, id, |task| {
-            task["merge_queued"] = json!({
-                "message": message,
-                "delete_worktree": delete_worktree,
-                "queued_at": goformat::timestamp(),
+        // 排队。
+        mutate_board(root, |board| {
+            update_task(board, id, |task| {
+                task["merge_queued"] = json!({
+                    "message": message,
+                    "delete_worktree": delete_worktree,
+                    "queued_at": goformat::timestamp(),
+                });
             });
-        });
-        save_board(root, &board)?;
+        })?;
         return Ok(true);
     };
     drop(guard);
@@ -731,9 +767,15 @@ fn dispatch_merge(
 
 /// Go `processTaskMerge`：合并分支（squash 或 worktree merge）并收尾。
 async fn process_merge(root: &Path, folder_id: i64, id: i64, message: &str, delete_worktree: bool) {
-    let mut board = load_board(root);
-    set_status(&mut board, id, "merging", "engine", json!({}));
-    let _ = save_board(root, &board);
+    let strategy = mutate_board(root, |board| {
+        set_status(board, id, "merging", "engine", json!({}));
+        folder_settings(board, folder_id)
+            .get("merge_strategy")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    })
+    .unwrap_or_default();
 
     let folder = folder_path(root, folder_id)
         .or_else(|| {
@@ -764,37 +806,33 @@ async fn process_merge(root: &Path, folder_id: i64, id: i64, message: &str, dele
         }
     }
 
-    let strategy = folder_settings(&board, folder_id)
-        .get("merge_strategy")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
     let result = if strategy == "squash" {
         squash_merge(&folder_dir, &format!("hh/{name}"), message)
     } else {
         merge_worktree(&folder_dir, &name, message)
     };
     if let Err(err) = result {
-        let mut board = load_board(root);
-        update_task(&mut board, id, |task| {
-            task["last_error"] = json!(err);
+        let _ = mutate_board(root, |board| {
+            update_task(board, id, |task| {
+                task["last_error"] = json!(err);
+            });
+            set_status(board, id, "review", "engine", json!({"error": err}));
         });
-        set_status(&mut board, id, "review", "engine", json!({"error": err}));
-        let _ = save_board(root, &board);
         drain_merge_queue(root, folder_id);
         return;
     }
-    let mut board = load_board(root);
-    if let Some(sha) = git_ok(&folder_dir, &["rev-parse", "HEAD"]) {
-        update_task(&mut board, id, |task| {
-            task["merge_commit"] = json!(sha.trim());
+    let merge_sha = git_ok(&folder_dir, &["rev-parse", "HEAD"]).map(|s| s.trim().to_string());
+    let _ = mutate_board(root, |board| {
+        if let Some(sha) = &merge_sha {
+            update_task(board, id, |task| {
+                task["merge_commit"] = json!(sha);
+            });
+        }
+        update_task(board, id, |task| {
+            task["completion_kind"] = json!("merged");
         });
-    }
-    update_task(&mut board, id, |task| {
-        task["completion_kind"] = json!("merged");
+        set_status(board, id, "done", "engine", json!({}));
     });
-    set_status(&mut board, id, "done", "engine", json!({}));
-    let _ = save_board(root, &board);
     if delete_worktree {
         let _ = discard_worktree(root, id);
     }
@@ -803,36 +841,35 @@ async fn process_merge(root: &Path, folder_id: i64, id: i64, message: &str, dele
 
 /// Go `drainMergeQueue`：合并结束后启动同文件夹下一个排队的合并。
 fn drain_merge_queue(root: &Path, folder_id: i64) {
-    let mut board = load_board(root);
-    let mut next: Option<(i64, String, bool)> = None;
-    if let Some(tasks) = board.get("tasks").and_then(Value::as_array) {
-        for task in tasks {
-            if number(task.get("folder_id")) != folder_id {
-                continue;
+    let next = mutate_board(root, |board| {
+        let mut next: Option<(i64, String, bool)> = None;
+        if let Some(tasks) = board.get("tasks").and_then(Value::as_array) {
+            for task in tasks {
+                if number(task.get("folder_id")) != folder_id {
+                    continue;
+                }
+                let queued = task.get("merge_queued");
+                let Some(queued) = queued.filter(|v| v.is_object()) else {
+                    continue;
+                };
+                next = Some((
+                    number(task.get("id")),
+                    text(queued.get("message")),
+                    queued.get("delete_worktree") == Some(&Value::Bool(true)),
+                ));
+                break;
             }
-            let queued = task.get("merge_queued");
-            let Some(queued) = queued.filter(|v| v.is_object()) else {
-                continue;
-            };
-            next = Some((
-                number(task.get("id")),
-                text(queued.get("message")),
-                queued.get("delete_worktree") == Some(&Value::Bool(true)),
-            ));
-            break;
         }
-    }
-    if let Some((id, _, _)) = &next {
-        update_task(&mut board, *id, |task| {
-            task["merge_queued"] = Value::Null;
-        });
-        if save_board(root, &board).is_err() {
-            return;
+        if let Some((id, _, _)) = &next {
+            update_task(board, *id, |task| {
+                task["merge_queued"] = Value::Null;
+            });
         }
-    } else {
+        next
+    });
+    let Ok(Some((id, message, delete_worktree))) = next else {
         return;
-    }
-    let (id, message, delete_worktree) = next.unwrap();
+    };
     let root_owned = root.to_path_buf();
     spawn(async move {
         let lock = merge_lock(folder_id);

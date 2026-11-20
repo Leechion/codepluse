@@ -22,9 +22,9 @@ $ErrorActionPreference = 'Stop'
 # such line into a terminating error while ErrorActionPreference is Stop, so
 # every external call runs with it relaxed and is judged by its exit code.
 function Invoke-Native([scriptblock] $Run) {
-    $previous = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try { & $Run } finally { $ErrorActionPreference = $previous }
+    $previous = $script:ErrorActionPreference
+    $script:ErrorActionPreference = 'Continue'
+    try { & $Run } finally { $script:ErrorActionPreference = $previous }
     return $LASTEXITCODE
 }
 
@@ -102,23 +102,8 @@ function Write-WorkspaceManifest([string] $Path) {
 $resources = Join-Path $tauriDir 'resources'
 New-Item -ItemType Directory -Path $resources -Force | Out-Null
 Write-WorkspaceManifest (Join-Path $resources 'workspace.json')
-# 开发/发布构建直接运行时，仓库根也要在旁边（安装包走 resources/）。
 $profileDir = if ($DebugBuild) { 'target\debug' } else { 'target\release' }
 $profileDir = Join-Path $tauriDir $profileDir
-if (Test-Path -LiteralPath $profileDir) {
-    Write-WorkspaceManifest (Join-Path $profileDir 'workspace.json')
-}
-# 桌面快捷方式指向 dist\codepluse\codepluse.exe（旧的 Go WebView2 外壳在
-# Phase 4 删掉了，那个位置现在是本仓库的启动入口）——每次构建都同步一份，
-# 免得快捷方式还停在旧版本上。
-$launcherDir = Join-Path $root 'dist\codepluse'
-if (Test-Path -LiteralPath $launcherDir) {
-    $builtExe = Join-Path $profileDir 'codepluse.exe'
-    if (Test-Path -LiteralPath $builtExe) {
-        Copy-Item -LiteralPath $builtExe -Destination (Join-Path $launcherDir 'codepluse.exe') -Force
-    }
-    Write-WorkspaceManifest (Join-Path $launcherDir 'workspace.json')
-}
 
 # Run the CLI from the repository root so it finds ./src-tauri.
 Push-Location $root
@@ -142,6 +127,22 @@ try {
         throw "Tauri 构建失败（exit $code）"
     }
 } finally { Pop-Location }
+
+# 开发/发布构建直接运行时，仓库根也要在旁边（安装包走 resources/）。
+if (Test-Path -LiteralPath $profileDir) {
+    Write-WorkspaceManifest (Join-Path $profileDir 'workspace.json')
+}
+# 桌面快捷方式指向 dist\codepluse\codepluse.exe（旧的 Go WebView2 外壳在
+# Phase 4 删掉了，那个位置现在是本仓库的启动入口）——构建完成后同步最新产物，
+# 免得快捷方式还停在旧版本上。
+$launcherDir = Join-Path $root 'dist\codepluse'
+if (Test-Path -LiteralPath $launcherDir) {
+    $builtExe = Join-Path $profileDir 'codepluse.exe'
+    if (Test-Path -LiteralPath $builtExe) {
+        Copy-Item -LiteralPath $builtExe -Destination (Join-Path $launcherDir 'codepluse.exe') -Force
+    }
+    Write-WorkspaceManifest (Join-Path $launcherDir 'workspace.json')
+}
 
 $outDir = if ($DebugBuild) { 'target\debug\bundle' } else { 'target\release\bundle' }
 Write-Host "[tauri] 完成，安装包位于 $tauriDir\$outDir"
