@@ -4,8 +4,8 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 
 const ROOT = 'E:/code/codepluse'
-const UI = ROOT + '/codeg-ui'
-const all = execFileSync('git', ['-C', ROOT, 'ls-files', 'codeg-ui/src'], { maxBuffer: 1 << 28 })
+const UI = ROOT + '/codepluse-ui'
+const all = execFileSync('git', ['-C', ROOT, 'ls-files', 'codepluse-ui/src'], { maxBuffer: 1 << 28 })
   .toString()
   .split('\n')
   .filter((f) => f.endsWith('.ts') || f.endsWith('.tsx'))

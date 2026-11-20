@@ -1,5 +1,5 @@
 //! The collaboration domain, ported from
-//! `server-go/internal/codeg/delegation.go` (plus `delegation_profiles.go`).
+//! `server-go/internal/codepluse/delegation.go` (plus `delegation_profiles.go`).
 //!
 //! A delegation is a child session the model opened on another harness: the
 //! parent records the task, the child runs it, and the parent collects the
@@ -98,7 +98,7 @@ fn registry_path(root: &Path) -> std::path::PathBuf {
 /// the workspace JSON "assistants" array; deleted rows (soft `deleted_at`)
 /// never surface.
 pub fn assistant_rows(root: &Path) -> Vec<Value> {
-    let path = root.join(".data").join("codeg-workspace.json");
+    let path = root.join(".data").join("codepluse-workspace.json");
     crate::backend::store_file::read_json(&path)
         .ok()
         .flatten()

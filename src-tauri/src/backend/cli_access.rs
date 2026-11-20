@@ -1,7 +1,7 @@
 //! CLI 访问开关与电脑驱动 —— 补全批次（S8，3 条）。
 //!
-//! 前端 `codeg-ui/src/lib/api.ts`（`cli_access_status` / `cli_access_set_enabled`）
-//! 与 `codeg-ui/src/lib/computer/computer-api.ts`（`computer_driver_install`）已经
+//! 前端 `codepluse-ui/src/lib/api.ts`（`cli_access_status` / `cli_access_set_enabled`）
+//! 与 `codepluse-ui/src/lib/computer/computer-api.ts`（`computer_driver_install`）已经
 //! 在调用这 3 条命令，但原 Go sidecar（提交 76712f5）与 Rust 都没有实现过它们
 //! （全树搜不到字面量），契约只取自调用点参数名与 `types.ts` 的返回结构。
 //!
@@ -12,7 +12,7 @@
 //! * `computer_driver_install` —— L3：**不**真的下载或安装系统合成输入驱动，
 //!   按 [`DriverInfo`] 结构回一个明确的未安装说明。
 //!
-//! 限制（L3）：本构建没有随附 `codeg-cli` 端点服务，开关打开后 `running` 仍为
+//! 限制（L3）：本构建没有随附 `codepluse-cli` 端点服务，开关打开后 `running` 仍为
 //! `false`，`error` 说明原因；cua-driver 二进制不在仓库分发范围，安装命令只回
 //! 状态，不触发下载、不改系统驱动。
 

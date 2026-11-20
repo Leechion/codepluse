@@ -4,10 +4,10 @@ node_modules/
 .worktrees/
 dist/
 .next/
-codeg-ui/out/
+codepluse-ui/out/
 
 .next/
-.codeg-src/
+.codepluse-src/
 *.exe
 .workbuddy/
 *.log
@@ -15,4 +15,4 @@ codeg-ui/out/
 .swc-cache/
 *.tsbuildinfo
 public/icon-preview/
-codeg-ui/.cdp-profile/
+codepluse-ui/.cdp-profile/

@@ -1,6 +1,6 @@
 //! 日志面（补全批次）：级别设置、内存环形缓冲、磁盘日志文件。
 //!
-//! 前端 `codeg-ui/src/lib/api.ts` 的 `getLogSettings` / `setLogSettings` /
+//! 前端 `codepluse-ui/src/lib/api.ts` 的 `getLogSettings` / `setLogSettings` /
 //! `getRecentLogs` / `listLogFiles` / `openLogsDir` / `readLogFile` 已经在调
 //! 这 6 条命令，但原 Go sidecar 与 Rust 都没有实现过它们（`go-sidecar-final`
 //! 里搜不到这些字面量），所以契约只由调用点和 `types.ts` 决定：
@@ -117,10 +117,10 @@ fn read_settings(root: &Path) -> (String, Vec<Value>) {
     (level, targets)
 }
 
-/// `env_locked`：`CODEG_LOG` / `RUST_LOG` 一旦存在就由环境变量接管实时级别，
+/// `env_locked`：`CODEPLUSE_LOG` / `RUST_LOG` 一旦存在就由环境变量接管实时级别，
 /// 界面上的控件必须灰掉——这正是前端读取该字段的原因。
 fn env_locked() -> bool {
-    ["CODEG_LOG", "RUST_LOG"].iter().any(|name| {
+    ["CODEPLUSE_LOG", "RUST_LOG"].iter().any(|name| {
         std::env::var(name)
             .map(|value| !value.trim().is_empty())
             .unwrap_or(false)

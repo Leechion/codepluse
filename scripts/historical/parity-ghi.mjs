@@ -10,7 +10,7 @@
 //   - automation_run_now 的运行执行经桥接走到 Go 的 acp_connect（ACP 仍归
 //     Go），双胞胎里没有可用执行端 → 运行失败，对比失败路径的事件与落盘。
 //
-//   go build -o server-go/serve-codeg.exe ./cmd/serve        （先构建）
+//   go build -o server-go/serve-codepluse.exe ./cmd/serve        （先构建）
 //   cargo build                                              （先构建）
 //   node scripts/parity-ghi.mjs [--keep] [--go 8840] [--rust 8841]
 //
@@ -39,14 +39,14 @@ const option = (name, fallback) => {
 const keep = args.includes('--keep');
 const GO_PORT = Number(option('go', '8840'));
 const RUST_PORT = Number(option('rust', '8841'));
-const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codeg.exe');
+const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codepluse.exe');
 const RUST_EXE = path.join(repoRoot, 'src-tauri', 'target', 'debug', 'codepluse.exe');
 
 const die = (message) => {
   console.error(`❌ ${message}`);
   process.exit(2);
 };
-if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codeg.exe，先 go build -o server-go/serve-codeg.exe ./cmd/serve');
+if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codepluse.exe，先 go build -o server-go/serve-codepluse.exe ./cmd/serve');
 if (!existsSync(RUST_EXE)) die('缺少 src-tauri/target/debug/codepluse.exe，先 cargo build');
 
 // ── twin workspaces ─────────────────────────────────────────────────────────
@@ -118,7 +118,7 @@ const seedStore = (root) =>
   });
 
 for (const root of [rootA, rootB]) {
-  writeFileSync(path.join(root, '.data', 'codeg-workspace.json'), seedStore(root));
+  writeFileSync(path.join(root, '.data', 'codepluse-workspace.json'), seedStore(root));
 }
 
 // ── servers ─────────────────────────────────────────────────────────────────
@@ -135,7 +135,7 @@ const spawnServer = (exe, cwd, env, label) => {
 };
 
 spawnServer(GO_EXE, rootA, {
-  HARNESS_HUB_CODEG: '1',
+  HARNESS_HUB_CODEPLUSE: '1',
   PORT: String(GO_PORT),
   HARNESS_HUB_ALLOW_ANY_PATH: '1',
   // 关闭 warm 池：预热会尝试拉起 codex，往 .data/codex-native-home 写文件，
@@ -167,7 +167,7 @@ const wsFrames = [];
 const connectRecorder = () =>
   new Promise((resolve) => {
     try {
-      const socket = new WebSocket(`ws://127.0.0.1:${RUST_PORT}/ws/events`, 'codeg-events');
+      const socket = new WebSocket(`ws://127.0.0.1:${RUST_PORT}/ws/events`, 'codepluse-events');
       socket.onmessage = (event) => {
         try {
           wsFrames.push(JSON.parse(event.data));
@@ -306,7 +306,7 @@ const steps = [
     isolation: 'shared_in_root',
     timezone: 'Asia/Shanghai',
     config: { prompt_blocks: [{ type: 'text', text: '早' }], display_text: 'morning', config_values: { depth: 3, flag: true }, label_snapshot: { agent: 'Codex' } },
-  } }, { files: ['codeg-automations.json'] }),
+  } }, { files: ['codepluse-automations.json'] }),
   step('auto.create.schedule', 'automation_create', { draft: {
     name: '夜间',
     trigger_kind: 'schedule',
@@ -314,25 +314,25 @@ const steps = [
     agent_type: 'nonexistent-agent',
     isolation: 'shared_in_root',
     config: { prompt_blocks: [], display_text: 'night', config_values: {} },
-  } }, { files: ['codeg-automations.json'] }),
+  } }, { files: ['codepluse-automations.json'] }),
   step('auto.get', 'automation_get', { id: 1 }),
   step('auto.list', 'automation_list', {}),
-  step('auto.set_enabled', 'automation_set_enabled', { id: 1, enabled: false }, { files: ['codeg-automations.json'] }),
+  step('auto.set_enabled', 'automation_set_enabled', { id: 1, enabled: false }, { files: ['codepluse-automations.json'] }),
   step('auto.update', 'automation_update', { id: 1, draft: {
     name: '晨报改',
     trigger_kind: 'manual',
     agent_type: 'nonexistent-agent',
     config: { prompt_blocks: [], display_text: 'morning2', config_values: {} },
-  } }, { files: ['codeg-automations.json'] }),
+  } }, { files: ['codepluse-automations.json'] }),
   step('auto.compute', 'automation_compute_next_run', { cron: '0 9 * * 1-5' }),
   step('auto.compute.bad', 'automation_compute_next_run', { cron: '99 * * * *' }),
   step('auto.runs.empty', 'automation_runs', { automationId: 1, limit: 10 }),
-  step('auto.run_now', 'automation_run_now', { automationId: 1 }, { settle: 1200, files: ['codeg-automation-runs.json'] }),
-  step('auto.set_enabled.back', 'automation_set_enabled', { id: 1, enabled: true }, { files: ['codeg-automations.json'] }),
-  step('auto.mark_seen', 'automation_mark_seen', {}, { files: ['codeg-automations.json'] }),
+  step('auto.run_now', 'automation_run_now', { automationId: 1 }, { settle: 1200, files: ['codepluse-automation-runs.json'] }),
+  step('auto.set_enabled.back', 'automation_set_enabled', { id: 1, enabled: true }, { files: ['codepluse-automations.json'] }),
+  step('auto.mark_seen', 'automation_mark_seen', {}, { files: ['codepluse-automations.json'] }),
   step('auto.get.missing', 'automation_get', { id: 999 }),
   step('auto.delete.missing', 'automation_delete', { id: 999 }),
-  step('auto.runs.after', 'automation_runs', { automationId: 1, limit: 10 }, { settle: 800, files: ['codeg-automation-runs.json'] }),
+  step('auto.runs.after', 'automation_runs', { automationId: 1, limit: 10 }, { settle: 800, files: ['codepluse-automation-runs.json'] }),
   step('auto.cancel.missing', 'automation_cancel_run', { runId: 999 }),
 ];
 

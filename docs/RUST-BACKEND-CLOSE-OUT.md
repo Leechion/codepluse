@@ -18,7 +18,7 @@
 ## A. Phase 3 — Rust 直服（不依赖 sidecar 也能跑）
 
 ### A1. 静态资源 ✅ 已做
-- [x] `codeg-ui/out` 由 Rust 直服（`webapp.rs::static_asset`）
+- [x] `codepluse-ui/out` 由 Rust 直服（`webapp.rs::static_asset`）
 - [x] 路径解析复刻 Go `static()`：`/` → `/index.html`；`Rsc: 1` → 先试 `<file>.txt`
       并设 `Content-Type: text/x-component`；否则文件缺失/是目录时试 `<file>.html`，
       再回落 `<dir>/index.html`
@@ -32,11 +32,11 @@
 
 ### A2. `/api/health` 本地应答 ✅ 已做
 - [x] 本地合成，字段与 Go 完全一致：`{ok, app:"codepluse", data:{status, version,
-      sessionRuntime}, backend, codeg_version, path_boundary:{allow_any_path,
+      sessionRuntime}, backend, codepluse_version, path_boundary:{allow_any_path,
       allow_any_browse}}`
 - [x] `backend` 取 `"rust"`
-- [x] `version`/`codeg_version` 的取值：**刻意保持 Go 的字面量**（`2.0.0-go` →
-      `2.0.0-rust` 仅此一处，`codeg_version` 仍是 `0.42.0`）。原因：`codeg_version`
+- [x] `version`/`codepluse_version` 的取值：**刻意保持 Go 的字面量**（`2.0.0-go` →
+      `2.0.0-rust` 仅此一处，`codepluse_version` 仍是 `0.42.0`）。原因：`codepluse_version`
       会被前端拿来和自身版本比较，updater 另有自己的 `VERSION` 契约；改这两个值
       会移动本次迁移不该移动的行为。
 - [x] `path_boundary` 读 `HARNESS_HUB_ALLOW_ANY_PATH` / `HARNESS_HUB_ALLOW_ANY_BROWSE`
@@ -54,13 +54,13 @@
 
 验收：上传成功/坏文件名两条路径与旧 Go 文案一致（双跑 MATCH）。
 
-### A4. `/api/codeg_mcp` 本地应答 ✅ 已做（比原计划更完整）
+### A4. `/api/codepluse_mcp` 本地应答 ✅ 已做（比原计划更完整）
 - [x] 非 POST → 405 `{"error":"POST required"}`
 - [x] token 校验：按 `Authorization: Bearer <token>` 在 **ACP 调用方注册表**里查，
       查不到 → 401 `{"error":"Invalid companion token"}`
 - [x] 非 JSON body → 400（Go 的 decoder 错误文案）
-- [x] **超出原计划**：连带把 `codeg-mcp` 伴随服务本身移植了
-      （`mcp_companion.rs` + 二进制 `mcp-codeg <endpoint> <token>` 模式）——
+- [x] **超出原计划**：连带把 `codepluse-mcp` 伴随服务本身移植了
+      （`mcp_companion.rs` + 二进制 `mcp-codepluse <endpoint> <token>` 模式）——
       否则 Rust 仍在向 agent 广告一个不存在的子命令（见 §D 偏差表的第 1 条）。
 
 ### A5. `/api/*` 非 POST → 405 ✅ 已做
@@ -76,7 +76,7 @@
       为 `multipart/form-data`），否则 415 `unsupported_content_type`
 - [x] 拒绝体统一为 `{"code":"<code>","message":"请求被本地安全策略拒绝"}`
 - [x] 参考实现：`server-go/cmd/serve/guard.go`（tag `go-sidecar-final`）
-      —— **注意**：`internal/codeg/guard.go` 是更早的一版（Sec-Fetch-Site 白名单 +
+      —— **注意**：`internal/codepluse/guard.go` 是更早的一版（Sec-Fetch-Site 白名单 +
       Origin 同源比对），随 sidecar 一起删除了；线上行为以 `cmd/serve/guard.go` 为准。
 
 ### A7. WebSocket 协议本地实现 ✅ 已做
@@ -92,7 +92,7 @@
 - [x] 事件源：Rust 侧连接层（`acp/connections.rs` 的 `events`/`seq`/`live`）
       与 `emit_events`
 
-验收：协议帧与 Go 的 `mcp-codeg` 逐帧对拍一致（`parity-mcp.mjs`，4/4）；
+验收：协议帧与 Go 的 `mcp-codepluse` 逐帧对拍一致（`parity-mcp.mjs`，4/4）；
 单进程烟测 `/ws/events` 收到 `__ready__` 首帧。
 
 ### A8. 开发热更新代理 ✅ 已做
@@ -122,9 +122,9 @@
 
 ### B3. 构建脚本去 Go ✅ 已做
 - [x] `scripts/build-tauri.ps1`、`tauri-dev.ps1`、`dev.ps1`、
-      `rebuild-after-pull.ps1`、`start-codeg.ps1`：Go 步骤全部换成 Rust
+      `rebuild-after-pull.ps1`、`start-codepluse.ps1`：Go 步骤全部换成 Rust
       （`cargo build` / 直接启动 `codepluse.exe`）
-- [x] `scripts/build-codeg-desktop.ps1`（旧 Go + WebView2 外壳）已删除
+- [x] `scripts/build-codepluse-desktop.ps1`（旧 Go + WebView2 外壳）已删除
 - [x] `scripts/inventory-commands.mjs` 依赖扫 Go 源码 → 已归档到
       `scripts/historical/`（命令面清单 TSV 成为权威记录）
 - [x] 迁移期双跑脚本（`parity*.mjs`）→ 移到 `scripts/historical/`，附 README 说明
@@ -169,13 +169,13 @@
 | 偏差 | 影响 |
 |---|---|
 | **协作域（delegation）只移植了注册表与部分工具** | `delegate_to_agent` / `get_delegation_status` / `cancel_delegation` / `resume_delegation` / `send_agent_message` / `check_user_feedback` 已落地（`acp/delegation.rs`）；**`propose_task_split` 与 `ask_user_question` 两个工具变体未接**，仍返回「未知协作工具」。拆分卡片的命令面（`acp_respond_task_split`）是有的 |
-| `codeg-mcp` 的 `serverInfo.name` 为 `codeg-mcp-rust`（Go 为 `codeg-mcp-go`） | 仅日志展示，MCP 客户端不校验 |
+| `codepluse-mcp` 的 `serverInfo.name` 为 `codepluse-mcp-rust`（Go 为 `codepluse-mcp-go`） | 仅日志展示，MCP 客户端不校验 |
 | `fetch_url` 不做 GBK/Big5 解码 | 中文站点（GB2312/GBK）会乱码；Go 用 `golang.org/x/text` 解码，Rust 侧缺对应依赖 |
 | `propose_task_split` 的卡片文案与 Go 一致，但 fan-out 未接 | 确认卡片后不会真的派发 |
 | ACP driver 指纹哈希字节与 Go 不同 | 只影响进程池 key 命名，无跨实现混用 |
 | DSH 补丁 YAML 输出字节与 yaml.v3 不同 | 语义等价，文件名 hash 不同（Go 会写单引号风格的 TOML，Rust 的 toml crate 用双引号；YAML 缩进宽度也不同） |
 | `sessions.json` null→`[]` 归一 | Go 读端两种都接受 |
-| `get_codeg_mcp_service_status.binary_path` | 报告 Rust 二进制（双跑掩码 `<BIN>`） |
+| `get_codepluse_mcp_service_status.binary_path` | 报告 Rust 二进制（双跑掩码 `<BIN>`） |
 | 任务引擎运行时字段在进程级注册表、合并锁为 tokio 异步锁、定时器 15s | 行为等价，重启后由磁盘布局重建 |
 | ACP 有状态命令用 Go 的 fixture 测试验收，未走真实 harness 双跑 | 无状态命令已双跑 |
 | dev 代理不隧道 HMR 的 WebSocket | 前端热更新需浏览器直连 `next dev` |

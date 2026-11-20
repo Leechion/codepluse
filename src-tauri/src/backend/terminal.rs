@@ -1,4 +1,4 @@
-//! 终端会话：`server-go/internal/codeg/terminal.go` + `terminal_windows.go` 的
+//! 终端会话：`server-go/internal/codepluse/terminal.go` + `terminal_windows.go` 的
 //! Rust 移植，ConPTY 走 kernel32 裸 FFI（等价于 Go 侧引用的
 //! UserExistsError/conpty v0.1.4，包括它逐字节→UTF-16 码元的环境块怪癖）。
 //!
@@ -165,7 +165,7 @@ fn terminal_shell(shell: &str) -> Result<String, String> {
 }
 
 fn saved_default_shell(root: &Path) -> Option<String> {
-    let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json")).ok()??;
+    let doc = store_file::read_json(&root.join(".data").join("codepluse-workspace.json")).ok()??;
     doc.get("settings")?
         .get("get_system_terminal_settings")?
         .get("default_shell")?
@@ -174,7 +174,7 @@ fn saved_default_shell(root: &Path) -> Option<String> {
 }
 
 fn system_terminal_settings(root: &Path) -> Result<Value, String> {
-    let path = root.join(".data").join("codeg-workspace.json");
+    let path = root.join(".data").join("codepluse-workspace.json");
     let doc = store_file::read_json(&path)?.unwrap_or_else(|| json!({}));
     let saved = doc
         .get("settings")
@@ -207,7 +207,7 @@ fn update_system_terminal_settings(root: &Path, args: &Value) -> Result<Value, S
         "colorize_command_output": colorize_command_output,
     });
 
-    let path = root.join(".data").join("codeg-workspace.json");
+    let path = root.join(".data").join("codepluse-workspace.json");
     let _lock = store_file::lock(&path)?;
     let mut doc = store_file::read_json(&path)?.unwrap_or_else(|| json!({}));
     let doc_object = doc.as_object_mut().ok_or("工作区设置格式无效")?;

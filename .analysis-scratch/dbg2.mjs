@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 const RE = /(?:import|export)\s+(?:type\s+)?(?:[^'"()]*?\sfrom\s*)?['"]([^'"]+)['"]/g
-const f = 'E:/code/codepluse/codeg-ui/src/zcode/pages/ZCodeWorkspacePage.tsx'
+const f = 'E:/code/codepluse/codepluse-ui/src/zcode/pages/ZCodeWorkspacePage.tsx'
 const src = fs.readFileSync(f, 'utf8')
 const specs = [...src.matchAll(RE)].map((m) => m[1])
 console.log('解析出', specs.length, '条:', specs.slice(0, 12))

@@ -34,9 +34,9 @@ const option = (name, fallback) => {
 const keep = args.includes('--keep');
 const GO_PORT = Number(option('go', '28895'));
 const RUST_PORT = Number(option('rust', '28896'));
-const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codeg.exe');
+const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codepluse.exe');
 const RUST_EXE = path.join(repoRoot, 'src-tauri', 'target', 'debug', 'codepluse.exe');
-if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codeg.exe');
+if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codepluse.exe');
 if (!existsSync(RUST_EXE)) die('缺少 src-tauri/target/debug/codepluse.exe');
 
 function die(message) {
@@ -80,8 +80,8 @@ const seedStore = (project) =>
     assistants: [],
     quickMessages: [],
   });
-writeFileSync(path.join(goTwin.root, '.data', 'codeg-workspace.json'), seedStore(goTwin.project));
-writeFileSync(path.join(rustTwin.root, '.data', 'codeg-workspace.json'), seedStore(rustTwin.project));
+writeFileSync(path.join(goTwin.root, '.data', 'codepluse-workspace.json'), seedStore(goTwin.project));
+writeFileSync(path.join(rustTwin.root, '.data', 'codepluse-workspace.json'), seedStore(rustTwin.project));
 
 // ── local manifest server (plain HTTP, both sides fetch it) ────────────────
 
@@ -187,9 +187,9 @@ await new Promise((resolve) => modelGateway.listen(0, '127.0.0.1', resolve));
 const gatewayUrl = `http://127.0.0.1:${modelGateway.address().port}`;
 
 // Go 侧把 githubAPI 变量重定向到 mock（forge_github.go 专为测试留的 var）。
-const GO_MOCK_EXE = path.join(base, 'serve-codeg-mock.exe');
+const GO_MOCK_EXE = path.join(base, 'serve-codepluse-mock.exe');
 execSync(
-  `go build -ldflags "-X harnesshub/internal/codeg.githubAPI=${githubApi}" -o "${GO_MOCK_EXE}" ./cmd/serve`,
+  `go build -ldflags "-X harnesshub/internal/codepluse.githubAPI=${githubApi}" -o "${GO_MOCK_EXE}" ./cmd/serve`,
   { cwd: path.join(repoRoot, 'server-go'), stdio: 'pipe' },
 );
 
@@ -219,7 +219,7 @@ const spawnServer = (exe, cwd, env, label) => {
   return child;
 };
 spawnServer(GO_MOCK_EXE, goTwin.root, {
-  HARNESS_HUB_CODEG: '1',
+  HARNESS_HUB_CODEPLUSE: '1',
   PORT: String(GO_PORT),
   HARNESS_HUB_ALLOW_ANY_PATH: '1',
   HARNESS_HUB_UPDATE_MANIFEST: manifestUrl,
@@ -329,9 +329,9 @@ const steps = [
   { name: 'remote.github', command: 'folder_forge_remote', body: { folderId: 1 } },
   { name: 'validate.dead-path', command: 'validate_github_token', body: { token: 't', folderId: 1 } },
   { name: 'settings.get', command: 'forge_settings_get', body: { folderId: 1 } },
-  { name: 'settings.set.global', command: 'forge_settings_set', body: { folderId: 0, settings: { pinned: 3, z: { a: 1 } } }, file: 'codeg-forge.json' },
-  { name: 'settings.set.folder', command: 'forge_settings_set', body: { folderId: 1, settings: { q: 9 } }, file: 'codeg-forge.json' },
-  { name: 'settings.set.delete', command: 'forge_settings_set', body: { folderId: 1, settings: null }, file: 'codeg-forge.json' },
+  { name: 'settings.set.global', command: 'forge_settings_set', body: { folderId: 0, settings: { pinned: 3, z: { a: 1 } } }, file: 'codepluse-forge.json' },
+  { name: 'settings.set.folder', command: 'forge_settings_set', body: { folderId: 1, settings: { q: 9 } }, file: 'codepluse-forge.json' },
+  { name: 'settings.set.delete', command: 'forge_settings_set', body: { folderId: 1, settings: null }, file: 'codepluse-forge.json' },
   { name: 'auto.status', command: 'forge_auto_status' },
   { name: 'auto.scan', command: 'forge_auto_scan_now' },
   // ---- GitHub workbench（mock API；先建立账户再走 12 条 REST）----

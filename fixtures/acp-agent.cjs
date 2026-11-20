@@ -89,7 +89,7 @@ readline.createInterface({ input: process.stdin }).on('line', async line => {
     output = '已通过 submit_result 提交';
   }
   if (text === 'permission' || text === 'permission-internal') {
-    const permission = await request('session/request_permission', { sessionId: p.sessionId, toolCall: { toolCallId: 'edit-1', title: text === 'permission-internal' ? 'mcp__codeg-mcp__list_agents' : 'Edit file', kind: 'edit', status: 'pending' },
+    const permission = await request('session/request_permission', { sessionId: p.sessionId, toolCall: { toolCallId: 'edit-1', title: text === 'permission-internal' ? 'mcp__codepluse-mcp__list_agents' : 'Edit file', kind: 'edit', status: 'pending' },
       options: [{ optionId: 'yes', name: 'Allow once', kind: 'allow_once' }, { optionId: 'no', name: 'Reject', kind: 'reject_once' }] });
     output = permission.outcome.outcome === 'selected' ? permission.outcome.optionId : 'cancelled';
   }

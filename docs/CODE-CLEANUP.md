@@ -30,4 +30,4 @@
 - TypeScript 类型检查通过。
 - Next.js 生产构建通过，包含 `/workspace`、`/workspace-classic` 和设置路由。
 - 智能体设置、设置导航、主智能体默认值及工作区相关测试：8 个测试文件，142 项通过。
-- Go `internal/providers`、`internal/codeg`、`cmd/serve` 测试通过。
+- Go `internal/providers`、`internal/codepluse`、`cmd/serve` 测试通过。

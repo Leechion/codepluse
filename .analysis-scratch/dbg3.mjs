@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 const ROOT = fs.realpathSync(process.cwd())
-const SRC = ROOT + '/codeg-ui/src'
+const SRC = ROOT + '/codepluse-ui/src'
 const f = SRC + '/zcode/pages/ZCodeWorkspacePage.tsx'
 const src = fs.readFileSync(f, 'utf8')
 const RE = /(?:^|\n)[ \t]*(?:import|export)(?:\s+type)?[\s\S]{0,400}?from[ \t]*['"]([^'"]+)['"]/g

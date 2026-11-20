@@ -1,7 +1,7 @@
 //! 宠物窗口与交互 —— 补全批次（13 条）。
 //!
-//! 前端调用点见 `codeg-ui/src/lib/pet/api.ts`，返回结构见
-//! `codeg-ui/src/lib/pet/types.ts`。这一组命令在原 Go sidecar 与 Rust 里都从未
+//! 前端调用点见 `codepluse-ui/src/lib/pet/api.ts`，返回结构见
+//! `codepluse-ui/src/lib/pet/types.ts`。这一组命令在原 Go sidecar 与 Rust 里都从未
 //! 实现过，契约只由调用点参数名与类型定义决定。
 //!
 //! ## 架构现实（诚实红线）

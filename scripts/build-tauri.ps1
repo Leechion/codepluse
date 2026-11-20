@@ -29,7 +29,7 @@ function Invoke-Native([scriptblock] $Run) {
 }
 
 $root = Split-Path -Parent $PSScriptRoot
-$ui = Join-Path $root 'codeg-ui'
+$ui = Join-Path $root 'codepluse-ui'
 $tauriDir = Join-Path $root 'src-tauri'
 
 # Rust may live outside the default location (this machine installs it to
@@ -74,7 +74,7 @@ if (!$env:RUSTUP_HOME) {
 
 $cli = Join-Path $ui 'node_modules\@tauri-apps\cli\tauri.js'
 if (!(Test-Path -LiteralPath $cli)) {
-    throw "缺少 @tauri-apps/cli，请先执行：pnpm --dir codeg-ui install"
+    throw "缺少 @tauri-apps/cli，请先执行：pnpm --dir codepluse-ui install"
 }
 
 if (!$SkipFrontend) {
@@ -83,7 +83,7 @@ if (!$SkipFrontend) {
 }
 
 if (!(Test-Path -LiteralPath (Join-Path $ui 'out\workspace.html'))) {
-    throw '缺少 codeg-ui\out\workspace.html，请先构建前端'
+    throw '缺少 codepluse-ui\out\workspace.html，请先构建前端'
 }
 
 & (Join-Path $PSScriptRoot 'make-tauri-icons.ps1')
@@ -93,7 +93,7 @@ if (!(Test-Path -LiteralPath (Join-Path $ui 'out\workspace.html'))) {
 # accepted by Windows path APIs.
 # serde_json rejects a UTF-8 BOM, and PowerShell 5.1's `-Encoding utf8`
 # writes one — the shell would then fall back to its own directory and fail
-# to find codeg-ui\out. Write the manifest without a BOM.
+# to find codepluse-ui\out. Write the manifest without a BOM.
 function Write-WorkspaceManifest([string] $Path) {
     $json = @{ root = ($root -replace '\\', '/') } | ConvertTo-Json
     [IO.File]::WriteAllText($Path, $json, (New-Object System.Text.UTF8Encoding($false)))

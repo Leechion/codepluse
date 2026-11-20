@@ -10,7 +10,7 @@ use serde_json::{json, Map, Value};
 
 use crate::backend::store_file;
 
-const FILE: &str = "codeg-workspace.json";
+const FILE: &str = "codepluse-workspace.json";
 
 pub fn owns(command: &str) -> bool {
     matches!(

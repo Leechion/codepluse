@@ -1351,7 +1351,7 @@ pub fn launch_fn(
 /// the codex config/auth text for one agent, read from `Store.Agents`.
 fn overlay_for(root: &Path, agent: &Agent) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
-    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
     else {
         return out;
     };
@@ -1374,7 +1374,7 @@ fn overlay_for(root: &Path, agent: &Agent) -> BTreeMap<String, String> {
 }
 
 fn overlay_codex_toml(root: &Path, agent: &Agent) -> String {
-    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
     else {
         return String::new();
     };
@@ -1387,7 +1387,7 @@ fn overlay_codex_toml(root: &Path, agent: &Agent) -> String {
 }
 
 fn overlay_codex_auth(root: &Path, agent: &Agent) -> String {
-    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
     else {
         return String::new();
     };

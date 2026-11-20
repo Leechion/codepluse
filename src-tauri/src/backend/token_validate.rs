@@ -9,7 +9,7 @@
 //! * `validate_cnb_token` / `validate_gitea_token` / `validate_gitlab_token` ——
 //!   拿令牌去各自主机的 "who am I" 接口做真实校验（短超时）。
 //!
-//! 契约来源：前端 `codeg-ui/src/lib/api.ts`（参数 `serverUrl` / `token`）与
+//! 契约来源：前端 `codepluse-ui/src/lib/api.ts`（参数 `serverUrl` / `token`）与
 //! `types.ts` 的 `GitHubTokenValidation`：
 //! `{ success: boolean, username: string|null, scopes: string[], avatar_url: string|null, message: string|null }`。
 //!

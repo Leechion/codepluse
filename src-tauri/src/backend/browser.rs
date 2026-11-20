@@ -1,4 +1,4 @@
-//! Browser operations, ported from `server-go/internal/codeg/browser.go` +
+//! Browser operations, ported from `server-go/internal/codepluse/browser.go` +
 //! `browser_cdp.go`.
 //!
 //! A minimal Chrome DevTools Protocol driver over WebSocket: launch (or
@@ -224,9 +224,9 @@ async fn run(root: &Path, command: &str, a: &Value) -> Result<Outcome, String> {
             browser.ensure_agent_world(&mut tab, &bundle).await?;
             let max_chars = int_of(&a["maxChars"]);
             let expression = if max_chars > 0 {
-                format!("JSON.stringify(__codegAgent.snapshot({{maxChars:{max_chars}}})) || null")
+                format!("JSON.stringify(__codepluseAgent.snapshot({{maxChars:{max_chars}}})) || null")
             } else {
-                "JSON.stringify(__codegAgent.snapshot({})) || null".to_string()
+                "JSON.stringify(__codepluseAgent.snapshot({})) || null".to_string()
             };
             let result = browser
                 .call(
@@ -254,7 +254,7 @@ async fn run(root: &Path, command: &str, a: &Value) -> Result<Outcome, String> {
             let payload = serde_json::to_string(&crate::backend::goformat::canon(&a["request"]))
                 .unwrap_or_default();
             let expression = format!(
-                "JSON.stringify(__codegAgent.act({payload}) || {{ok:false,error:'no result'}})"
+                "JSON.stringify(__codepluseAgent.act({payload}) || {{ok:false,error:'no result'}})"
             );
             let result = browser
                 .call(
@@ -347,7 +347,7 @@ fn parse_stringified(result: &Value) -> Value {
 
 // ----------------------------- agent bundle -----------------------------
 
-const AGENT_BUNDLE_REL: &str = "codeg-ui/browser-agent/agent.bundle.js";
+const AGENT_BUNDLE_REL: &str = "codepluse-ui/browser-agent/agent.bundle.js";
 
 static BUNDLE: Mutex<Option<String>> = Mutex::new(None);
 
@@ -359,7 +359,7 @@ fn agent_bundle(root: &Path) -> Result<String, String> {
     let path = root.join(AGENT_BUNDLE_REL);
     let data = std::fs::read_to_string(&path).map_err(|err| {
         format!(
-            "浏览器 agent 脚本未构建（codeg-ui/browser-agent/agent.bundle.js）：open {}: {}",
+            "浏览器 agent 脚本未构建（codepluse-ui/browser-agent/agent.bundle.js）：open {}: {}",
             path.display(),
             err
         )

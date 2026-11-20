@@ -12,22 +12,22 @@
  底部 N 个会话
 ```
 
-而当前 `/workspace`（[ZCodeWorkspacePage.tsx](file:///e:/code/codepluse/codeg-ui/src/zcode/pages/ZCodeWorkspacePage.tsx)）只渲染两栏：ZCodeWorkPanel + ConversationDetailPanel，**缺少最左侧的会话侧栏**。上一次修复只在工作面板里加了「工作区」切换和「设置」按钮，没有解决"界面不完整"的本意。
+而当前 `/workspace`（[ZCodeWorkspacePage.tsx](file:///e:/code/codepluse/codepluse-ui/src/zcode/pages/ZCodeWorkspacePage.tsx)）只渲染两栏：ZCodeWorkPanel + ConversationDetailPanel，**缺少最左侧的会话侧栏**。上一次修复只在工作面板里加了「工作区」切换和「设置」按钮，没有解决"界面不完整"的本意。
 
-仓库中已有完整版 codeg 经典侧栏组件 [sidebar.tsx](file:///e:/code/codepluse/codeg-ui/src/components/layout/sidebar.tsx)（导出 `Sidebar()`，无 props，当前未被任何页面挂载），其全部 Provider 依赖已在 [workspace/layout.tsx](file:///e:/code/codepluse/codeg-ui/src/app/workspace/layout.tsx) 挂好。点击侧栏会话 → tab-context → ConversationDetailPanel 切换对话的链路是现成的。
+仓库中已有完整版 codepluse 经典侧栏组件 [sidebar.tsx](file:///e:/code/codepluse/codepluse-ui/src/components/layout/sidebar.tsx)（导出 `Sidebar()`，无 props，当前未被任何页面挂载），其全部 Provider 依赖已在 [workspace/layout.tsx](file:///e:/code/codepluse/codepluse-ui/src/app/workspace/layout.tsx) 挂好。点击侧栏会话 → tab-context → ConversationDetailPanel 切换对话的链路是现成的。
 
 不采用 `src/zcode/app-shell/WorkspaceShellLayout.tsx`（ZCode 全套壳）：它依赖 ZCode 自己的 store 生态（TabStoreProvider 等），与当前混合页不兼容。
 
 ## 改动
 
-### 1. [zcode-workspace.css](file:///e:/code/codepluse/codeg-ui/src/app/zcode-workspace.css)
+### 1. [zcode-workspace.css](file:///e:/code/codepluse/codepluse-ui/src/app/zcode-workspace.css)
 
 - `.zw-shell`（L150-159）追加 `position: relative;`（供浮动 dock 定位）。
 - 新增 `.zw-side`（左列容器：flex 列、`background: var(--sidebar)`、`border-right: 1px solid var(--sidebar-border)`，宽度由 inline style 注入）。
 - 新增 `.zw-float-dock`（absolute 左上角，`top:9px; left:10px; z-index:6`，flex 横排，内部 `.zw-float-toggle` 改 `position:static`）+ `.zw-float-toggle--icon`（28px 纯图标变体）。
 - **注意**：Sidebar 不能包进任何 `.zw-root` 容器（会重映射 shadcn token）；`.zw-shell` 本身无 zw-root 类，安全。
 
-### 2. [ZCodeWorkspacePage.tsx](file:///e:/code/codepluse/codeg-ui/src/zcode/pages/ZCodeWorkspacePage.tsx)
+### 2. [ZCodeWorkspacePage.tsx](file:///e:/code/codepluse/codepluse-ui/src/zcode/pages/ZCodeWorkspacePage.tsx)
 
 - 导入：`Sidebar`（`@/components/layout/sidebar`）、`useSidebarContext`（`@/contexts/sidebar-context`）、lucide 图标 `PanelLeft / PanelLeftOpen`。
 - 组件体解构：`const { isOpen: sidebarOpen, toggle: toggleSidebar, width } = useSidebarContext()`。
@@ -67,7 +67,7 @@
 ## 验证
 
 ```powershell
-pnpm --dir codeg-ui build
+pnpm --dir codepluse-ui build
 ```
 
 浏览器打开 http://127.0.0.1:8840/workspace（后台 serve-codepluse.exe 正在运行）：

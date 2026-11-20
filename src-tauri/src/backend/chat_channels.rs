@@ -1,6 +1,6 @@
 //! 聊天渠道与账号令牌 —— 补全批次。
 //!
-//! 前端（`codeg-ui/src/lib/api.ts`）已经在调用这 17 条命令，但 Rust 与已删除的
+//! 前端（`codepluse-ui/src/lib/api.ts`）已经在调用这 17 条命令，但 Rust 与已删除的
 //! Go sidecar 都没有实现过它们（在 `server-go` 只读副本里搜不到命令字面量），
 //! 所以契约只由调用点（`api.ts` 的参数名）与 `types.ts` 的返回结构决定：
 //!

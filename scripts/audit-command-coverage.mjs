@@ -3,7 +3,7 @@ import path from "node:path";
 import process from "node:process";
 
 const root = path.resolve(import.meta.dirname, "..");
-const uiRoot = path.join(root, "codeg-ui", "src");
+const uiRoot = path.join(root, "codepluse-ui", "src");
 const backendRoot = path.join(root, "src-tauri", "src");
 
 function walk(dir, accept) {

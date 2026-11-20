@@ -2,13 +2,13 @@
 
 ## Context
 
-`StatusBar`（[status-bar.tsx](file:///e:/code/codepluse/codeg-ui/src/components/layout/status-bar.tsx)）从未被渲染（无 props，h-8 底栏）。内容：左侧 **QuickActionsDropdown**（快捷操作菜单，内含「打开设置」→ `openSettingsWindow`，[quick-actions-dropdown.tsx](file:///e:/code/codepluse/codeg-ui/src/components/layout/quick-actions-dropdown.tsx) L105-111）+ StatusBarStats（会话统计）；右侧 更新/任务/命令/计算机/MCP/告警 指示器。所需 Provider（Update/AppWorkspace/WorkbenchRoute 等）已在 workspace/layout.tsx 挂齐；样式复用 globals.css 的 `ws-surface-muted`/`ws-chrome-border`。
+`StatusBar`（[status-bar.tsx](file:///e:/code/codepluse/codepluse-ui/src/components/layout/status-bar.tsx)）从未被渲染（无 props，h-8 底栏）。内容：左侧 **QuickActionsDropdown**（快捷操作菜单，内含「打开设置」→ `openSettingsWindow`，[quick-actions-dropdown.tsx](file:///e:/code/codepluse/codepluse-ui/src/components/layout/quick-actions-dropdown.tsx) L105-111）+ StatusBarStats（会话统计）；右侧 更新/任务/命令/计算机/MCP/告警 指示器。所需 Provider（Update/AppWorkspace/WorkbenchRoute 等）已在 workspace/layout.tsx 挂齐；样式复用 globals.css 的 `ws-surface-muted`/`ws-chrome-border`。
 
 上游组合（.data/upstream-workspace-layout.tsx L1447）：`<StatusBar />` 位于整个 shell 之下、**窗口级全宽**（含侧栏下方）。
 
 ## 改动
 
-### 1. [ZCodeWorkspacePage.tsx](file:///e:/code/codepluse/codeg-ui/src/zcode/pages/ZCodeWorkspacePage.tsx)
+### 1. [ZCodeWorkspacePage.tsx](file:///e:/code/codepluse/codepluse-ui/src/zcode/pages/ZCodeWorkspacePage.tsx)
 
 - 导入 `StatusBar`（`@/components/layout/status-bar`）。
 - 结构：`.zw-shell` 内现有全部行内容（侧栏/divider/工作处理/chat-col/route + dock）包进 `<div className="zw-body">`，其后追加 `<StatusBar />`：
@@ -24,7 +24,7 @@
 
 - dock 保持 absolute 于 `.zw-shell`（坐标不变）。
 
-### 2. [zcode-workspace.css](file:///e:/code/codepluse/codeg-ui/src/app/zcode-workspace.css)
+### 2. [zcode-workspace.css](file:///e:/code/codepluse/codepluse-ui/src/app/zcode-workspace.css)
 
 - `.zw-shell` 改为纵向总容器：`flex-direction: column;`（其下 .zw-body 承担原横向行布局）。
 - 新增 `.zw-body { display:flex; flex:1 1 0; min-width:0; min-height:0; width:100%; overflow:hidden; }`。
@@ -33,7 +33,7 @@
 ## 验证
 
 ```powershell
-pnpm --dir codeg-ui build
+pnpm --dir codepluse-ui build
 ```
 
 浏览器（Ctrl+F5）+ 桌面截图：

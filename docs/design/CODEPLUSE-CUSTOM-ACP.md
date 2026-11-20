@@ -4,7 +4,7 @@
 
 ## 对照来源
 
-同级 `I:\NEW\code\codeg` 的 `src-tauri/src/acp/remote_registry.rs`、`acp/custom_registry.rs`、`commands/custom_agents.rs`。保留原前端的 camelCase 数据契约、`custom:<registryId>` 标识及原有界面。
+同级 `I:\NEW\code\codepluse` 的 `src-tauri/src/acp/remote_registry.rs`、`acp/custom_registry.rs`、`commands/custom_agents.rs`。保留原前端的 camelCase 数据契约、`custom:<registryId>` 标识及原有界面。
 
 ## 已接通
 

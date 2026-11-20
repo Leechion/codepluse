@@ -233,7 +233,7 @@ impl Emitter for NoopEmitter {
     fn emit(&self, _channel: &str, _payload: &Value) {}
 }
 
-/// Injection hooks the codeg layer installs (Go's `OnUpdate`, `ExtraMCP`,
+/// Injection hooks the codepluse layer installs (Go's `OnUpdate`, `ExtraMCP`,
 /// `AllowInternalTool` fields).
 pub trait RuntimeHooks: Send + Sync {
     fn on_update(&self, session_id: &str, update: &Value) {}
@@ -3683,7 +3683,7 @@ mod tests {
     struct AllowListHook;
     impl RuntimeHooks for AllowListHook {
         fn allow_internal_tool(&self, _session_id: &str, tool_call: &Value) -> bool {
-            tool_call.get("title").and_then(Value::as_str) == Some("mcp__codeg-mcp__list_agents")
+            tool_call.get("title").and_then(Value::as_str) == Some("mcp__codepluse-mcp__list_agents")
         }
     }
 

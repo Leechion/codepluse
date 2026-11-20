@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 # the user with nothing runnable.
 
 $root = Split-Path -Parent $PSScriptRoot
-$uiRoot = Join-Path $root 'codeg-ui'
+$uiRoot = Join-Path $root 'codepluse-ui'
 $tauriExe = Join-Path $root 'src-tauri\target\release\codepluse.exe'
 $webviewExe = Join-Path $root 'dist\codepluse\codepluse.exe'
 $desktopCandidates = @(
@@ -92,7 +92,7 @@ try {
     Write-Warning "[update] 构建失败：$($_.Exception.Message)"
     Write-Warning '[update] 用现有版本恢复运行…'
     foreach ($port in $portsToStart) {
-        $env:HARNESS_HUB_CODEG = '1'
+        $env:HARNESS_HUB_CODEPLUSE = '1'
         $env:CODEPLUSE_PORT = "$port"
         $env:CODEPLUSE_HEADLESS = '1'
         $env:HOST = '127.0.0.1'
@@ -113,11 +113,11 @@ try {
 }
 
 foreach ($port in $portsToStart) {
-    $envNames = @('HARNESS_HUB_CODEG', 'CODEPLUSE_PORT', 'CODEPLUSE_HEADLESS', 'HOST', 'HARNESS_HUB_WARM', 'HARNESS_HUB_ALLOW_ANY_PATH')
+    $envNames = @('HARNESS_HUB_CODEPLUSE', 'CODEPLUSE_PORT', 'CODEPLUSE_HEADLESS', 'HOST', 'HARNESS_HUB_WARM', 'HARNESS_HUB_ALLOW_ANY_PATH')
     $oldValues = @{}
     foreach ($name in $envNames) { $oldValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
     try {
-        $env:HARNESS_HUB_CODEG = '1'
+        $env:HARNESS_HUB_CODEPLUSE = '1'
         $env:CODEPLUSE_PORT = "$port"
         $env:CODEPLUSE_HEADLESS = '1'
         $env:HOST = '127.0.0.1'

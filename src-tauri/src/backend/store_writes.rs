@@ -1,4 +1,4 @@
-//! Write commands over `codeg-workspace.json`, ported from Go's
+//! Write commands over `codepluse-workspace.json`, ported from Go's
 //! store-locked handlers (`command_sidebar.go`, `command_workspace.go`,
 //! `canvas.go`, `git_settings.go`).
 //!
@@ -32,7 +32,7 @@ use crate::backend::git;
 use crate::backend::goformat;
 use crate::backend::store_file;
 
-const FILE: &str = "codeg-workspace.json";
+const FILE: &str = "codepluse-workspace.json";
 
 /// Result of one command: the HTTP answer plus side effects for the caller.
 pub struct Outcome {

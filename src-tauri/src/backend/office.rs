@@ -1,9 +1,9 @@
-//! Office tooling surface, ported from `server-go/internal/codeg/office.go`
+//! Office tooling surface, ported from `server-go/internal/codepluse/office.go`
 //! (14 commands).
 //!
-//! Nothing here touches `codeg-workspace.json`: detection looks at PATH and two
+//! Nothing here touches `codepluse-workspace.json`: detection looks at PATH and two
 //! home-directory locations, and the skill list is a directory scan of
-//! `codeg-assets/` plus `.data/office-skills/`. That makes the whole file safe
+//! `codepluse-assets/` plus `.data/office-skills/`. That makes the whole file safe
 //! to move command by command.
 //!
 //! The OfficeCLI binary is not distributed with this repository, so `install`
@@ -88,7 +88,7 @@ fn detect() -> Value {
 
 fn skill_dirs(root: &Path) -> [PathBuf; 2] {
     [
-        root.join("codeg-assets"),
+        root.join("codepluse-assets"),
         root.join(".data").join("office-skills"),
     ]
 }
@@ -160,9 +160,9 @@ fn list_skills(root: &Path) -> Vec<Value> {
                 "category": category,
                 "icon": icon_for(category),
                 "sortOrder": skills.len(),
-                // Only the copy shipped in `codeg-assets` is centrally provided;
+                // Only the copy shipped in `codepluse-assets` is centrally provided;
                 // one that exists solely in the user's directory is theirs.
-                "installedCentrally": source == "codeg-assets",
+                "installedCentrally": source == "codepluse-assets",
                 "displayName": { "en": name },
                 "description": { "en": "" },
             }));
@@ -177,7 +177,7 @@ fn list_skills(root: &Path) -> Vec<Value> {
 /// Nothing is overwritten: a file already in the target store stays as it is,
 /// so a sync can be repeated without losing a local edit.
 fn sync_skills(root: &Path) -> Value {
-    let assets = root.join("codeg-assets");
+    let assets = root.join("codepluse-assets");
     let target_dir = root.join(".data").join("office-skills");
     let mut synced = 0u32;
     let mut errors: Vec<String> = Vec::new();
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn skills_are_listed_from_both_directories_without_duplicates() {
         let root = temp_root("skills");
-        let assets = root.join("codeg-assets");
+        let assets = root.join("codepluse-assets");
         let user = root.join(".data").join("office-skills");
         fs::create_dir_all(&assets).unwrap();
         fs::create_dir_all(&user).unwrap();
@@ -315,7 +315,7 @@ mod tests {
         let skills = out.as_array().expect("list_skills must be an array");
         assert_eq!(skills.len(), 2, "{out}");
         assert_eq!(skills[0]["id"], "office-skill-docx");
-        assert_eq!(skills[0]["source"], "codeg-assets");
+        assert_eq!(skills[0]["source"], "codepluse-assets");
         // Every field `OfficecliSkill` declares is present and of the right sort.
         assert_eq!(skills[0]["category"], "documents");
         assert_eq!(skills[0]["icon"], "FileText");
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn sync_skills_reports_counts_and_leaves_existing_copies_alone() {
         let root = temp_root("sync");
-        let assets = root.join("codeg-assets");
+        let assets = root.join("codepluse-assets");
         let user = root.join(".data").join("office-skills");
         fs::create_dir_all(&assets).unwrap();
         fs::write(assets.join("docx.md"), "# docx").unwrap();
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn skill_content_reads_the_first_match_and_validates_ids() {
         let root = temp_root("content");
-        let assets = root.join("codeg-assets");
+        let assets = root.join("codepluse-assets");
         fs::create_dir_all(&assets).unwrap();
         fs::write(assets.join("docx.md"), "# docx").unwrap();
 

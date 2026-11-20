@@ -1,7 +1,7 @@
-//! Work tasks, ported from `server-go/internal/codeg/worktask.go` +
+//! Work tasks, ported from `server-go/internal/codepluse/worktask.go` +
 //! `worktask_run.go`.
 //!
-//! Rust owns `.data/codeg-worktasks.json` (the `taskStore` document): every
+//! Rust owns `.data/codepluse-worktasks.json` (the `taskStore` document): every
 //! command here re-reads the file, mutates a typed mirror of Go's structs and
 //! writes it back with Go's `json.Marshal` byte layout — struct fields in
 //! declaration order (`goformat::marshal_preserve`, no key sorting), map
@@ -35,7 +35,7 @@ use serde_json::{json, Value};
 use crate::backend::goformat;
 use crate::backend::store_file;
 
-const FILE: &str = "codeg-worktasks.json";
+const FILE: &str = "codepluse-worktasks.json";
 
 /// Serialises every command against one shared board, mirroring Go's
 /// `taskStore.mu` (a load → mutate → write cycle must not interleave).
@@ -509,10 +509,10 @@ fn settings_for(doc: &TaskDoc, folder_id: i64) -> WorkTaskFolderSettings {
     }
 }
 
-/// The workspace document (`codeg-workspace.json`) is still Go-owned, but it
+/// The workspace document (`codepluse-workspace.json`) is still Go-owned, but it
 /// re-reads from disk on every request, so the file is authoritative here too.
 fn folder_exists(root: &Path, folder_id: i64) -> bool {
-    let path = root.join(".data").join("codeg-workspace.json");
+    let path = root.join(".data").join("codepluse-workspace.json");
     let Ok(Some(doc)) = store_file::read_json(&path) else {
         return false;
     };
@@ -523,7 +523,7 @@ fn folder_exists(root: &Path, folder_id: i64) -> bool {
 }
 
 fn folder_path(root: &Path, folder_id: i64) -> Option<String> {
-    let path = root.join(".data").join("codeg-workspace.json");
+    let path = root.join(".data").join("codepluse-workspace.json");
     let Ok(Some(doc)) = store_file::read_json(&path) else {
         return None;
     };
@@ -1598,7 +1598,7 @@ mod tests {
             .collect();
         let doc = json!({ "next": 1, "folders": folders });
         store_file::write_bytes(
-            &root.join(".data").join("codeg-workspace.json"),
+            &root.join(".data").join("codepluse-workspace.json"),
             &serde_json::to_vec(&doc).unwrap(),
         )
         .unwrap();

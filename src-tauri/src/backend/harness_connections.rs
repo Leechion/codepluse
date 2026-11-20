@@ -1,10 +1,10 @@
 //! Harness connections: the settings-page "connect this harness to a
 //! provider" surface, ported from
-//! `server-go/internal/codeg/harness_connections.go` + the four
+//! `server-go/internal/codepluse/harness_connections.go` + the four
 //! `experts/science_*_install_statuses` companions live in experts.rs.
 //!
 //! Ported here (3): `codepluse_connection_catalog`, `codepluse_connection_save`
-//! and `get_codeg_mcp_service_status`.
+//! and `get_codepluse_mcp_service_status`.
 //!
 //! Go keeps per-harness connection defaults in `Store.Settings` under
 //! `harness_connection:<wire>` and mirrors them into the in-memory Hub. The
@@ -32,7 +32,7 @@ pub fn owns(command: &str) -> bool {
         command,
         "codepluse_connection_catalog"
             | "codepluse_connection_save"
-            | "get_codeg_mcp_service_status"
+            | "get_codepluse_mcp_service_status"
     )
 }
 
@@ -58,7 +58,7 @@ fn run(
     match command {
         "codepluse_connection_catalog" => connection_catalog(root),
         "codepluse_connection_save" => connection_save(root, args, events),
-        "get_codeg_mcp_service_status" => mcp_service_status(),
+        "get_codepluse_mcp_service_status" => mcp_service_status(),
         _ => Err(format!("Go 移植尚未实现此接口：{command}")),
     }
 }
@@ -195,7 +195,7 @@ fn connection_save(
     Ok(cfg)
 }
 
-/// Go `get_codeg_mcp_service_status`：companion/会话/活跃委托计数。
+/// Go `get_codepluse_mcp_service_status`：companion/会话/活跃委托计数。
 fn mcp_service_status() -> Result<Value, String> {
     let (companions, sessions, active, base) = match layer_if_ready() {
         Some(layer) => {
@@ -207,7 +207,7 @@ fn mcp_service_status() -> Result<Value, String> {
     Ok(json!({
         "state": "running",
         "listening": true,
-        "socket_path": format!("{base}/api/codeg_mcp"),
+        "socket_path": format!("{base}/api/codepluse_mcp"),
         "binary_path": std::env::current_exe()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default(),
@@ -223,7 +223,7 @@ fn mcp_service_status() -> Result<Value, String> {
 }
 
 fn load_settings(root: &Path) -> Value {
-    store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
         .ok()
         .flatten()
         .and_then(|doc| doc.get("settings").cloned())
@@ -232,7 +232,7 @@ fn load_settings(root: &Path) -> Value {
 
 /// 写 `settings[key]` 并整文档落盘（Go 的 saveLocked 语义）。
 fn set_store_setting(root: &Path, key: &str, value: &Value) -> Result<(), String> {
-    let path = root.join(".data").join("codeg-workspace.json");
+    let path = root.join(".data").join("codepluse-workspace.json");
     let mut doc = match store_file::read_json(&path)? {
         Some(doc) if doc.is_object() => doc,
         _ => json!({"next": 1}),
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn mcp_status_shape() {
         let root = temp_root("mcp");
-        let (result, _) = call(&root, "get_codeg_mcp_service_status", json!({}));
+        let (result, _) = call(&root, "get_codepluse_mcp_service_status", json!({}));
         let value = result.unwrap();
         assert_eq!(value["state"], "running");
         assert_eq!(value["depth_limit"], 4);

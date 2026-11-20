@@ -213,7 +213,7 @@ test("independent agent communicates with a real stdio MCP process and feeds its
       assert.ok(
         body.tools.some(
           (tool) =>
-            tool.function.name === "mcp__codeg-mcp__check_user_feedback",
+            tool.function.name === "mcp__codepluse-mcp__check_user_feedback",
         ),
       );
       sse(res, {
@@ -222,7 +222,7 @@ test("independent agent communicates with a real stdio MCP process and feeds its
             index: 0,
             id: "team-1",
             function: {
-              name: "mcp__codeg-mcp__check_user_feedback",
+              name: "mcp__codepluse-mcp__check_user_feedback",
               arguments: "{}",
             },
           },
@@ -237,7 +237,7 @@ test("independent agent communicates with a real stdio MCP process and feeds its
     cwd: app.dir,
     mcpServers: [
       {
-        name: "codeg-mcp",
+        name: "codepluse-mcp",
         command: process.execPath,
         args: [fileURLToPath(new URL("./fixtures/mcp.mjs", import.meta.url))],
         env: [],

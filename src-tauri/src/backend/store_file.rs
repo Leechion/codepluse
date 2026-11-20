@@ -90,9 +90,7 @@ pub fn lock(path: &Path) -> Result<WriteLock, String> {
     }
 }
 
-/// Reads JSON, returning `None` when the file does not exist. Transient parse
-/// failures are retried: the other implementation may be replacing the file.
-pub fn read_json(path: &Path) -> Result<Option<Value>, String> {
+fn read_json_inner(path: &Path) -> Result<Option<Value>, String> {
     let mut last_error = String::new();
     for attempt in 0..READ_ATTEMPTS {
         match fs::read(path) {
@@ -117,6 +115,27 @@ pub fn read_json(path: &Path) -> Result<Option<Value>, String> {
         }
     }
     Err(last_error)
+}
+
+/// Reads JSON, returning `None` when the file does not exist. Transient parse
+/// failures are retried: the other implementation may be replacing the file.
+/// If a `codepluse-*` file does not exist, automatically falls back to `codeg-*`.
+pub fn read_json(path: &Path) -> Result<Option<Value>, String> {
+    match read_json_inner(path) {
+        Ok(Some(v)) => Ok(Some(v)),
+        Ok(None) => {
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            if file_name.starts_with("codepluse-") {
+                let fallback_name = file_name.replace("codepluse-", "codeg-");
+                let fallback_path = path.with_file_name(fallback_name);
+                if fallback_path.is_file() {
+                    return read_json_inner(&fallback_path);
+                }
+            }
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Replaces the file atomically: temp file in the same directory, fsync, rename.

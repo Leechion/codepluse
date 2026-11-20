@@ -1,6 +1,6 @@
 //! Harness instances: named copies of a built-in tool (Claude 1号/2号…) that
 //! pin their own provider/model, ported from
-//! `server-go/internal/codeg/instances.go` + `main_bot.go`.
+//! `server-go/internal/codepluse/instances.go` + `main_bot.go`.
 //!
 //! Ported (5): `codepluse_instance_list/create/update/delete` and
 //! `update_main_bot_settings`.
@@ -467,7 +467,7 @@ fn resolve_instance_id(root: &Path, args: &Value) -> String {
 
 /// Go：`s.store.Settings["get_main_bot_settings"] = cfg` + saveLocked。
 fn write_main_bot_setting(root: &Path, cfg: &Value) -> Result<(), String> {
-    let path = root.join(".data").join("codeg-workspace.json");
+    let path = root.join(".data").join("codepluse-workspace.json");
     let mut doc = match store_file::read_json(&path)? {
         Some(doc) if doc.is_object() => doc,
         _ => json!({"next": 1}),
@@ -573,7 +573,7 @@ mod tests {
         assert!(events
             .iter()
             .any(|(channel, _)| channel == "main-bot://changed"));
-        let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+        let doc = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
             .unwrap()
             .unwrap();
         assert_eq!(

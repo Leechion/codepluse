@@ -1,5 +1,5 @@
-//! The connection layer, ported from Go's `codeg/connections.go` (+ the
-//! attachment helpers in `codeg/attachments.go`, `bindConversation` from
+//! The connection layer, ported from Go's `codepluse/connections.go` (+ the
+//! attachment helpers in `codepluse/attachments.go`, `bindConversation` from
 //! `delegation_recovery.go`, `extraMCP` from `delegation.go` and the
 //! context-string builders from `delegation_recovery.go`/`split.go`).
 //!
@@ -42,7 +42,7 @@ pub type EmitSink = Arc<dyn Fn(&str, &Value) + Send + Sync>;
 
 pub struct Layer {
     pub root: PathBuf,
-    /// The Go sidecar's base URL — the codeg-mcp companion endpoint the
+    /// The Go sidecar's base URL — the codepluse-mcp companion endpoint the
     /// extraMCP hook hands to adapter processes (still Go-served while the
     /// companion domain is unported).
     pub upstream_base: String,
@@ -138,11 +138,11 @@ impl Connection {
 
 /// Runtime hooks bound to the layer (Go wiring: `rt.OnUpdate = s.nativeUpdate`
 /// etc.). The layer is stored weakly: the runtime lives inside it.
-struct CodegHooks {
+struct CodepluseHooks {
     layer: Weak<Layer>,
 }
 
-impl RuntimeHooks for CodegHooks {
+impl RuntimeHooks for CodepluseHooks {
     fn on_update(&self, _session_id: &str, update: &Value) {
         if let Some(layer) = self.layer.upgrade() {
             // The runtime hands us the session record id (= runtime id view);
@@ -188,11 +188,11 @@ fn state_file(root: &Path) -> Option<PathBuf> {
     {
         return None;
     }
-    let name = if std::env::var("HARNESS_HUB_CODEG")
+    let name = if std::env::var("HARNESS_HUB_CODEPLUSE")
         .map(|v| v == "1")
         .unwrap_or(false)
     {
-        "codeg-sessions.json"
+        "codepluse-sessions.json"
     } else {
         "sessions.json"
     };
@@ -241,7 +241,7 @@ pub fn init_layer(root: PathBuf, base_url: String, sink: EmitSink) -> Arc<Layer>
         emitter: Arc::new(SinkEmitter {
             sink: layer.sink.clone(),
         }),
-        hooks: Arc::new(CodegHooks {
+        hooks: Arc::new(CodepluseHooks {
             layer: Arc::downgrade(&layer),
         }),
     });
@@ -854,7 +854,7 @@ impl Layer {
         out
     }
 
-    /// Go `extraMCP` (delegation.go:42): the codeg-mcp companion server entry
+    /// Go `extraMCP` (delegation.go:42): the codepluse-mcp companion server entry
     /// handed to the adapter, keyed by a fresh caller token.
     fn extra_mcp(&self, agent: &Agent, o: &Options, runtime_id: &str) -> Vec<Value> {
         // A custom agent without MCP support carries no companion.
@@ -903,9 +903,9 @@ impl Layer {
             .map(|c| c.token.clone())
             .unwrap_or_default();
         vec![json!({
-            "name": "codeg-mcp",
+            "name": "codepluse-mcp",
             "command": exe,
-            "args": ["mcp-codeg", format!("{}/api/codeg_mcp", self.upstream_base), token],
+            "args": ["mcp-codepluse", format!("{}/api/codepluse_mcp", self.upstream_base), token],
             "env": [],
         })]
     }
@@ -917,7 +917,7 @@ impl Layer {
             return;
         }
         let (root, depth, folder) = {
-            let doc = store_file::read_json(&self.root.join(".data").join("codeg-workspace.json"))
+            let doc = store_file::read_json(&self.root.join(".data").join("codepluse-workspace.json"))
                 .ok()
                 .flatten()
                 .unwrap_or(Value::Null);
@@ -1283,7 +1283,7 @@ impl Layer {
         if level == "workspace" || level == "full" {
             permission = "workspace".into();
         }
-        let mut key = format!("codeg:{}", goformat::hex_id());
+        let mut key = format!("codepluse:{}", goformat::hex_id());
         let mut model = String::new();
         if let Some(config) = args.get("preferredConfigValues") {
             model = text(config.get("model"));
@@ -1322,7 +1322,7 @@ impl Layer {
         let mut conversation_id = 0i64;
         if !previous.is_empty() {
             let doc =
-                store_file::read_json(&self.root.join(".data").join("codeg-workspace.json"))
+                store_file::read_json(&self.root.join(".data").join("codepluse-workspace.json"))
                     .ok()
                     .flatten()
                     .unwrap_or(Value::Null);
@@ -1619,7 +1619,7 @@ impl Layer {
         }
     }
 
-    /// Go `get_codeg_mcp_service_status` 的计数面：(companions, sessions, active)。
+    /// Go `get_codepluse_mcp_service_status` 的计数面：(companions, sessions, active)。
     pub fn service_counts(&self) -> (usize, usize, usize) {
         let state = self.state.lock().unwrap();
         let companions = state.callers.len();
@@ -2225,7 +2225,7 @@ impl Layer {
         };
         // Native dialogue prefix (connections.go:657): the model chooses tools
         // and sub-agents itself.
-        let prefix = "本工作台支持 codeg-mcp 协作工具。需要其他执行端时使用 delegate_to_agent 自主分工，并用 get_delegation_status 收集真实结果后汇报；用户点名执行端时遵从其选择。任务可拆成多个各自独立的子任务时，优先用 propose_task_split 一次性提案（界面卡片让用户确认或改选执行端），确认后系统自动派发，你无需也不得重复派发；无需用户挑选的单独立项仍用 delegate_to_agent。子任务必须自包含并继承当前权限边界。抓取网页时使用 codeg-mcp 的 fetch_url 工具：harness 自带的网页工具（如 Claude Code 的 WebFetch）会先向域名安全校验服务查询，该服务不可达时会直接失败并提示 “Unable to verify if domain … is safe to fetch”，此时用 fetch_url 抓取同一地址。\n\n".to_string()
+        let prefix = "本工作台支持 codepluse-mcp 协作工具。需要其他执行端时使用 delegate_to_agent 自主分工，并用 get_delegation_status 收集真实结果后汇报；用户点名执行端时遵从其选择。任务可拆成多个各自独立的子任务时，优先用 propose_task_split 一次性提案（界面卡片让用户确认或改选执行端），确认后系统自动派发，你无需也不得重复派发；无需用户挑选的单独立项仍用 delegate_to_agent。子任务必须自包含并继承当前权限边界。抓取网页时使用 codepluse-mcp 的 fetch_url 工具：harness 自带的网页工具（如 Claude Code 的 WebFetch）会先向域名安全校验服务查询，该服务不可达时会直接失败并提示 “Unable to verify if domain … is safe to fetch”，此时用 fetch_url 抓取同一地址。\n\n".to_string()
             + &self.delegation_context(&cid)
             + &self.split_context(&cid);
         let mut wire_blocks = content.unwrap_or_default();

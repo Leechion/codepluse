@@ -1,6 +1,6 @@
 //! The agent registry, rebuilt from its persisted sources on demand.
 //!
-//! Go assembles the hub once at boot (`cmd/serve/wiring.go` main + `codeg.New`):
+//! Go assembles the hub once at boot (`cmd/serve/wiring.go` main + `codepluse.New`):
 //! built-in CLI agents seeded by probing the machine, custom ACP commands from
 //! `.data/acp-agents.json`, custom agents from `Store.CustomAgents`, harness
 //! instances from `.data/harness-instances.json`, and finally the per-agent
@@ -222,7 +222,7 @@ fn custom_acp_agents(root: &Path) -> Vec<Agent> {
 /// Go `loadCustomAgents` + `registerCustomAgent` (custom_agents.go:216-227):
 /// `Store.CustomAgents` entries become `custom:<registryId>` wire agents.
 fn custom_store_agents(root: &Path) -> Vec<Agent> {
-    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
     else {
         return Vec::new();
     };
@@ -370,7 +370,7 @@ fn builtin_agents(root: &Path) -> Vec<Agent> {
 /// Go `applyEnabledOverrides` (agentconfig.go:102): the settings-page
 /// enable/disable choices re-applied onto the registry.
 fn apply_enabled_overrides(root: &Path, agents: &mut [Arc<Agent>]) {
-    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
     else {
         return;
     };
@@ -557,7 +557,7 @@ mod tests {
     fn write_store(root: &Path, custom_agents: Value, overlays: Value) {
         let doc = json!({"customAgents": custom_agents, "agents": overlays, "next": 1});
         fs::write(
-            root.join(".data").join("codeg-workspace.json"),
+            root.join(".data").join("codepluse-workspace.json"),
             doc.to_string(),
         )
         .unwrap();

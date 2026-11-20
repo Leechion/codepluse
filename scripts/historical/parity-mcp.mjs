@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Dual-run for the `mcp-codeg` companion (the MCP stdio server the agents spawn).
+// Dual-run for the `mcp-codepluse` companion (the MCP stdio server the agents spawn).
 //
 // Both binaries are fed the same JSON-RPC lines on stdin and their stdout is
 // compared frame by frame. `tools/call` needs a live ACP caller token, so the
@@ -14,14 +14,14 @@ import path from 'node:path';
 import process from 'node:process';
 
 const repoRoot = path.resolve(new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
-const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codeg.exe');
+const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codepluse.exe');
 const RUST_EXE = path.join(repoRoot, 'src-tauri', 'target', 'debug', 'codepluse.exe');
 
 const die = (message) => {
   console.error(`❌ ${message}`);
   process.exit(2);
 };
-if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codeg.exe');
+if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codepluse.exe');
 if (!existsSync(RUST_EXE)) die('缺少 src-tauri/target/debug/codepluse.exe');
 
 const REQUESTS = [
@@ -45,17 +45,17 @@ const run = (exe, args) =>
     child.stdin.end();
   });
 
-/// Go names itself `codeg-mcp-go`; the Rust port is `codeg-mcp-rust`. The name
+/// Go names itself `codepluse-mcp-go`; the Rust port is `codepluse-mcp-rust`. The name
 /// is cosmetic (no MCP client checks it), so it is masked in the comparison.
 const normalize = (text) =>
   text
     .split('\n')
     .filter((line) => line.trim().length > 0)
-    .map((line) => line.replace(/"codeg-mcp-(go|rust)"/g, '"codeg-mcp"'))
+    .map((line) => line.replace(/"codepluse-mcp-(go|rust)"/g, '"codepluse-mcp"'))
     .join('\n');
 
-const go = await run(GO_EXE, ['mcp-codeg', 'http://127.0.0.1:1/api/codeg_mcp', 'dummy-token']);
-const rust = await run(RUST_EXE, ['mcp-codeg', 'http://127.0.0.1:1/api/codeg_mcp', 'dummy-token']);
+const go = await run(GO_EXE, ['mcp-codepluse', 'http://127.0.0.1:1/api/codepluse_mcp', 'dummy-token']);
+const rust = await run(RUST_EXE, ['mcp-codepluse', 'http://127.0.0.1:1/api/codepluse_mcp', 'dummy-token']);
 
 let failures = 0;
 if (go.code !== rust.code) {

@@ -186,7 +186,7 @@ const RUST = new Set([
   "forge_settings_set",
   "forge_tab_count",
   "get_available_terminal_shells",
-  "get_codeg_mcp_service_status",
+  "get_codepluse_mcp_service_status",
   "get_commit_message_settings",
   "get_computer_tools_settings",
   "get_conversation",

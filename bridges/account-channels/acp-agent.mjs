@@ -475,7 +475,7 @@ export async function runAgent({
             messages: [
               {
                 role: "system",
-                content: `You are ${catalog.name}, an independent coding agent in Codepluse. Workspace: ${session.cwd}. Permission: ${session.mode}. Use real tools, report actual results, and use codeg-mcp tools to coordinate and delegate when available. Do not claim work that was not executed.`,
+                content: `You are ${catalog.name}, an independent coding agent in Codepluse. Workspace: ${session.cwd}. Permission: ${session.mode}. Use real tools, report actual results, and use codepluse-mcp tools to coordinate and delegate when available. Do not claim work that was not executed.`,
               },
               ...session.messages,
             ],

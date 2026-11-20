@@ -1,4 +1,4 @@
-//! 自定义智能体的只读面：`server-go/internal/codeg/custom_agents.go` 里
+//! 自定义智能体的只读面：`server-go/internal/codepluse/custom_agents.go` 里
 //! 不碰 hub 注册表的 2 条命令。
 //!
 //! - `acp_current_platform`：平台标识（GOOS-GOARCH）。
@@ -8,7 +8,7 @@
 //!
 //! 写命令（收尾批）：`acp_save_custom_agent` / `acp_delete_custom_agent` /
 //! `acp_add_registry_agent`。Go 侧同步的是内存 Hub 注册表与热身连接池；Rust
-//! 的注册表按 `.data/codeg-workspace.json` 的 customAgents 每次无状态重建
+//! 的注册表按 `.data/codepluse-workspace.json` 的 customAgents 每次无状态重建
 //! （acp::agents），所以写路径只需落盘 + 事件。
 //!
 //! 校验逻辑按 validateCustomDef 逐条复刻（ID 正则手写展开，不引 regex 依赖）。
@@ -190,7 +190,7 @@ fn valid_http_url(raw: &str) -> bool {
 }
 
 fn custom_agents_doc(root: &Path) -> Value {
-    store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
         .ok()
         .flatten()
         .and_then(|doc| doc.get("customAgents").cloned())
@@ -330,7 +330,7 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
 // ── 写命令（custom_agents.go saveCustomAgent / delete / add_registry）──────
 
 fn workspace_path(root: &Path) -> std::path::PathBuf {
-    root.join(".data").join("codeg-workspace.json")
+    root.join(".data").join("codepluse-workspace.json")
 }
 
 fn read_doc(root: &Path) -> Result<Value, String> {
@@ -656,7 +656,7 @@ mod tests {
         handle(&root, "acp_save_custom_agent", &json!({"params": params}))
             .unwrap()
             .unwrap();
-        let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+        let doc = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
             .unwrap()
             .unwrap();
         let def = &doc["customAgents"]["demo-agent"];
@@ -684,7 +684,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+        let doc = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
             .unwrap()
             .unwrap();
         assert!(doc["customAgents"].get("demo-agent").is_none());
@@ -750,7 +750,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+        let doc = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
             .unwrap()
             .unwrap();
         assert_eq!(doc["customAgents"]["ok-agent"]["source"], "manual");
@@ -759,7 +759,7 @@ mod tests {
         let mut doc = doc;
         doc["customAgents"]["ok-agent"]["supportsMcp"] = json!(false);
         store_file::write_bytes(
-            &root.join(".data").join("codeg-workspace.json"),
+            &root.join(".data").join("codepluse-workspace.json"),
             &crate::backend::goformat::marshal_store(&doc),
         )
         .unwrap();
@@ -770,7 +770,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+        let doc = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
             .unwrap()
             .unwrap();
         assert_eq!(

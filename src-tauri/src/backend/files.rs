@@ -1,7 +1,7 @@
-//! Workspace file operations, ported from `server-go/internal/codeg/files.go`
+//! Workspace file operations, ported from `server-go/internal/codepluse/files.go`
 //! (12 commands).
 //!
-//! Anything that touches `codeg-workspace.json` stays in Go, but these do not:
+//! Anything that touches `codepluse-workspace.json` stays in Go, but these do not:
 //! they only *read* the folder list to decide which roots are readable, then
 //! work on the filesystem. Writes here are the user's own file edits, which the
 //! Go side never caches, so there is nothing to clobber.
@@ -765,7 +765,7 @@ mod tests {
         fs::write(external.join("x.txt"), "hello\n").unwrap();
         fs::create_dir_all(root.join(".data")).unwrap();
         fs::write(
-            root.join(".data").join("codeg-workspace.json"),
+            root.join(".data").join("codepluse-workspace.json"),
             serde_json::to_vec(&json!({
                 "folders": [{"id": 2, "path": external.to_string_lossy(), "open": true}]
             }))

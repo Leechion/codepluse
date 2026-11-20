@@ -1,6 +1,6 @@
 # codepluse · 多 Harness 工作台
 
-codepluse 使用 Codeg 0.42.0 的 Next.js 界面、**Rust ACP 后台**和 Windows 桌面窗口（Tauri 2）。它支持真实 ACP 会话、执行端委派、文件和 Git 操作、终端与画布。
+codepluse 使用 Codepluse 0.42.0 的 Next.js 界面、**Rust ACP 后台**和 Windows 桌面窗口（Tauri 2）。它支持真实 ACP 会话、执行端委派、文件和 Git 操作、终端与画布。
 
 ## 安装与启动
 
@@ -8,18 +8,18 @@ codepluse 使用 Codeg 0.42.0 的 Next.js 界面、**Rust ACP 后台**和 Window
 
 ```powershell
 npm i -g @agentclientprotocol/claude-agent-acp @agentclientprotocol/codex-acp
-pnpm --dir codeg-ui install --frozen-lockfile
+pnpm --dir codepluse-ui install --frozen-lockfile
 npm run codepluse:build
 npm start
 ```
 
-> 根目录没有运行时依赖，`npm ci` 不会安装任何东西，已从步骤中移除；前端依赖只装 `codeg-ui/`。安装会触发 `postinstall`，把 Monaco 与 PDF.js 资源复制到 `codeg-ui/public/`。
+> 根目录没有运行时依赖，`npm ci` 不会安装任何东西，已从步骤中移除；前端依赖只装 `codepluse-ui/`。安装会触发 `postinstall`，把 Monaco 与 PDF.js 资源复制到 `codepluse-ui/public/`。
 
-打开 http://127.0.0.1:8840/workspace。构建 Windows 桌面版使用 `npm run codepluse:desktop:build`（Tauri 2 窗口 + Rust 后端，需要 Rust/MSVC，见 [Tauri 外壳说明](docs/TAURI-SHELL.md)）。安装、功能边界及数据位置见 [移植说明](docs/CODEG-GO-PORT.md)。
+打开 http://127.0.0.1:8840/workspace。构建 Windows 桌面版使用 `npm run codepluse:desktop:build`（Tauri 2 窗口 + Rust 后端，需要 Rust/MSVC，见 [Tauri 外壳说明](docs/TAURI-SHELL.md)）。安装、功能边界及数据位置见 [移植说明](docs/CODEPLUSE-GO-PORT.md)。
 
 ## 代码结构
 
-- `codeg-ui/`：Codeg 前端。
+- `codepluse-ui/`：Codepluse 前端。
 - `src-tauri/`：桌面外壳与**全部后台**——HTTP API、事件 WebSocket、静态资源、ACP 运行时、终端、浏览器、画布、任务与定时任务。
 - `fixtures/`：ACP 协议测试使用的 fixture。
 - `skills/`：可注入执行端的技能包。

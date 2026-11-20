@@ -2,7 +2,7 @@
 //!
 //! Go sources, all mirrored behaviour-for-behaviour:
 //! `server-go/internal/acp/runtime.go` (driver pool, sessions, turns,
-//! permission cards), `server-go/internal/codeg/{connections,server,fork,
+//! permission cards), `server-go/internal/codepluse/{connections,server,fork,
 //! preflight,agentconfig,custom_launch,custom_archive,question,split,
 //! tool_identity,wire,history}.go` (connection layer + the 28 `acp_*`
 //! commands), and the launch chain in `server-go/cmd/serve/{wiring,cli,

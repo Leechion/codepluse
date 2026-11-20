@@ -21,15 +21,15 @@ codepluse.exe（一个进程）
 
 ## 为什么前端仍走 HTTP 而不是 `invoke()`
 
-`codeg-ui/src/lib/transport/tauri-transport.ts` 把应用自己的命令名原样交给
-`invoke()`（`acp_connect`、`workspace_*` 等）。上游 Codeg 的 Rust 后端提供这些命令，
+`codepluse-ui/src/lib/transport/tauri-transport.ts` 把应用自己的命令名原样交给
+`invoke()`（`acp_connect`、`workspace_*` 等）。上游 Codepluse 的 Rust 后端提供这些命令，
 本仓库没有这套实现——**后端是 HTTP 服务，窗口只是它的宿主**。
 
 前端靠一个注入标记区分两者：
 
 ```
-src-tauri/src/main.rs   →  window.__CODEG_TAURI_SHELL__ = true
-codeg-ui/src/lib/transport/detect.ts
+src-tauri/src/main.rs   →  window.__CODEPLUSE_TAURI_SHELL__ = true
+codepluse-ui/src/lib/transport/detect.ts
    isTauriSidecarShell() → true 时 detectEnvironment() 仍返回 "web"
 ```
 
@@ -56,12 +56,12 @@ src-tauri/
 | `webapp.rs` | 静态资源、health、附件上传、companion 端点、dev 代理 |
 | `events_ws.rs` | 事件 WebSocket 协议（attach/detach/snapshot/replay/event） |
 | `acp/` | ACP 运行时、连接层、协作（delegation）、分片、问答 |
-| `store_reads.rs` / `store_writes.rs` | `codeg-workspace.json` 的读写 |
+| `store_reads.rs` / `store_writes.rs` | `codepluse-workspace.json` 的读写 |
 | `git.rs` / `files.rs` / `folder_commands.rs` | Git、文件、目录命令 |
 | `terminal.rs` / `browser.rs` / `computer.rs` | ConPTY 终端、CDP 浏览器、桌面控制 |
 | `worktask.rs` / `worktask_engine.rs` / `automations.rs` | 任务看板、执行引擎、定时任务 |
 | `providers.rs` / `exec_providers.rs` / `provider_catalog.rs` / `provider_writeback.rs` | 供应商读写与外部写回 |
-| `mcp_companion.rs` | `codeg-mcp` 伴随服务（stdio JSON-RPC） |
+| `mcp_companion.rs` | `codepluse-mcp` 伴随服务（stdio JSON-RPC） |
 
 ## 外壳做四件事
 
@@ -74,7 +74,7 @@ src-tauri/
 无头模式（`CODEPLUSE_HEADLESS=1`）只起后端不开窗口——烟测与迁移期对拍脚本用它。
 
 5 个窗口命令：`window_open` / `window_close` / `window_minimize` /
-`window_toggle_maximize` / `window_begin_drag`，由 `codeg-ui/src/lib/go-desktop.ts`
+`window_toggle_maximize` / `window_begin_drag`，由 `codepluse-ui/src/lib/go-desktop.ts`
 统一选择实现。
 
 缩放（Tauri 独有）走官方 JS API 而不是自定义命令：`WebviewWindow` 没有
@@ -91,7 +91,7 @@ src-tauri/
 1. **rustup**（https://win.rustup.rs），默认工具链 `x86_64-pc-windows-msvc`。
 2. **Visual Studio Build Tools**，勾选「使用 C++ 的桌面开发」。只装 rustup 会在链接阶段
    报 `linker not found`。
-3. `pnpm --dir codeg-ui install`（提供 `@tauri-apps/cli`）。
+3. `pnpm --dir codepluse-ui install`（提供 `@tauri-apps/cli`）。
 
 验证：`rustc -vV` 的 `host:` 必须是 `x86_64-pc-windows-msvc`。
 
@@ -123,7 +123,7 @@ NSIS 按 `currentUser` 安装（无需管理员）。安装后外壳从 `resourc
   （IPC 被 ACL 拒绝），需要同步改 `capabilities/main-shell.json`。
 - **仍是「仓库模式」**：`resources/workspace.json` 把 Root 指向打包机器的仓库；
   换机器或移动仓库后需要重新打包，或设置 `CODEPLUSE_ROOT`。真正自包含需要把
-  `codeg-ui/out` 与可写数据目录（`.data` → `%APPDATA%`）一起规划，尚未做。
+  `codepluse-ui/out` 与可写数据目录（`.data` → `%APPDATA%`）一起规划，尚未做。
 - **启动失败无 GUI 提示**：release 版是 `windows_subsystem="windows"`，`setup` 失败会
   直接退出；排查时用 `pnpm tauri:dev` 或 `-DebugBuild` 看控制台。
 - release 用 thin LTO（`lto = "thin"` + `codegen-units = 16`）：`lto = true` +

@@ -1,6 +1,6 @@
-//! Bundled skill packs (`codeg-assets/<group>`) and the link/unlink plumbing
+//! Bundled skill packs (`codepluse-assets/<group>`) and the link/unlink plumbing
 //! that makes a skill visible to one agent, ported from
-//! `server-go/internal/codeg/skills.go`.
+//! `server-go/internal/codepluse/skills.go`.
 //!
 //! Ported (10): `experts_list`, `experts_read_content`,
 //! `experts_link_to_agent`, `experts_unlink_from_agent`, `experts_apply_links`
@@ -15,7 +15,7 @@
 //!
 //! The interesting part is the Windows fallback: creating a directory symlink
 //! needs Developer Mode, so a failed `symlink_dir` falls back to copying the
-//! tree and stamping `.codeg-copy` with the central path. Disable only ever
+//! tree and stamping `.codepluse-copy` with the central path. Disable only ever
 //! removes a link or a stamped copy — never a user's own directory.
 
 use std::path::{Path, PathBuf};
@@ -27,7 +27,7 @@ use crate::backend::git::{eval_symlinks, strip_verbatim};
 
 /// Marks a skill directory codepluse copied (rather than linked) into an
 /// agent's skill directory.
-const COPY_MARKER: &str = ".codeg-copy";
+const COPY_MARKER: &str = ".codepluse-copy";
 
 pub fn owns(command: &str) -> bool {
     matches!(
@@ -361,9 +361,9 @@ fn delete_agent_skill(home: &Path, root: &Path, args: &Value) -> Result<Value, S
 
 /// Go compares resolved paths with `strings.EqualFold`. The two strings arrive
 /// with mixed separator styles: the central path is built from a root that may
-/// carry forward slashes (`E:/code/codepluse\codeg-assets\...`) while copy
+/// carry forward slashes (`E:/code/codepluse\codepluse-assets\...`) while copy
 /// markers and symlink targets were written with native backslashes
-/// (`E:\code\codepluse\codeg-assets\...`). Folding only case made every such
+/// (`E:\code\codepluse\codepluse-assets\...`). Folding only case made every such
 /// pair read as "blocked_by_real_directory", so fold both case and separators.
 fn eq_fold(a: &str, b: &str) -> bool {
     fn fold(s: &str) -> String {
@@ -387,7 +387,7 @@ fn is_symlink(path: &Path) -> bool {
 /// One row per manifest entry: metadata plus whether the shipped copy is
 /// present and unmodified.
 fn bundled_skills(root: &Path, group: &str) -> Result<Vec<Value>, String> {
-    let base = root.join("codeg-assets").join(group);
+    let base = root.join("codepluse-assets").join(group);
     let raw = std::fs::read(base.join("manifest.json")).map_err(|e| e.to_string())?;
     let metadata: Vec<Value> = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
     let mut out = Vec::with_capacity(metadata.len());
@@ -414,7 +414,7 @@ fn bundled_skills(root: &Path, group: &str) -> Result<Vec<Value>, String> {
 }
 
 /// The per-(skill, agent) row the settings matrix reads: enabled only when the
-/// entry at the agent's own skill directory points at codeg's central copy.
+/// entry at the agent's own skill directory points at codepluse's central copy.
 fn skill_status(home: &Path, name: &str, agent_type: &str, central: &str) -> Value {
     let link = native_skill_root(home, agent_type).join(name);
     let mut state = "not_linked";
@@ -426,7 +426,7 @@ fn skill_status(home: &Path, name: &str, agent_type: &str, central: &str) -> Val
                 let actual = resolved_text(&link);
                 target = json!(actual);
                 state = if eq_fold(&actual, central) {
-                    "linked_to_codeg"
+                    "linked_to_codepluse"
                 } else {
                     "linked_elsewhere"
                 };
@@ -438,7 +438,7 @@ fn skill_status(home: &Path, name: &str, agent_type: &str, central: &str) -> Val
         match std::fs::read(link.join(COPY_MARKER)) {
             Ok(marker) if eq_fold(String::from_utf8_lossy(&marker).trim(), central) => {
                 target = json!(String::from_utf8_lossy(&marker).trim());
-                state = "linked_to_codeg";
+                state = "linked_to_codepluse";
                 copy_mode = true;
             }
             _ => state = "blocked_by_real_directory",
@@ -446,12 +446,12 @@ fn skill_status(home: &Path, name: &str, agent_type: &str, central: &str) -> Val
     }
     // `usable` answers a different question than `state`: can the AGENT load
     // this skill from its own directory, regardless of who put it there? A
-    // codeg link/copy obviously yes; a symlink to anywhere resolves to a real
+    // codepluse link/copy obviously yes; a symlink to anywhere resolves to a real
     // directory the harness reads fine; a real directory counts only when it
     // actually holds a SKILL.md. Chat-side gating reads this field so a skill
-    // the provider can already use is never locked behind codeg bookkeeping.
+    // the provider can already use is never locked behind codepluse bookkeeping.
     let usable = match state {
-        "linked_to_codeg" | "linked_elsewhere" => true,
+        "linked_to_codepluse" | "linked_elsewhere" => true,
         "blocked_by_real_directory" => link.join("SKILL.md").is_file(),
         _ => false,
     };
@@ -492,7 +492,7 @@ fn make_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
     std::os::unix::fs::symlink(target, link)
 }
 
-/// Enable or disable one bundled skill for one agent. Only links/copies codeg
+/// Enable or disable one bundled skill for one agent. Only links/copies codepluse
 /// itself put there are removed, and a same-named real directory is never
 /// touched.
 fn skill_link(
@@ -596,13 +596,13 @@ fn skill_link_to_path(
 const GENERATIVE_UI_ID: &str = "ui-render";
 
 fn custom_skill_root(home: &Path) -> PathBuf {
-    home.join(".codeg").join("skills")
+    home.join(".codepluse").join("skills")
 }
 
 fn validate_custom_root(home: &Path) -> Result<PathBuf, String> {
-    let codeg = home.join(".codeg");
+    let codepluse = home.join(".codepluse");
     let base = custom_skill_root(home);
-    if is_symlink(&codeg) || is_symlink(&base) {
+    if is_symlink(&codepluse) || is_symlink(&base) {
         return Err("自定义技能目录不能是符号链接".into());
     }
     Ok(base)
@@ -611,7 +611,7 @@ fn validate_custom_root(home: &Path) -> Result<PathBuf, String> {
 fn builtin_skill_ids(root: &Path) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
     for group in ["experts", "science"] {
-        let path = root.join("codeg-assets").join(group).join("manifest.json");
+        let path = root.join("codepluse-assets").join(group).join("manifest.json");
         if let Ok(bytes) = std::fs::read(path) {
             if let Ok(rows) = serde_json::from_slice::<Vec<Value>>(&bytes) {
                 ids.extend(
@@ -756,7 +756,7 @@ fn custom_link_op(
 }
 
 fn generative_ui_path(root: &Path) -> PathBuf {
-    root.join("codeg-assets")
+    root.join("codepluse-assets")
         .join("generative-ui")
         .join("skills")
         .join(GENERATIVE_UI_ID)
@@ -1065,7 +1065,7 @@ fn run_with_home(home: &Path, root: &Path, command: &str, args: &Value) -> Resul
     }
     if command == "experts_open_central_dir" || command == "science_open_central_dir" {
         let group = group_of(command);
-        let path = root.join("codeg-assets").join(group);
+        let path = root.join("codepluse-assets").join(group);
         open_directory(&path)?;
         return Ok(Value::String(path.to_string_lossy().into_owned()));
     }
@@ -1211,7 +1211,7 @@ mod tests {
 
     /// One skill pack whose manifest hash matches the shipped file.
     fn seed(root: &Path, group: &str) {
-        let base = root.join("codeg-assets").join(group);
+        let base = root.join("codepluse-assets").join(group);
         let dir = base.join("skills").join("one");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("SKILL.md"), "# one\n").unwrap();
@@ -1244,13 +1244,13 @@ mod tests {
 
         // Editing the file flips user_modified; deleting it flips both flags.
         fs::write(
-            f.root.join("codeg-assets/experts/skills/one/SKILL.md"),
+            f.root.join("codepluse-assets/experts/skills/one/SKILL.md"),
             "changed",
         )
         .unwrap();
         let out = call(&f, "experts_list", serde_json::json!({})).unwrap();
         assert_eq!(out[0]["user_modified"], true);
-        fs::remove_file(f.root.join("codeg-assets/experts/skills/one/SKILL.md")).unwrap();
+        fs::remove_file(f.root.join("codepluse-assets/experts/skills/one/SKILL.md")).unwrap();
         let out = call(&f, "experts_list", serde_json::json!({})).unwrap();
         assert_eq!(out[0]["installed_centrally"], false);
         // Go hashes the empty slice it read, so this stays true.
@@ -1301,7 +1301,7 @@ mod tests {
     fn link_then_unlink_roundtrip() {
         let f = fixture("link");
         seed(&f.root, "experts");
-        let central = f.root.join("codeg-assets/experts/skills/one");
+        let central = f.root.join("codepluse-assets/experts/skills/one");
 
         let status = call(
             &f,
@@ -1309,7 +1309,7 @@ mod tests {
             serde_json::json!({"expertId": "one", "agentType": "claude"}),
         )
         .unwrap();
-        assert_eq!(status["state"], "linked_to_codeg", "{status}");
+        assert_eq!(status["state"], "linked_to_codepluse", "{status}");
         assert_eq!(status["expertId"], "one");
         assert_eq!(status["agentType"], "claude");
         assert_eq!(
@@ -1328,7 +1328,7 @@ mod tests {
             serde_json::json!({"expertId": "one", "agentType": "claude"}),
         )
         .unwrap();
-        assert_eq!(again["state"], "linked_to_codeg");
+        assert_eq!(again["state"], "linked_to_codepluse");
 
         let after = call(
             &f,
@@ -1407,7 +1407,7 @@ mod tests {
         let rows = out.as_array().unwrap();
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0]["ok"], true);
-        assert_eq!(rows[0]["status"]["state"], "linked_to_codeg");
+        assert_eq!(rows[0]["status"]["state"], "linked_to_codepluse");
         assert_eq!(rows[0]["error"], Value::Null);
         assert_eq!(rows[1]["ok"], false);
         assert_eq!(rows[1]["error"], "技能不存在：missing");
@@ -1491,7 +1491,7 @@ mod tests {
         fs::write(
             link.join(COPY_MARKER),
             f.root
-                .join("codeg-assets")
+                .join("codepluse-assets")
                 .join("experts")
                 .join("skills")
                 .join("one")
@@ -1507,7 +1507,7 @@ mod tests {
             &serde_json::json!({"expertId": "one", "agentType": "claude"}),
         )
         .unwrap();
-        assert_eq!(row["state"], "linked_to_codeg", "{row}");
+        assert_eq!(row["state"], "linked_to_codepluse", "{row}");
         assert_eq!(row["copyMode"], true);
         // The same row must also unlink cleanly under the mismatched style.
         let after = run_with_home(
@@ -1521,7 +1521,7 @@ mod tests {
         assert!(!link.exists());
     }
 
-    /// `usable` answers what the agent can load, independent of codeg's own
+    /// `usable` answers what the agent can load, independent of codepluse's own
     /// link bookkeeping: linked/copy ⇒ usable, a real directory only when it
     /// actually holds a SKILL.md, not_linked/broken ⇒ not usable.
     #[test]
@@ -1538,12 +1538,12 @@ mod tests {
             .unwrap()
         };
 
-        // Nothing installed: neither codeg-linked nor agent-loadable.
+        // Nothing installed: neither codepluse-linked nor agent-loadable.
         let row = probe("claude");
         assert_eq!(row["state"], "not_linked");
         assert_eq!(row["usable"], false);
 
-        // codeg's own link/copy: usable however it was materialized.
+        // codepluse's own link/copy: usable however it was materialized.
         run_with_home(
             &f.home,
             &f.root,
@@ -1552,10 +1552,10 @@ mod tests {
         )
         .unwrap();
         let row = probe("claude");
-        assert_eq!(row["state"], "linked_to_codeg");
+        assert_eq!(row["state"], "linked_to_codepluse");
         assert_eq!(row["usable"], true);
 
-        // A real directory WITH a SKILL.md is blocked for codeg's bookkeeping
+        // A real directory WITH a SKILL.md is blocked for codepluse's bookkeeping
         // but the agent can still load it.
         let link = native_skill_root(&f.home, "codex").join("one");
         fs::create_dir_all(&link).unwrap();

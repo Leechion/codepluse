@@ -8,10 +8,10 @@
 
 ## 改动
 
-1. **[agents/page.tsx](file:///e:/code/codepluse/codeg-ui/src/app/settings/agents/page.tsx)**：`<AcpAgentSettings />` 之下新增「供应商」折叠区（`<details>`/Collapsible），内含：
+1. **[agents/page.tsx](file:///e:/code/codepluse/codepluse-ui/src/app/settings/agents/page.tsx)**：`<AcpAgentSettings />` 之下新增「供应商」折叠区（`<details>`/Collapsible），内含：
    - **模型供应商**：模型供应商 CRUD（`list/create/update/delete_model_provider`，按智能体类型过滤 + 添加/编辑/删除）——新建 `components/settings/model-provider-manager.tsx` 承载（复用我已实现的 Go 后端）。
-   - **执行端供应商**：原 [ApiProvidersSection](file:///e:/code/codepluse/codeg-ui/src/components/settings/api-providers-section.tsx) 原样保留（执行端切换 + CC Switch）。
-2. **[settings-shell.tsx](file:///e:/code/codepluse/codeg-ui/src/components/settings/settings-shell.tsx)**：删除「供应商」导航项（labelKey providers）；保留 i18n key（页签/标题还在用则保留，否则一并清理）。
+   - **执行端供应商**：原 [ApiProvidersSection](file:///e:/code/codepluse/codepluse-ui/src/components/settings/api-providers-section.tsx) 原样保留（执行端切换 + CC Switch）。
+2. **[settings-shell.tsx](file:///e:/code/codepluse/codepluse-ui/src/components/settings/settings-shell.tsx)**：删除「供应商」导航项（labelKey providers）；保留 i18n key（页签/标题还在用则保留，否则一并清理）。
 3. **路由**：`/settings/model-providers` 与 `/settings/api-providers` 改为重定向到 `/settings/agents`（旧深链接与快捷菜单入口不断链）。
 4. **删除** providers-settings.tsx（双页签容器不再需要）。
 
@@ -20,4 +20,4 @@
 1. `/settings/agents`：智能体列表/详情功能回归正常；页面底部「供应商」折叠区可展开。
 2. 折叠区内：模型供应商 CRUD 正常（此前已验证后端回路）；执行端供应商切换/CC Switch 正常。
 3. 设置导航无「供应商」项；访问旧路由跳转到智能体页。
-4. console 无报错；`pnpm --dir codeg-ui build` 通过。
+4. console 无报错；`pnpm --dir codepluse-ui build` 通过。

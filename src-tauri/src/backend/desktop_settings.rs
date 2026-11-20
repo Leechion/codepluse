@@ -1,5 +1,5 @@
 //! Desktop settings that were still only exposed by the former sidecar.
-//! Values share `codeg-workspace.json` with the workspace settings store.
+//! Values share `codepluse-workspace.json` with the workspace settings store.
 
 use std::path::Path;
 
@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use crate::backend::store_file;
 
-const FILE: &str = "codeg-workspace.json";
+const FILE: &str = "codepluse-workspace.json";
 
 pub fn owns(command: &str) -> bool {
     matches!(

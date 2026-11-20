@@ -1,10 +1,10 @@
-//! Turn storage (SQLite), ported from `server-go/internal/codeg/turnstore.go`
+//! Turn storage (SQLite), ported from `server-go/internal/codepluse/turnstore.go`
 //! + `history.go`, plus the conversation commands that read it:
 //! `get_conversation`, `get_folder_conversation`, `get_folder_conversation_turns`,
 //! `delete_conversation`, and the four `token_usage_*` aggregations.
 //!
-//! The Go runtime migrated turns out of codeg-workspace.json into SQLite
-//! (.data/codeg.db, WAL); the JSON document keeps only conversation metadata.
+//! The Go runtime migrated turns out of codepluse-workspace.json into SQLite
+//! (.data/codepluse.db, WAL); the JSON document keeps only conversation metadata.
 //! Each row carries cumulative prefix state (FNV-1a fingerprint, role counts,
 //! max timestamp) so paging never re-reads the prefix. Fingerprints must stay
 //! byte-compatible with the client's extendPrefixFingerprint (turn-window.ts)
@@ -73,7 +73,7 @@ pub fn handle(root: &Path, command: &str, args: &Value) -> Option<Outcome> {
 // ── database (one connection, like Go's SetMaxOpenConns(1)) ─────────────────
 
 fn db_path(root: &Path) -> std::path::PathBuf {
-    root.join(".data").join("codeg.db")
+    root.join(".data").join("codepluse.db")
 }
 
 fn open_db(root: &Path) -> Result<Connection, String> {
@@ -127,7 +127,7 @@ pub fn ensure_initialized(root: &Path) -> Result<(), String> {
 /// turnstore.go 的 importLegacyTurnsLocked：把旧文档里的 turns 迁进 SQLite，
 /// 备份原文件后重写文档（幂等：库里已有行的会话跳过）。
 fn migrate_legacy_turns(root: &Path, connection: &Connection) -> Result<(), String> {
-    let path = root.join(".data").join("codeg-workspace.json");
+    let path = root.join(".data").join("codepluse-workspace.json");
     let Some(doc) = store_file::read_json(&path)? else {
         return Ok(());
     };
@@ -454,7 +454,7 @@ fn all_turns(connection: &Connection) -> Result<BTreeMap<i64, Vec<Value>>, Strin
 // ── workspace document access ───────────────────────────────────────────────
 
 fn load_workspace(root: &Path) -> Value {
-    store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
         .ok()
         .flatten()
         .unwrap_or(json!({}))
@@ -520,7 +520,7 @@ fn turns_with_delegations(doc: &Value, conversation: i64, turns: &mut [Value]) {
                     *meta = json!({});
                 }
                 meta.as_object_mut().unwrap().insert(
-                    "codeg.delegation".into(),
+                    "codepluse.delegation".into(),
                     json!({
                         "status": status,
                         "child_conversation_id": child.get("id").cloned().unwrap_or(Value::Null),
@@ -669,7 +669,7 @@ fn run(
                 return Err("会话 ID 无效".into());
             }
             let mut doc =
-                match store_file::read_json(&root.join(".data").join("codeg-workspace.json"))? {
+                match store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))? {
                     Some(doc) if doc.is_object() => doc,
                     Some(_) => return Err("会话 ID 无效".into()),
                     None => return Err("会话 ID 无效".into()),
@@ -779,7 +779,7 @@ fn run(
             }
             let bytes = goformat::marshal_store(&doc);
             {
-                let path = root.join(".data").join("codeg-workspace.json");
+                let path = root.join(".data").join("codepluse-workspace.json");
                 let _guard = store_file::lock(&path)?;
                 store_file::write_bytes(&path, &bytes)?;
             }

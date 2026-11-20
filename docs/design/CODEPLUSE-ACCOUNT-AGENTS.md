@@ -1,6 +1,6 @@
 # WorkBuddy / Qoder independent agents
 
-Settings → Agents → choose an independent agent → **官网订阅 → 管理官网账号** opens that product's browser login. Four independent ACP agents appear in the agent picker: `account_buddy`, `account_workbuddy`, `account_qoder`, `account_qodercn`. Each has its own session history, selected model and tool loop. They can be selected as the main agent, saved as multiple model profiles, or delegated to by another agent through the existing `codeg-mcp` tools.
+Settings → Agents → choose an independent agent → **官网订阅 → 管理官网账号** opens that product's browser login. Four independent ACP agents appear in the agent picker: `account_buddy`, `account_workbuddy`, `account_qoder`, `account_qodercn`. Each has its own session history, selected model and tool loop. They can be selected as the main agent, saved as multiple model profiles, or delegated to by another agent through the existing `codepluse-mcp` tools.
 
 These agents do not run DSH. Their local ACP adapter calls their own product's inference protocol, executes workspace file tools through the ACP client, requests permission before shell commands, and connects the actual MCP servers supplied by Codepluse. Read-only sessions expose no write/shell tools and reject such calls even if a model attempts to invoke them. Model IDs are validated against the selected product; no silent cross-product fallback is performed. Cancellation aborts the live HTTP request and pending tool calls. Histories can be restored via `session/load`.
 

@@ -4,14 +4,14 @@
 //!
 //! Everything here mirrors the Go implementation byte for byte where the
 //! client can observe it (status codes, JSON bodies, header sets, error
-//! texts). The Go originals live in `server-go/internal/codeg/server.go`
+//! texts). The Go originals live in `server-go/internal/codepluse/server.go`
 //! (`static`, `respond`), `guard.go` and `attachments.go`.
 //!
 //! ```text
-//! GET  /                     → codeg-ui/out/index.html
+//! GET  /                     → codepluse-ui/out/index.html
 //! GET  /api/health           → synthesised locally (no sidecar needed)
 //! POST /api/upload_attachment→ multipart upload into .data/uploads/<hex>/
-//! POST /api/codeg_mcp        → 401 (the delegation registry is not ported)
+//! POST /api/codepluse_mcp        → 401 (the delegation registry is not ported)
 //! POST /api/<command>        → command dispatch
 //! GET  /ws, /ws/events       → the event protocol (events_ws.rs)
 //! ```
@@ -58,8 +58,8 @@ pub fn error_envelope(status: StatusCode, code: &str, message: &str) -> Response
 /// used to proxy it; now it answers by itself, so the app keeps working with
 /// no sidecar. The shape is unchanged, only `backend` flips to `rust`.
 ///
-/// `version` / `codeg_version` keep Go's literals on purpose: the frontend
-/// compares `codeg_version` against its own build, and the updater contract
+/// `version` / `codepluse_version` keep Go's literals on purpose: the frontend
+/// compares `codepluse_version` against its own build, and the updater contract
 /// uses its own `VERSION` constant — changing either value here would move
 /// behaviour that this migration is not supposed to move.
 pub fn health() -> Response {
@@ -68,7 +68,7 @@ pub fn health() -> Response {
         "app": "codepluse",
         "data": {"status": "ok", "version": "2.0.0-rust", "sessionRuntime": "acp-v1"},
         "backend": "rust",
-        "codeg_version": "0.42.0",
+        "codepluse_version": "0.42.0",
         "path_boundary": {
             "allow_any_path": env_flag("HARNESS_HUB_ALLOW_ANY_PATH"),
             "allow_any_browse": env_flag("HARNESS_HUB_ALLOW_ANY_BROWSE"),
@@ -82,7 +82,7 @@ fn env_flag(name: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// A4 — /api/codeg_mcp (the companion endpoint)
+// A4 — /api/codepluse_mcp (the companion endpoint)
 // ---------------------------------------------------------------------------
 
 /// Go `delegation.go:73` `companionRequest`.
@@ -459,11 +459,17 @@ fn find(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
 // A1 — static assets
 // ---------------------------------------------------------------------------
 
-/// Go `server.go:362` `static`: serve `codeg-ui/out` with the same lookup
+/// Go `server.go:362` `static`: serve `codepluse-ui/out` with the same lookup
 /// order and the same headers `http.ServeFile` sets (Content-Type by
 /// extension, Content-Length, Last-Modified, ETag/If-None-Match, Range).
 pub fn static_asset(root: &Path, uri_path: &str, headers: &HeaderMap) -> Response {
-    let base = root.join("codeg-ui").join("out");
+    let mut base = root.join("codepluse-ui").join("out");
+    if !base.is_dir() {
+        let fallback = root.join("codeg-ui").join("out");
+        if fallback.is_dir() {
+            base = fallback;
+        }
+    }
     let request = if uri_path == "/" {
         "/index.html"
     } else {

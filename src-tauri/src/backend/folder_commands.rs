@@ -1,6 +1,6 @@
-//! Per-folder shell commands, ported from `server-go/internal/codeg/folder_commands.go`.
+//! Per-folder shell commands, ported from `server-go/internal/codepluse/folder_commands.go`.
 //!
-//! The store is its own file (`.data/codeg-folder-commands.json`) holding a
+//! The store is its own file (`.data/codepluse-folder-commands.json`) holding a
 //! JSON array of typed rows — Go marshals the `FolderCommand` struct in
 //! declared field order, so unlike the workspace document these files must NOT
 //! be key-sorted on write (`goformat::marshal_preserve`).
@@ -17,7 +17,7 @@ use serde_json::{json, Map, Value};
 use crate::backend::goformat;
 use crate::backend::store_file;
 
-const FILE: &str = "codeg-folder-commands.json";
+const FILE: &str = "codepluse-folder-commands.json";
 
 pub fn owns(command: &str) -> bool {
     matches!(
@@ -113,7 +113,7 @@ fn next_sort_order(rows: &[Value], folder_id: i64) -> i64 {
 /// The folder row must exist in the workspace store before the command store
 /// is touched (folder_commands.go `resolveFolderPath`).
 fn resolve_folder_path(root: &Path, folder_id: i64) -> Result<String, String> {
-    let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))?;
+    let doc = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))?;
     let folder = doc
         .as_ref()
         .and_then(|doc| doc.get("folders"))
@@ -366,7 +366,7 @@ mod tests {
     fn seed_workspace(root: &Path, folder_id: i64, path: &str) {
         let store = json!({"next": 2, "folders": [{"id": folder_id, "path": path, "name": "a", "kind": "regular", "open": true}]});
         fs::write(
-            root.join(".data").join("codeg-workspace.json"),
+            root.join(".data").join("codepluse-workspace.json"),
             serde_json::to_vec_pretty(&store).unwrap(),
         )
         .unwrap();

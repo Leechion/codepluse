@@ -1,14 +1,14 @@
-# Harness Hub × Codeg 架构对齐设计
+# Harness Hub × Codepluse 架构对齐设计
 
-参照 [Codeg](https://github.com/spacering-net/codeg) 的多 Agent Hub 设计，规划本项目的演进路线。
-原则与 codeg 一致：**本 Hub 不做模型推理，价值在于统一会话管理、任务编排与跨 Agent 协作**；
+参照 [Codepluse](https://github.com/spacering-net/codepluse) 的多 Agent Hub 设计，规划本项目的演进路线。
+原则与 codepluse 一致：**本 Hub 不做模型推理，价值在于统一会话管理、任务编排与跨 Agent 协作**；
 本地优先、无外部服务依赖、每项能力都挂在已有的真实 ACP 执行端上。
 
 ---
 
 ## 一、现状对照
 
-| 能力 | Codeg 的做法 | Harness Hub 现状 | 差距 |
+| 能力 | Codepluse 的做法 | Harness Hub 现状 | 差距 |
 | --- | --- | --- | --- |
 | 统一 Agent 接入 | ACP 协议 + 适配器，20+ 内置 agent | ACP v1 + HTTP 桥接，Codex / Claude + 可注册任意 ACP stdio | ✅ 已对齐 |
 | 编排调度 | `@` 委派、多 agent 并行、流式回传 | 宰相规划 → 1–8 子任务 → 依赖波次调度 | ⚠️ 缺 `@` 直接委派 |
@@ -68,7 +68,7 @@
 
 **问题**：现在 worker 必须在正文里输出约定 JSON，`orchestrator.json()` 靠正则剥离 Markdown 兜底，是整条链路最脆的一环。
 
-**方案**（对标 codeg 的 `codeg-mcp` sidecar + `submit_result`）：
+**方案**（对标 codepluse 的 `codepluse-mcp` sidecar + `submit_result`）：
 
 - 复用 `core/readonly-mcp.js` 的 stdio MCP 骨架，新增 `submit_result` 工具：
 
@@ -88,19 +88,19 @@
 
 ### 2. `@` 直接委派（P0）
 
-**对标**：codeg 在对话里 `@agent` 即把任务交给该 agent 并排执行、进度流式回主对话。
+**对标**：codepluse 在对话里 `@agent` 即把任务交给该 agent 并排执行、进度流式回主对话。
 
 **方案**：
 
 - `chat-controller.send()` 在进入宰相决策前解析 `@<agent名>`（前端输入框提供补全，服务端按 `hub.agents` 的 name/id 双匹配）。
 - 命中时走新路径 `delegate(chat, agentId, text)`：不经宰相拆解，直接 `orchestrator.create({ objective: text, managerId: 宰相, workerIds: [agentId], skipPlanning: true })`。
-- `skipPlanning` 时 `orchestrator.run()` 跳过"宰相拆解任务"，直接生成单任务 `t1{agentId, instructions: objective}`，保留汇报与验收环节（codeg 同样保留主对话的完成回报）。
+- `skipPlanning` 时 `orchestrator.run()` 跳过"宰相拆解任务"，直接生成单任务 `t1{agentId, instructions: objective}`，保留汇报与验收环节（codepluse 同样保留主对话的完成回报）。
 - 多个 `@` 各建一个独立 mission，**并行运行**；各任务流式状态仍经 SSE 汇入当前对话（复用 `onMission`）。
 - API：`POST /api/chats/:id/messages` 增加 `mentions: ["agt_codex_01"]` 字段；无 `@` 时行为完全不变。
 
 ### 3. `core/worktree.js` — worktree 隔离的无人值守任务（P1）
 
-**对标**：codeg 的无人值守 To-dos 在独立 git worktree 中隔离运行，完成后用户审查 diff 再批准。
+**对标**：codepluse 的无人值守 To-dos 在独立 git worktree 中隔离运行，完成后用户审查 diff 再批准。
 
 **方案**：
 
@@ -129,7 +129,7 @@ class Worktrees {
 
 ### 4. `core/automations.js` — 定时任务（P1）
 
-**对标**：codeg Automations——保存已配置的对话输入，按 cron 或按需无头运行。
+**对标**：codepluse Automations——保存已配置的对话输入，按 cron 或按需无头运行。
 
 ```js
 // 存储 .data/automations.json
@@ -144,15 +144,15 @@ class Worktrees {
 
 ### 5. `core/handoff.js` — 跨 Agent 会话移交（P2）
 
-**对标**：codeg 的会话可移植性——"把会话交给另一个 agent 继续"。
+**对标**：codepluse 的会话可移植性——"把会话交给另一个 agent 继续"。
 
 - `acp-runtime.exportTranscript(runtimeSessionId)`：聚合该 runtime session 的 `turns[].output` 与工具摘要为纯文本纪要（现成数据，`turns` 已保留最近 20 轮）。
 - `POST /api/sessions/:id/handoff { toAgentId }`：宰相（只读）把纪要压缩为移交简报 → 在目标 agent 上以 `sessionKey: 'handoff:' + 原ID` 开新原生会话，注入简报；原会话标记 `handedOff`，不再接受 prompt。
-- 与 codeg 直接解析各 agent 磁盘历史的差异：不做磁盘导入（各家格式私有且易碎），只做 Hub 内原生会话互移——能覆盖"这任务换 Codex 接着干"的主场景，成本和风险都小一个量级。
+- 与 codepluse 直接解析各 agent 磁盘历史的差异：不做磁盘导入（各家格式私有且易碎），只做 Hub 内原生会话互移——能覆盖"这任务换 Codex 接着干"的主场景，成本和风险都小一个量级。
 
 ### 6. `core/notifier.js` — Webhook 通知（P0，成本最低）
 
-**对标**：codeg 只推主会话的完成与错误，附会话/agent/父会话标识。
+**对标**：codepluse 只推主会话的完成与错误，附会话/agent/父会话标识。
 
 ```js
 // 环境变量 HARNESS_HUB_WEBHOOK_URL 存在即启用
@@ -160,11 +160,11 @@ hub.on('mission', m => { if (terminal(m)) POST webhook });
 // payload: { missionId, chatId, status, reply, error, finishedAt, workerIds }
 ```
 
-- 只推终态（completed / partial / failed），与 codeg "减少子 agent 干扰"的取舍一致。失败静默重试 1 次，不影响主流程。
+- 只推终态（completed / partial / failed），与 codepluse "减少子 agent 干扰"的取舍一致。失败静默重试 1 次，不影响主流程。
 
 ### 7. `core/skills.js` — 技能包（P2）
 
-**对标**：codeg Skill Packs 按 agent 矩阵分配。
+**对标**：codepluse Skill Packs 按 agent 矩阵分配。
 
 - 仓库根 `skills/<name>.md`（名称 + 指令正文），agent 注册项增加 `skills: ["review-style", ...]`。
 - `orchestrator.call()` 组 prompt 时按 `agentId` 追加命中的技能正文（截断 4000 字符/技能，最多 3 个）。
@@ -173,7 +173,7 @@ hub.on('mission', m => { if (terminal(m)) POST webhook });
 
 ### 8. `orchestrator.fork()` — 从成果分叉（P2）
 
-- steer 已覆盖"运行中插话"；补齐 codeg 的另一半：从**已结束** mission 分叉。
+- steer 已覆盖"运行中插话"；补齐 codepluse 的另一半：从**已结束** mission 分叉。
 - `POST /api/missions/:id/fork { taskId? }`：克隆任务板（outputs/inbox/files 原样带入，状态全部重置为 queued，dependsOn 保留），新 mission 挂同一 chat；用户在对话里说"基于刚才 xxx 再来一版"时由宰相决策调用。
 
 ---
@@ -216,4 +216,4 @@ hub.on('mission', m => { if (terminal(m)) POST webhook });
 1. **`mcpServers` 注入**：Codex / Claude ACP 适配器对 `session/new.mcpServers` 的支持程度需实测；不支持时 result-mcp 降级为"仅 Claude/Codex 各自可用的场景"，文本 JSON 兜底永久保留。
 2. **worktree 与权限**：worktree 内 `workspace` 任务仍走人工授权，不变；但要防止 merge 时覆盖用户未提交的本地改动——merge 前强制要求主工作区干净，否则拒绝并提示。
 3. **cron 精度**：自写解析器只做分钟级；不上 Quartz 式表达式。
-4. **宰相权威**：`@` 委派绕过拆解，但汇报验收仍归宰相——保持"只有一个对用户负责的声音"的现有设计，避免 codeg 并排多 agent 各说各话的碎片感。
+4. **宰相权威**：`@` 委派绕过拆解，但汇报验收仍归宰相——保持"只有一个对用户负责的声音"的现有设计，避免 codepluse 并排多 agent 各说各话的碎片感。

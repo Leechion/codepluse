@@ -1,8 +1,8 @@
 //! OpenCode 集成 —— 补全批次（S8，7 条）。
 //!
-//! 前端 `codeg-ui/src/lib/api.ts` 已经在调用这 7 条命令，但原 Go sidecar
+//! 前端 `codepluse-ui/src/lib/api.ts` 已经在调用这 7 条命令，但原 Go sidecar
 //! （提交 76712f5）与 Rust 都没有实现过它们（全树搜不到命令字面量），契约只
-//! 取自调用点参数名与 `codeg-ui/src/lib/types.ts` 的返回结构，没有可移植的
+//! 取自调用点参数名与 `codepluse-ui/src/lib/types.ts` 的返回结构，没有可移植的
 //! Go 原型。
 //!
 //! 命令清单：

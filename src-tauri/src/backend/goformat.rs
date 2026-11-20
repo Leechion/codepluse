@@ -1,12 +1,12 @@
 //! Byte-compatible serializers for data Go also writes.
 //!
-//! The migration runs two backends against one `codeg-workspace.json`. Go
+//! The migration runs two backends against one `codepluse-workspace.json`. Go
 //! saves the whole document with `json.Marshal`, so Rust must reproduce that
 //! exact encoding or every dual-run file comparison drifts:
 //!
 //! - compact output, no trailing newline;
 //! - top level follows the Go `Store` struct's field order (see
-//!   `server-go/internal/codeg/store.go`), while every nested object is a Go
+//!   `server-go/internal/codepluse/store.go`), while every nested object is a Go
 //!   `map[string]any` and therefore comes out with byte-sorted keys;
 //! - `<`, `>`, `&` (and U+2028/U+2029) are HTML-escaped inside strings, which
 //!   Go's encoder does by default and serde_json never does;

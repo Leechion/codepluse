@@ -9,7 +9,7 @@ import { createHash } from "node:crypto"
 const sourceRoot = path.resolve(process.argv[2] || "")
 if (!process.argv[2]) throw new Error("Usage: node build-vendor.mjs <dsh-our-free-model package directory>")
 const directory = path.dirname(fileURLToPath(import.meta.url))
-const frontendRequire = createRequire(path.join(directory, "../../codeg-ui/package.json"))
+const frontendRequire = createRequire(path.join(directory, "../../codepluse-ui/package.json"))
 const esbuild = frontendRequire(frontendRequire.resolve("esbuild", { paths: [path.dirname(frontendRequire.resolve("vite"))] }))
 const sourceFile = path.join(sourceRoot, "packages/standalone/channels/business.mjs")
 const original = await fs.readFile(sourceFile, "utf8")

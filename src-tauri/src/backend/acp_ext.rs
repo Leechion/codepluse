@@ -1,6 +1,6 @@
 //! ACP 与智能体扩展 —— 补全批次（19 条）。
 //!
-//! 前端（`codeg-ui/src/lib/api.ts`）已经在调用这些命令，但原 Go sidecar
+//! 前端（`codepluse-ui/src/lib/api.ts`）已经在调用这些命令，但原 Go sidecar
 //! （提交 `76712f5`）与 Rust 都没有实现过它们，所以契约只由调用点参数名与
 //! `types.ts` 的返回结构决定，没有可对照的 Go 原型。本模块在 `src-tauri/src`
 //! 全树复核过：这 19 条字面量此前只出现在本文件的注释里，没有别的真实分派者。
@@ -878,7 +878,7 @@ fn reclaim_leaked_temp(args: &Value) -> Result<Value, String> {
 
 // ── Claude 模型选择器 ─────────────────────────────────────────────────────
 
-/// `acp_update_claude_model_picker`：规范化并持久化 codeg 为未绑定 Claude
+/// `acp_update_claude_model_picker`：规范化并持久化 codepluse 为未绑定 Claude
 /// 智能体补充的选择器 id。返回需要重启的在跑会话数；会话池归属 ACP 运行时，
 /// 本模块统计不到，按 0 返回（limited）。
 fn update_claude_picker(root: &Path, args: &Value) -> Result<Value, String> {

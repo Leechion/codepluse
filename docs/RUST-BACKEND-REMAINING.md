@@ -55,12 +55,12 @@ fixture 测试全数移植成 Rust（node `fixtures/acp-agent.cjs`）+ 各模块
 | 任务引擎 | 4 | `worktask_engine.rs`：claim / run / settle / merge 队列 / 工作树丢弃 + 15s 定时器（Go TickWorkTasks 的对位） |
 
 **关键迁移**：C 组的会话写（prompt / completion / fork）原先写 JSON 文档的 turns map，
-Go 现行是 SQLite —— 本批把写路径切到 `codeg.db`，并实现旧文档 turns 的一次性迁移
+Go 现行是 SQLite —— 本批把写路径切到 `codepluse.db`，并实现旧文档 turns 的一次性迁移
 （备份 + 幂等导入），`persist` 不再回写 turns。
 
 **已知偏差**（有意为之）：
 
-1. `get_codeg_mcp_service_status` 的 `socket_path` 用前端门的上游地址；`binary_path`
+1. `get_codepluse_mcp_service_status` 的 `socket_path` 用前端门的上游地址；`binary_path`
    报告各自后端二进制（双跑掩码为 `<BIN>`）。
 2. 任务引擎的运行时字段（liveConn / cancelFlag / checkout）放在进程级注册表：board
    每次从磁盘重载，Go 靠内存里的 taskStore 对象保活。
@@ -96,23 +96,23 @@ worktree `641b`）——后两个是更早的快照（分别少 138 / 45 条）�
 
 删 Go 后「保存外部 provider」必然失败。
 
-### 2. companion MCP（`mcp-codeg`）—— ✅ 已补齐（`mcp_companion.rs`）
+### 2. companion MCP（`mcp-codepluse`）—— ✅ 已补齐（`mcp_companion.rs`）
 
-`internal/mcpserver/`(457) + `cmd/serve/wiring.go:504` 的 `mcp-codeg` stdio 模式
+`internal/mcpserver/`(457) + `cmd/serve/wiring.go:504` 的 `mcp-codepluse` stdio 模式
 没有移植，Rust 二进制里没有这个子命令。而
 `acp/connections.rs:611` 仍向 agent 广告：
 
 ```json
-{"name":"codeg-mcp","command":"<exe>","args":["mcp-codeg","<base>/api/codeg_mcp","<token>"]}
+{"name":"codepluse-mcp","command":"<exe>","args":["mcp-codepluse","<base>/api/codepluse_mcp","<token>"]}
 ```
 
 sidecar 移除后：`command` 指向不存在的子命令，`base` 又来自 sidecar 端口
 （`Layer::upstream_base`）。**工具一被调用就失败**——要么移植
-`internal/mcpserver` 并给 Rust 加 `mcp-codeg` 模式，要么停止广告。
+`internal/mcpserver` 并给 Rust 加 `mcp-codepluse` 模式，要么停止广告。
 
 ### 3. 协作域 delegation —— 🟡 部分补齐（`acp/delegation.rs`）
 
-`internal/codeg/delegation.go`(602) + `delegation_profiles.go`(98) +
+`internal/codepluse/delegation.go`(602) + `delegation_profiles.go`(98) +
 `delegation_recovery.go`(195)。Rust 侧 `acp_respond_task_split` 的 approve 直接
 返回「协作派发尚未移植：拆分提案已撤销……」（`acp/connections.rs:349`）。
 

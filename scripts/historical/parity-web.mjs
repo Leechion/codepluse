@@ -4,7 +4,7 @@
 // companion endpoint, the method/content-type contract and the local-request
 // guard.
 //
-// Twin roots carry a small `codeg-ui/out` export so the static lookup order
+// Twin roots carry a small `codepluse-ui/out` export so the static lookup order
 // (Rsc .txt → .html → <dir>/index.html) can be compared.
 //
 //   node scripts/parity-web.mjs [--go 8880] [--rust 8881]
@@ -22,21 +22,21 @@ const option = (name, fallback) => {
 };
 const GO_PORT = Number(option('go', '8880'));
 const RUST_PORT = Number(option('rust', '8881'));
-const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codeg.exe');
+const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codepluse.exe');
 const RUST_EXE = path.join(repoRoot, 'src-tauri', 'target', 'debug', 'codepluse.exe');
 
 const die = (message) => {
   console.error(`❌ ${message}`);
   process.exit(2);
 };
-if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codeg.exe');
+if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codepluse.exe');
 if (!existsSync(RUST_EXE)) die('缺少 src-tauri/target/debug/codepluse.exe');
 
 const base = mkdtempSync(path.join(repoRoot, '.superpowers', 'sdd', 'parity-web-'));
 
 const twin = (tag) => {
   const root = path.join(base, tag);
-  const out = path.join(root, 'codeg-ui', 'out');
+  const out = path.join(root, 'codepluse-ui', 'out');
   mkdirSync(path.join(out, 'assets'), { recursive: true });
   mkdirSync(path.join(root, '.data'), { recursive: true });
   writeFileSync(path.join(out, 'index.html'), '<html>index</html>');
@@ -60,7 +60,7 @@ const spawnServer = (exe, cwd, env, label) => {
 };
 
 spawnServer(GO_EXE, goRoot, {
-  HARNESS_HUB_CODEG: '1',
+  HARNESS_HUB_CODEPLUSE: '1',
   PORT: String(GO_PORT),
   HARNESS_HUB_ALLOW_ANY_PATH: '1',
 }, 'go');
@@ -211,7 +211,7 @@ try {
 
   // ── companion 端点 ──────────────────────────────────────────────────────
   {
-    const [go, rust] = [await get(GO_PORT, '/api/codeg_mcp'), await get(RUST_PORT, '/api/codeg_mcp')];
+    const [go, rust] = [await get(GO_PORT, '/api/codepluse_mcp'), await get(RUST_PORT, '/api/codepluse_mcp')];
     check(
       go.status === rust.status && go.body === rust.body,
       `companion 非 POST: ${go.status}/${rust.status}\n   Go   ${go.body.slice(0, 160)}\n   Rust ${rust.body.slice(0, 160)}`

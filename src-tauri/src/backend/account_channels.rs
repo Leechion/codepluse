@@ -423,7 +423,7 @@ pub fn list(root: &Path) -> Result<(Vec<Channel>, Client), String> {
     Ok((channels, client))
 }
 
-/// Go `accountChannelCommand`（codeg/account_channels.go:13）：五条命令的转发。
+/// Go `accountChannelCommand`（codepluse/account_channels.go:13）：五条命令的转发。
 pub fn command(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
     let client = ensure(root)?;
     let text = |key: &str| {

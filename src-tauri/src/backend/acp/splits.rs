@@ -1,4 +1,4 @@
-//! Port of Go's `codeg/split.go` registry half: the task-split cards the
+//! Port of Go's `codepluse/split.go` registry half: the task-split cards the
 //! model proposes and the user confirms. `propose_task_split` itself arrives
 //! through the companion MCP (still Go-served), so cards only reach the Rust
 //! layer when that domain lands; the registry, wire shape, persistence and
@@ -39,7 +39,7 @@ pub fn split_wire(sp: &TaskSplit) -> Value {
 
 /// Go `splitFile` (split.go:45).
 fn split_file(root: &Path) -> std::path::PathBuf {
-    root.join(".data").join("codeg-task-splits.json")
+    root.join(".data").join("codepluse-task-splits.json")
 }
 
 /// Go `saveSplitsLocked` (split.go:53).

@@ -1,4 +1,4 @@
-//! Forge: the Issue/PR workbench, ported from `server-go/internal/codeg/forge.go`
+//! Forge: the Issue/PR workbench, ported from `server-go/internal/codepluse/forge.go`
 //! and `forge_github.go`.
 //!
 //! Ported here (10): `validate_github_token`, `folder_forge_remote`,
@@ -13,7 +13,7 @@
 //! - **Account tokens live in process memory only** (Go: "a restart asks for
 //!   re-entry"). `update_github_accounts` validates each token against
 //!   `GET /user` and keeps the list in RAM; the settings file
-//!   `.data/codeg-forge.json` persists without tokens. The two processes must
+//!   `.data/codepluse-forge.json` persists without tokens. The two processes must
 //!   not share this state, so the whole forge surface flips as one unit —
 //!   while any forge command is still answered by Go, its in-memory accounts
 //!   are the only ones that exist, which is exactly why these commands move
@@ -133,7 +133,7 @@ fn fresh_state(root: &Path) {
 }
 
 fn settings_path(root: &Path) -> PathBuf {
-    root.join(".data").join("codeg-forge.json")
+    root.join(".data").join("codepluse-forge.json")
 }
 
 /// forge.go `accountFor`: the explicit account when given, else the first one.
@@ -941,7 +941,7 @@ fn folder_remote(guard: &ForgeState, folder_id: i64) -> Result<(String, String),
 
 /// The workspace document's folder row path (worktask_run.go `folderRow`).
 fn workspace_folder_path(root: &Path, folder_id: i64) -> Result<String, String> {
-    let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))?;
+    let doc = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))?;
     Ok(doc
         .as_ref()
         .and_then(|doc| doc.get("folders"))
@@ -1182,7 +1182,7 @@ mod tests {
         // token 只在内存：update 不写设置文件（Go 同样只在 settings_set 落盘）。
         assert!(
             !settings_path(&root).exists(),
-            "update_github_accounts 不应写 codeg-forge.json"
+            "update_github_accounts 不应写 codepluse-forge.json"
         );
     }
 
@@ -1271,7 +1271,7 @@ mod tests {
         let project = root.join("proj");
         std::fs::create_dir_all(&project).unwrap();
         std::fs::write(
-            root.join(".data").join("codeg-workspace.json"),
+            root.join(".data").join("codepluse-workspace.json"),
             json!({"next": 2, "folders": [{"id": 1, "name": "p", "path": project.to_string_lossy(), "kind": "regular", "open": true}]}).to_string(),
         ).unwrap();
         let run = |args: &[&str]| {
@@ -1469,7 +1469,7 @@ mod tests {
         let project = root.join("proj");
         std::fs::create_dir_all(&project).unwrap();
         std::fs::write(
-            root.join(".data").join("codeg-workspace.json"),
+            root.join(".data").join("codepluse-workspace.json"),
             json!({"next": 2, "folders": [{"id": 1, "name": "p", "path": project.to_string_lossy(), "kind": "regular", "open": true}]}).to_string(),
         ).unwrap();
         let _ = std::process::Command::new("git")

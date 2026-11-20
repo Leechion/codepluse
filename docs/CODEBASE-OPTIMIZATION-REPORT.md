@@ -1,6 +1,6 @@
 # codepluse 代码库全面解析与 less is more 优化报告
 
-日期：2026-11-15 · 范围：`E:\code\codepluse`（Rust 后端 + `codeg-ui` Next.js 前端 + Tauri 桌面壳）
+日期：2026-11-15 · 范围：`E:\code\codepluse`（Rust 后端 + `codepluse-ui` Next.js 前端 + Tauri 桌面壳）
 口径：只写有实测证据的结论；每个优化项附验证结果。
 
 ---
@@ -10,12 +10,12 @@
 | 区域 | 文件数 | 源码体积 | 说明 |
 |---|---|---|---|
 | `src-tauri/src` | 74 个 `.rs` | ≈ 2,277 KB | Rust 后端（原 Go sidecar 命令已全部归并至此） |
-| `codeg-ui/src/components` | 910 | ≈ 10,885 KB | 前端最大区，UI 组件主体 |
-| `codeg-ui/src/lib` | 480 | ≈ 4,130 KB | api.ts 防腐层、types.ts 契约、工具库 |
-| `codeg-ui/src/contexts + stores + hooks` | 166 | ≈ 2,814 KB | 状态层 |
-| `codeg-ui/src/app + i18n + types` | 70 | ≈ 189 KB | 路由（40 页静态导出）+ 10 语言文案 |
+| `codepluse-ui/src/components` | 910 | ≈ 10,885 KB | 前端最大区，UI 组件主体 |
+| `codepluse-ui/src/lib` | 480 | ≈ 4,130 KB | api.ts 防腐层、types.ts 契约、工具库 |
+| `codepluse-ui/src/contexts + stores + hooks` | 166 | ≈ 2,814 KB | 状态层 |
+| `codepluse-ui/src/app + i18n + types` | 70 | ≈ 189 KB | 路由（40 页静态导出）+ 10 语言文案 |
 
-磁盘大头（非源码）：`src-tauri/target` ≈ 19 GB、`codeg-ui`（node_modules + out + .next）≈ 2.2 GB、`node_modules` ≈ 871 MB。
+磁盘大头（非源码）：`src-tauri/target` ≈ 19 GB、`codepluse-ui`（node_modules + out + .next）≈ 2.2 GB、`node_modules` ≈ 871 MB。
 
 **架构一句话**：Tauri 壳内嵌 axum 服务（127.0.0.1:8840）+ WebView2 加载静态导出页；前端 `api.ts` 统一发 `POST /api/<command>`，后端 `EXT_MODULES` 表驱动派发（`owns`/`handle`），阻塞 I/O 一律 `spawn_blocking`，ACP 运行时独占异步层。134 条原 Go 命令已全部有 Rust 所有者（审计 `calls without a Rust command owner: 0`，197 条新测试）。
 
@@ -30,8 +30,8 @@
 - **症状**：设置 → 技能包 → 办公工具 tab 渲染 `This page couldn't load`，CDP 捕获 `TypeError: j.map is not a function`，且后续「界面/自定义」tab 连带不可达。
 - **根因**：`src-tauri/src/backend/office.rs` 的 `officecli_list_skills` 返回信封对象 `{"skills":[...]}`，而前端契约（`api.ts` → `OfficecliSkill[]`）是**裸数组**——组件直接 `skills.map(...)`。`officecli_sync_skills` 也返回同一形状，前端却按 `SkillSyncReport {synced, errors}` 读 `report.errors.length`；`officecli_skill_read_content` 返回对象而前端把返回值当字符串直接渲染。
 - **修复**（`office.rs`，前端零改动）：
-  - `list_skills` → 裸数组，且补齐 `OfficecliSkill` 声明的全部字段（`category` 按文件名推导、`icon`、`sortOrder`、`installedCentrally`=是否随 `codeg-assets` 分发、`displayName/description` 本地化映射）；
-  - `sync_skills` → 真实同步逻辑（把 `codeg-assets` 中央技能拷入 `.data/office-skills`，**不覆盖已有本地副本**）+ `{synced, errors}` 报告；
+  - `list_skills` → 裸数组，且补齐 `OfficecliSkill` 声明的全部字段（`category` 按文件名推导、`icon`、`sortOrder`、`installedCentrally`=是否随 `codepluse-assets` 分发、`displayName/description` 本地化映射）；
+  - `sync_skills` → 真实同步逻辑（把 `codepluse-assets` 中央技能拷入 `.data/office-skills`，**不覆盖已有本地副本**）+ `{synced, errors}` 报告；
   - `skill_read_content` → 裸字符串。
 - **验证**：`cargo test --release backend::office` 14/14 通过（新增 `sync_skills_reports_counts_and_leaves_existing_copies_alone`，改写 2 个旧断言）；部署后真机 CDP 逐个点击 5 个子 tab（专家/科学研究/办公工具/界面/自定义）零异常，办公工具与自定义显示诚实空态（0 列，本机未分发办公技能）。
 
@@ -88,7 +88,7 @@
 
 | 验证 | 结果 |
 |---|---|
-| `codeg-ui` `pnpm exec tsc --noEmit` | exit 0 |
+| `codepluse-ui` `pnpm exec tsc --noEmit` | exit 0 |
 | 触及的 11 个测试文件（技能矩阵 5 + harness 3 + delegation 1 + matrix/packs 2），`--testTimeout=20000` | 全绿（58 tests；delegation 单独复跑 18/18） |
 | `cargo check` / `cargo build --release` | 干净（仅既有 warning） |
 | `cargo test --release --bin codepluse`（全量） | 见下「最终门禁」 |
@@ -97,7 +97,7 @@
 
 ### 最终门禁
 
-- `codeg-ui`：`tsc --noEmit` exit 0；`pnpm build` exit 0（40 页静态导出）。
+- `codepluse-ui`：`tsc --noEmit` exit 0；`pnpm build` exit 0（40 页静态导出）。
 - 后端：`cargo build --release` exit 0；全量 `cargo test --release --bin codepluse`：497 条中唯一失败为既有环境性 ConPTY（`CreatePseudoConsole() 0x80070006`，`terminal.rs`，本轮零改动、与代码无关），其余全绿。
 - 常驻实例已以**不带** `--remote-debugging-port` 方式重启，`/api/health` 200。
 
@@ -105,11 +105,11 @@
 
 - `src-tauri/src/backend/office.rs`（契约修复 + 真实同步 + 测试改写）
 - `src-tauri/src/backend/mod.rs`（catalog 预热线程）
-- `codeg-ui/src/lib/custom-agents.ts`（`isProviderAgent`）
-- `codeg-ui/src/components/settings/{custom-skills,generative-ui,experts,office-tools,science}-settings.tsx`（过滤统一）
-- `codeg-ui/src/components/settings/delegation-settings.tsx`（直连 HarnessProfiles）
-- 删除 `codeg-ui/src/components/settings/harness-instance-settings.tsx`
-- `codeg-ui/src/components/settings/delegation-settings.test.tsx`（断言对齐现 UI）
+- `codepluse-ui/src/lib/custom-agents.ts`（`isProviderAgent`）
+- `codepluse-ui/src/components/settings/{custom-skills,generative-ui,experts,office-tools,science}-settings.tsx`（过滤统一）
+- `codepluse-ui/src/components/settings/delegation-settings.tsx`（直连 HarnessProfiles）
+- 删除 `codepluse-ui/src/components/settings/harness-instance-settings.tsx`
+- `codepluse-ui/src/components/settings/delegation-settings.test.tsx`（断言对齐现 UI）
 - 此前各轮：`assistant-editor-dialog.tsx`、`harness-profiles.tsx`、10 个 i18n JSON、`acp/runtime.rs`、`acp/connections.rs` 等（详见各自验收记录）
 
 **一句话总结**：这一轮把「只显示供应商」的诉求从子智能体下拉推广到了全部 5 个技能矩阵，顺手修掉了办公工具 tab 的整页崩溃（后端返回形状与前端契约不符的真 bug）、给 4.9 s 的供应商目录加了启动预热、删掉了一个转发文件和 7 条陈旧断言——每一项都有真机或测试证据；更大的既有债务（headless panic、warning 清理、target 19 GB）已列清单待批。

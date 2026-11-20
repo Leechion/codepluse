@@ -1,4 +1,4 @@
-//! Git command surface, ported from `server-go/internal/codeg/git.go` (48
+//! Git command surface, ported from `server-go/internal/codepluse/git.go` (48
 //! commands) plus the four `open_*_window` helpers from `server.go`.
 //!
 //! Ported here: every git command except `git_commit`, which stays in Go
@@ -11,8 +11,8 @@
 //!
 //! - `resolve`         = `cmd/serve/state.go:resolveWorkdir`  (symlink-safe,
 //!   constrained to the workspace root unless `HARNESS_HUB_ALLOW_ANY_PATH=1`)
-//! - `resolve_file`    = `codeg/files.go:resolveFile` (readable roots =
-//!   workspace root + every opened folder from `codeg-workspace.json`)
+//! - `resolve_file`    = `codepluse/files.go:resolveFile` (readable roots =
+//!   workspace root + every opened folder from `codepluse-workspace.json`)
 //!
 //! Calls run through `spawn_blocking` in the dispatcher: `git fetch/push` can
 //! legitimately take tens of seconds, and the proxy must keep relaying WS
@@ -110,7 +110,7 @@ pub fn handle(root: &Path, command: &str, args: &Value) -> Option<Result<Value, 
 }
 
 pub fn load_settings(root: &Path) {
-    let path = root.join(".data").join("codeg-workspace.json");
+    let path = root.join(".data").join("codepluse-workspace.json");
     let configured = store_file::read_json(&path)
         .ok()
         .flatten()
@@ -352,10 +352,10 @@ pub(crate) fn resolve_openable(root: &Path, input: &str) -> Result<PathBuf, Stri
     Ok(resolve_existing_path(trimmed, root))
 }
 
-/// `codeg/files.go:readableRoots` — workspace root + every opened folder.
+/// `codepluse/files.go:readableRoots` — workspace root + every opened folder.
 pub(crate) fn readable_roots(root: &Path) -> Vec<PathBuf> {
     let mut roots = vec![root.to_path_buf()];
-    if let Ok(raw) = std::fs::read(root.join(".data").join("codeg-workspace.json")) {
+    if let Ok(raw) = std::fs::read(root.join(".data").join("codepluse-workspace.json")) {
         if let Ok(data) = serde_json::from_slice::<Value>(&raw) {
             if let Some(folders) = data.get("folders").and_then(|v| v.as_array()) {
                 for folder in folders {
@@ -371,7 +371,7 @@ pub(crate) fn readable_roots(root: &Path) -> Vec<PathBuf> {
     roots
 }
 
-/// `codeg/files.go:resolveFile`.
+/// `codepluse/files.go:resolveFile`.
 pub(crate) fn resolve_file(root: &Path, folder: &Path, input: &str) -> Result<PathBuf, String> {
     let candidate = if Path::new(input).is_absolute() {
         PathBuf::from(input)
@@ -853,7 +853,7 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
             return Ok(git_info(&path));
         }
         "get_git_settings" => {
-            let path = root.join(".data").join("codeg-workspace.json");
+            let path = root.join(".data").join("codepluse-workspace.json");
             let doc = store_file::read_json(&path)?.unwrap_or_else(|| json!({}));
             return Ok(doc
                 .get("settings")
@@ -904,7 +904,7 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
                 }
             }
 
-            let path = root.join(".data").join("codeg-workspace.json");
+            let path = root.join(".data").join("codepluse-workspace.json");
             let _guard = store_file::lock(&path)?;
             let mut doc = store_file::read_json(&path)?.unwrap_or_else(|| json!({}));
             let object = doc.as_object_mut().ok_or("工作区设置格式无效")?;
@@ -1067,7 +1067,7 @@ fn run(root: &Path, command: &str, a: &Value) -> Result<Value, String> {
         let path = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
         let path_key = normalize_path(&path.to_string_lossy());
         let doc = crate::backend::store_file::read_json(
-            &root.join(".data").join("codeg-workspace.json"),
+            &root.join(".data").join("codepluse-workspace.json"),
         )?;
         let folder_id = doc
             .as_ref()
@@ -2288,7 +2288,7 @@ mod tests {
         let outside = temp_dir("ws-opened");
         std::fs::create_dir_all(root.join(".data")).unwrap();
         std::fs::write(
-            root.join(".data").join("codeg-workspace.json"),
+            root.join(".data").join("codepluse-workspace.json"),
             serde_json::to_vec(&json!({
                 "folders": [{"id": 9, "path": outside.to_string_lossy(), "open": true}]
             }))

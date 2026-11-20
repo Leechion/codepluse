@@ -1,4 +1,4 @@
-//! 工作区状态流：`server-go/internal/codeg/workspace.go` 的移植（3 条命令）。
+//! 工作区状态流：`server-go/internal/codepluse/workspace.go` 的移植（3 条命令）。
 //!
 //! `start/stop_workspace_state_stream` 维护引用计数的观察器，创建时起一个
 //! 1.5 秒轮询任务；`get_workspace_snapshot` 顺手也建观察器（refs 不加，

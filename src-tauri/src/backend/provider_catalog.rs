@@ -1,6 +1,6 @@
 //! Provider catalog: the `providers` package's read/assemble surface, ported
 //! from `server-go/internal/providers/{providers,ccswitch,native,writeback}.go`
-//! and `internal/codeg/providermodels.go`.
+//! and `internal/codepluse/providermodels.go`.
 //!
 //! Ported (5 commands): `codepluse_providers_list` (`providers.Public`),
 //! `codepluse_provider_activate` (`providers.Activate`),

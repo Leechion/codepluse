@@ -1,4 +1,4 @@
-//! Computer tools, ported from `server-go/internal/codeg/computer.go`.
+//! Computer tools, ported from `server-go/internal/codepluse/computer.go`.
 //!
 //! The management layer (settings, window enumeration, thumbnails, share
 //! bookkeeping) is real; the input driver (synthetic mouse/keyboard by the

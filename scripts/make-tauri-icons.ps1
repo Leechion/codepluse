@@ -1,11 +1,11 @@
 ﻿<#
     Generates the icon set Tauri expects (32/128/256 PNG + multi-size ICO)
-    from the single app icon PNG. The ICO comes from make-codeg-icon.ps1 so
+    from the single app icon PNG. The ICO comes from make-codepluse-icon.ps1 so
     Explorer and the installer both get alpha-correct frames.
 #>
 [CmdletBinding()]
 param(
-    [string] $SourcePng = (Join-Path (Split-Path -Parent $PSScriptRoot) 'codeg-ui\public\icon-512x512.png')
+    [string] $SourcePng = (Join-Path (Split-Path -Parent $PSScriptRoot) 'codepluse-ui\public\icon-512x512.png')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,5 +43,5 @@ try {
     }
 } finally { $image.Dispose() }
 
-& (Join-Path $PSScriptRoot 'make-codeg-icon.ps1') -SourcePng $SourcePng -OutIco (Join-Path $icons 'icon.ico')
+& (Join-Path $PSScriptRoot 'make-codepluse-icon.ps1') -SourcePng $SourcePng -OutIco (Join-Path $icons 'icon.ico')
 Write-Host "[tauri] 图标已生成：$icons"

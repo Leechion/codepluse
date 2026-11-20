@@ -1,4 +1,4 @@
-//! The event WebSocket protocol, ported from `server-go/internal/codeg/websocket.go`.
+//! The event WebSocket protocol, ported from `server-go/internal/codepluse/websocket.go`.
 //!
 //! The sidecar used to own this protocol; with the Go process gone the Rust
 //! front door has to speak it itself. The frame vocabulary is unchanged:

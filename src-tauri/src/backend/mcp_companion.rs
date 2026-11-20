@@ -1,16 +1,16 @@
-//! The `codeg-mcp` companion: the stdio MCP server the agents spawn, and the
+//! The `codepluse-mcp` companion: the stdio MCP server the agents spawn, and the
 //! tool surface it exposes.
 //!
-//! Ported from `server-go/internal/codeg/companion.go` (the JSON-RPC stdio
+//! Ported from `server-go/internal/codepluse/companion.go` (the JSON-RPC stdio
 //! server and the tool definitions), `delegation_profiles.go`
 //! (`delegationAgents`) and `webfetch.go` (`fetchURL`).
 //!
 //! The agent side:
 //! ```text
-//! codepluse.exe mcp-codeg <endpoint> <token>
+//! codepluse.exe mcp-codepluse <endpoint> <token>
 //! ```
 //! speaks MCP over stdio and forwards every `tools/call` to `<endpoint>`
-//! (`/api/codeg_mcp`) with the caller's bearer token. The server side
+//! (`/api/codepluse_mcp`) with the caller's bearer token. The server side
 //! ([`dispatch`]) answers the tool call.
 //!
 //! The collaboration tools (`delegate_to_agent`, `resume_delegation`,
@@ -170,7 +170,7 @@ pub fn tool_definitions() -> Vec<Value> {
 /// Go `MainCompanion` (companion.go:52).
 pub fn main_companion(args: &[String]) -> i32 {
     if args.len() != 2 {
-        eprintln!("mcp-codeg requires endpoint and token");
+        eprintln!("mcp-codepluse requires endpoint and token");
         return 2;
     }
     serve(&args[0], &args[1])
@@ -193,7 +193,7 @@ fn serve(endpoint: &str, token: &str) -> i32 {
     {
         Ok(client) => client,
         Err(error) => {
-            eprintln!("codeg-mcp: 客户端初始化失败：{error}");
+            eprintln!("codepluse-mcp: 客户端初始化失败：{error}");
             return 1;
         }
     };
@@ -226,7 +226,7 @@ fn serve(endpoint: &str, token: &str) -> i32 {
                     Ok(json!({
                         "protocolVersion": "2024-11-05",
                         "capabilities": { "tools": {} },
-                        "serverInfo": { "name": "codeg-mcp-rust", "version": "0.1.0" },
+                        "serverInfo": { "name": "codepluse-mcp-rust", "version": "0.1.0" },
                     })),
                 );
             }
@@ -737,11 +737,11 @@ mod tests {
     /// ACP instance profiles never surface, disabled or deleted rows stay out.
     #[test]
     fn delegation_agents_lists_enabled_assistants_only() {
-        let dir = std::env::temp_dir().join(format!("codeg-mcp-agents-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("codepluse-mcp-agents-{}", std::process::id()));
         let data = dir.join(".data");
         std::fs::create_dir_all(&data).unwrap();
         std::fs::write(
-            data.join("codeg-workspace.json"),
+            data.join("codepluse-workspace.json"),
             json!({
                 "assistants": [
                     {"id": 1, "name": "调研", "agent_type": "inst_claude2",

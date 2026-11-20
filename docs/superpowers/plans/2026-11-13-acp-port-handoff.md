@@ -42,7 +42,7 @@ store_conv,question,splits,tool_identity,wire}.rs
 
 1. **协作域（delegation/companion MCP）未移植**：`acp_respond_task_split`
    的 approve 路径返回明确错误（该路径只在 companion 提案后可达，Rust 侧
-   splits 注册表恒空）；codeg-mcp 伴生进程端点仍指 Go sidecar（其 caller
+   splits 注册表恒空）；codepluse-mcp 伴生进程端点仍指 Go sidecar（其 caller
    注册表在 Go 侧，token 校验 401 → 模型侧协作工具失败，不影响对话主链）。
 2. **driver 指纹哈希**：`providerVersion` 的哈希字节与 Go 不同（JSON 编码器
    不同）——只影响进程池 key 命名，acp 命令整体路由到一侧，无跨进程混用。

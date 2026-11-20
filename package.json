@@ -4,17 +4,19 @@
   "private": true,
   "description": "多 Harness 智能体统一协调中枢：注册、派发、通信、上下文隔离、审计",
   "scripts": {
-    "start": "powershell -NoProfile -File scripts/start-codeg.ps1",
-    "codeg:build": "pnpm --dir codeg-ui build",
-    "codeg:start": "powershell -NoProfile -File scripts/start-codeg.ps1",
-    "codeg:desktop:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-tauri.ps1",
-    "codepluse:build": "pnpm --dir codeg-ui build",
-    "codepluse:start": "powershell -NoProfile -File scripts/start-codeg.ps1",
+    "start": "powershell -NoProfile -File scripts/start-codepluse.ps1",
+    "codepluse:build": "pnpm --dir codepluse-ui build",
+    "codepluse:start": "powershell -NoProfile -File scripts/start-codepluse.ps1",
+    "codepluse:desktop:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-tauri.ps1",
+    "codepluse:build": "pnpm --dir codepluse-ui build",
+    "codepluse:start": "powershell -NoProfile -File scripts/start-codepluse.ps1",
     "codepluse:setup-auto-update": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-codepluse-update-hook.ps1",
     "codepluse:refresh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rebuild-after-pull.ps1",
-    "codepluse:desktop:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-tauri.ps1",
+    "codepluse:desktop:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-tauri.ps1",
+
     "tauri:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tauri-dev.ps1",
-    "tauri:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-tauri.ps1"
+    "tauri:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-tauri.ps1"
+
   },
   "engines": {
     "node": ">=22"

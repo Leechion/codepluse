@@ -8,10 +8,10 @@
 集成回主检出时只拷新文件 + 3 个共享文件的小 hunk。
 
 **Architecture:** Rust 侧常驻 `Runtime`（tokio 进程池 + stdio NDJSON JSON-RPC + 会话记录 +
-权限卡 + 可暂停回合时钟），连接层（warm pool / 事件流 / 快照）与 Go `codeg` 包逐行为对应。
+权限卡 + 可暂停回合时钟），连接层（warm pool / 事件流 / 快照）与 Go `codepluse` 包逐行为对应。
 Agent 注册表按 Go boot 装配逻辑从持久化文件**每次请求无状态重建**（内置探针 + Store.CustomAgents
 + harness-instances.json + acp-agents.json + Agents overlay），与未移植的 I 组命令保持一致。
-对话/回合落盘沿用批次 5 约定：每次请求经 `store_file` 锁读-改-写 `codeg-workspace.json`，
+对话/回合落盘沿用批次 5 约定：每次请求经 `store_file` 锁读-改-写 `codepluse-workspace.json`，
 `goformat::marshal_store` 落盘，Go 侧 `reloadIfChangedLocked` 兜底。WS 事件经 mod.rs 既有
 `emit_events` 注入。
 
@@ -21,7 +21,7 @@ Agent 注册表按 Go boot 装配逻辑从持久化文件**每次请求无状态
 `preserve_order`。
 
 **Spec:** `docs/RUST-BACKEND-REMAINING.md` C 组；Go 源码以本 worktree `server-go/`（eedc419）
-为准：`internal/acp/runtime.go`、`internal/codeg/{server,connections,fork,preflight,
+为准：`internal/acp/runtime.go`、`internal/codepluse/{server,connections,fork,preflight,
 agentconfig,custom_launch,custom_archive,tool_identity,question,wire,store,history,
 companion}.go`、`cmd/serve/{wiring,cli,provider_profiles,official_accounts,dsh_model,
 anthropic_base,state}.go`。测试 fixture：`fixtures/acp-agent.cjs`（node）。
@@ -35,8 +35,8 @@ anthropic_base,state}.go`。测试 fixture：`fixtures/acp-agent.cjs`（node）�
 - 响应包络：成功 `go_json`（canon 后 marshal_preserve + `\n`，200）；失败 `fail()`（400
   `task_execution_failed`）；唯一例外 `turn_in_progress` → 409
   `{"code":"turn_in_progress","message":"A turn is already in progress"}`（Go server.go:275）。
-- 状态文件：desktop 下 `CODEG_MODE=1`（`HARNESS_HUB_CODEG=1`）→ `sessions.json` 换名
-  `.data/codeg-sessions.json`（main.go:513-516）；`:memory:` 分支仅测试用。
+- 状态文件：desktop 下 `CODEPLUSE_MODE=1`（`HARNESS_HUB_CODEPLUSE=1`）→ `sessions.json` 换名
+  `.data/codepluse-sessions.json`（main.go:513-516）；`:memory:` 分支仅测试用。
 - 端口纪律：任何双跑/运行验证用非 8840 端口；不在主检出发 cargo。
 - Go 侧源文件零改动（CRLF 陷阱 + B 会话并行）。
 - 会话记录 JSON 需 Go wire 字段序（serde struct 声明序 + `preserve_order`），仅
@@ -49,7 +49,7 @@ anthropic_base,state}.go`。测试 fixture：`fixtures/acp-agent.cjs`（node）�
    无限顺延；cancel 后 10s 强杀 → 期待 `ACP 会话超时`（runtime_test.go:169-185 对应两个测试）。
 2. **权限卡不阻塞读循环**：`session/request_permission` 在独立任务应答，通知按 wire 序先于
    最终响应落库（TestPermissionRequestDoesNotBlockStreamReader）。
-3. **只读会话越权**：`AllowInternalTool` 只放行 codeg-mcp 工具且有 caller 的连接；原生写请求
+3. **只读会话越权**：`AllowInternalTool` 只放行 codepluse-mcp 工具且有 caller 的连接；原生写请求
    在 readonly 模式一律 cancelled（TestOnlyOwnedInternalToolsMayBeAllowedInReadOnlySessions）。
 4. **fork 事务原子性**：store 锁 + 连接锁双校验、失败回滚（ForgetFork + 内存快照还原），
    `turn_in_progress` 用 TryLock（fork.go 全文）。
@@ -85,7 +85,7 @@ anthropic_base,state}.go`。测试 fixture：`fixtures/acp-agent.cjs`（node）�
   `nil_if_empty(Value)->Value`、`mode_wire(&Value)->Value`、`config_wire(&Value)->Vec<Value>`、
   `permission_options(&Value)->Vec<Value>`、`tool_state_wire(&[Value])->Vec<Value>`、
   `persisted_blocks(&Value,&[Value],&str)->Vec<Value>`、`tool_output_text(&str)->String`。
-  语义逐条对照 `codeg/wire.go` + `history.go:61-135`。
+  语义逐条对照 `codepluse/wire.go` + `history.go:61-135`。
 
 - [ ] **Step 1:** 先写测试（每函数 ≥1 例，取 Go 行为构造期望 JSON；configWire 空 opts 走
   models 兜底分支、persistedBlocks 的 tool_call_ref→tool_use+tool_result 展开序）。
@@ -190,7 +190,7 @@ anthropic_base,state}.go`。测试 fixture：`fixtures/acp-agent.cjs`（node）�
 - Create: `src-tauri/src/backend/acp/store_conv.rs`
 
 **Interfaces:**
-- Produces（全部一次锁内完成读-改-写，`store_file::lock(codeg-workspace.json)`）:
+- Produces（全部一次锁内完成读-改-写，`store_file::lock(codepluse-workspace.json)`）:
   `open_folder(doc,path,kind)`、`create_conversation(doc,folder,agent,title,parent)`、
   `append_turn(doc,conv_id,role,body)`、`conversation(doc,id)`、`save(doc)`、
   `prompt_side_write(root, conn, conv_args, user_blocks) -> Result<(conv_id,folder_id),String>`
@@ -239,8 +239,8 @@ anthropic_base,state}.go`。测试 fixture：`fixtures/acp-agent.cjs`（node）�
   resource_link/resource（attachments.go 全语义、20MiB 上限、file:// 上传目录校验）、store 写、
   spawn run_with_content）、`run_with_content`（delegation 前缀常量全文照抄 + delegationContext
   （Rust tasks 空则空串）+ splitContext + PromptBlocks + 完成段）、`release_run/cancel/
-  disconnect/connection_list`、`extra_mcp`（companion token 注册 + codeg-mcp server 条目，
-  endpoint 取 Go `Base`，实测值见 wiring 装配——实现时从 main.go 找 codeg.New 调用点钉死）。
+  disconnect/connection_list`、`extra_mcp`（companion token 注册 + codepluse-mcp server 条目，
+  endpoint 取 Go `Base`，实测值见 wiring 装配——实现时从 main.go 找 codepluse.New 调用点钉死）。
 - turn_in_progress 错误以精确字符串返回（Task 12 转 409）。
 
 - [ ] **Step 1:** 测试：fixture agent 全链 connect→prompt（echo）→快照出 turn→cancel 路径；
@@ -358,6 +358,6 @@ anthropic_base,state}.go`。测试 fixture：`fixtures/acp-agent.cjs`（node）�
 - 类型一致性：Emitter/Resolver/Launch/Outcome 命名在 Task 5/6/7/8/12 间一致。
 - Review Focus 5 条各自落到 Task 6（时钟/权限/只读）、Task 9（busy 自愈）、Task 8（warm）。
 - 已知偏差（写进 handoff）：①delegation/companion 未移植 → acp_respond_task_split approve
-  与 codeg-mcp 工具调用在 Rust 侧不可用（前者不可达、后者 401，模型侧表现为协作工具失败，
+  与 codepluse-mcp 工具调用在 Rust 侧不可用（前者不可达、后者 401，模型侧表现为协作工具失败，
   不影响对话主链）；②`get_conversation` 族仍归 ④⑤；③acp_update_agent_config 与 env 共用
   updateAgentSettings。

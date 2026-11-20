@@ -7,9 +7,9 @@
 
 ## 一、先说一个影响解读的事实
 
-**这 134 条命令在原 Go sidecar 里一条都没有实现过。** 把 Go 的最终状态（tag 前后提交 `76712f5`）解出来逐条搜字面量，只有 `codepluse_provider_delete` 在 `server-go/internal/codeg/server.go` 里有原型（`providers.Delete`）。
+**这 134 条命令在原 Go sidecar 里一条都没有实现过。** 把 Go 的最终状态（tag 前后提交 `76712f5`）解出来逐条搜字面量，只有 `codepluse_provider_delete` 在 `server-go/internal/codepluse/server.go` 里有原型（`providers.Delete`）。
 
-所以这批命令没有"照 Go 移植"这条路，契约只能从前端反推：参数名照 `codeg-ui/src/lib/api.ts` 等调用点，返回结构照 `codeg-ui/src/lib/types.ts`（宠物组另有 `lib/pet/types.ts`）。**前端一行没改**，是后端去对齐前端。
+所以这批命令没有"照 Go 移植"这条路，契约只能从前端反推：参数名照 `codepluse-ui/src/lib/api.ts` 等调用点，返回结构照 `codepluse-ui/src/lib/types.ts`（宠物组另有 `lib/pet/types.ts`）。**前端一行没改**，是后端去对齐前端。
 
 ## 二、总览
 
@@ -113,7 +113,7 @@ const EXT_MODULES: &[ExtModule] = &[ /* 18 个模块，18 行 */ ];
 
 | # | 命令 | 状态 | 说明 |
 |---:|---|---|---|
-| 36 | `codex_bundled_catalog` | implemented | 先读 `codeg-assets/codex-models.json` 再读 `.data` 快照；仓库无随附快照时回空数组（不编造） |
+| 36 | `codex_bundled_catalog` | implemented | 先读 `codepluse-assets/codex-models.json` 再读 `.data` 快照；仓库无随附快照时回空数组（不编造） |
 | 37 | `codex_catalog_plan_preview` | implemented | 回显 `configToml`、探测 `model_catalog_json` 接管、解析默认 `model`；不联网不写盘 |
 | 38 | `codex_endpoint_catalog_cached` | implemented | 只读 `.data/codex-catalog-cache.json`；命中/请求不符(mismatch:"request")/无缓存(none) |
 | 39 | `codex_endpoint_catalog_published` | implemented | 读 `.data/codex-catalog-published.json`；空→none，指纹不符→request，格式不符→format |
@@ -153,7 +153,7 @@ const EXT_MODULES: &[ExtModule] = &[ /* 18 个模块，18 行 */ ];
 | 63 | `create_shadcn_project` | implemented | 建 `src/components`/`src/lib` + 最小 package.json；不跑 pnpm install |
 | 64 | `detect_hyperframes_skills` | implemented | 扫 `.claude/.codex/.gemini/skills/hyperframes` 真实检测，回每代理 installed 状态 |
 | 65 | `install_hyperframes_skills` | limited | 落 `.data/hyperframes-skills.json` 状态 `requested`；不克隆、不写 installed:true、不伪装下载成功 |
-| 66 | `get_folder_conversation_outline` | implemented | 读既有 `.data/codeg.db` 轮次（复用 `turn_store::all_turns_for`），边界切片 + FNV-1a 指纹 |
+| 66 | `get_folder_conversation_outline` | implemented | 读既有 `.data/codepluse.db` 轮次（复用 `turn_store::all_turns_for`），边界切片 + FNV-1a 指纹 |
 | 67 | `import_local_conversations` | implemented | 可按 folderId 过滤对账 tallies，台账落 `.data/imports/` |
 | 68 | `import_selected_sessions` | implemented | tallies imported/updated/restored/not_found/failed；缺键记 failed，不编造 |
 | 69 | `scan_importable_sessions` | implemented | 扫 `.data/import-sessions/{claude,codex}` 的 jsonl/json，按 (external_id, agent_type) 对账 new/imported/deleted |
@@ -162,7 +162,7 @@ const EXT_MODULES: &[ExtModule] = &[ /* 18 个模块，18 行 */ ];
 
 | # | 命令 | 状态 | 说明 |
 |---:|---|---|---|
-| 70 | `get_log_settings` | implemented | 读 `.data/log-settings.json`，回 `{level,targets,env_locked}`；CODEG_LOG/RUST_LOG 决定 env_locked |
+| 70 | `get_log_settings` | implemented | 读 `.data/log-settings.json`，回 `{level,targets,env_locked}`；CODEPLUSE_LOG/RUST_LOG 决定 env_locked |
 | 71 | `get_recent_logs` | implemented | 环形缓冲（上限 2000）倒序取最新 limit 条再正序返回；minLevel 严重度过滤 + search 子串过滤 |
 | 72 | `list_log_files` | implemented | 扫 `.data/logs/*.log`，回 `{name,size_bytes,modified_ms}`，新在前 |
 | 73 | `open_logs_dir` | implemented | 确保目录存在并回绝对路径 |
@@ -200,8 +200,8 @@ const EXT_MODULES: &[ExtModule] = &[ /* 18 个模块，18 行 */ ];
 | 90 | `mcp_search_marketplace` | implemented | `GET {base}/servers?provider_id&query&limit`；上游不支持关键词时本地兜底过滤 |
 | 91 | `mcp_set_server_apps` | implemented | 更新持久记录 apps；未知 id 回 null；apps 非数组 Err |
 | 92 | `mcp_upsert_local_server` | implemented | 校验 id（挡分隔符/`..`/`:`）、spec（stdio 必 command，http/sse/local/remote 必 url）、apps 白名单 |
-| 93 | `set_codeg_mcp_tool_group` | implemented | 9 组白名单落 `.data/mcp-tool-groups.json` 并发 `mcp-tool-groups://changed`；非法组名/非布尔 Err |
-| 94 | `start_codeg_mcp_service` | limited | `/api/codeg_mcp` 随主进程内联绑定，无独立 broker 可拉起；幂等空转回 null |
+| 93 | `set_codepluse_mcp_tool_group` | implemented | 9 组白名单落 `.data/mcp-tool-groups.json` 并发 `mcp-tool-groups://changed`；非法组名/非布尔 Err |
+| 94 | `start_codepluse_mcp_service` | limited | `/api/codepluse_mcp` 随主进程内联绑定，无独立 broker 可拉起；幂等空转回 null |
 
 ### OpenCode（7）
 
@@ -294,7 +294,7 @@ node scripts/audit-command-coverage.mjs --check
 
 `git status --porcelain`：**162 → 180 项**，新增正好 18 项 = 17 个新模块文件（untracked）+ `mod.rs`（唯一被改的既有文件）。
 
-- `codeg-ui/**` 零改动（前端没动，后端对齐前端）
+- `codepluse-ui/**` 零改动（前端没动，后端对齐前端）
 - `src-tauri/Cargo.toml`、`Cargo.lock` 零改动（没加新依赖）
 - `terminal.rs` / `office.rs` / `browser.rs` / `computer.rs` / `git.rs` / `account_channels.rs` / `acp/**` / `store_*` 等既有模块零改动
 - 无 `git commit` / `checkout` / `reset` / `stash`；桌面应用（127.0.0.1:8840）全程未被 kill、未被占用
@@ -307,6 +307,6 @@ node scripts/audit-command-coverage.mjs --check
 
 ## 八、24 条 limited 的完整清单（按前端类型返回确定形态，未编造数据）
 
-`acp_antigravity_login_finish`、`acp_antigravity_login_start`、`acp_cursor_auth_status`、`acp_cursor_list_models`、`acp_fetch_agent_latest_release`、`acp_install_uv_tool`、`acp_list_pi_model_capabilities`、`acp_qoder_auth_status`、`acp_update_system_agent`、`backup_active_agents`、`backup_create`、`computer_driver_install`、`install_hyperframes_skills`、`start_web_server`、`stop_web_server`、`git_generate_commit_message`、`start_codeg_mcp_service`、`close_pet_panel`、`close_pet_window`、`focus_conversation`、`open_pet_window`、`pet_show_context_menu`、`resize_pet_panel`、`toggle_pet_panel`
+`acp_antigravity_login_finish`、`acp_antigravity_login_start`、`acp_cursor_auth_status`、`acp_cursor_list_models`、`acp_fetch_agent_latest_release`、`acp_install_uv_tool`、`acp_list_pi_model_capabilities`、`acp_qoder_auth_status`、`acp_update_system_agent`、`backup_active_agents`、`backup_create`、`computer_driver_install`、`install_hyperframes_skills`、`start_web_server`、`stop_web_server`、`git_generate_commit_message`、`start_codepluse_mcp_service`、`close_pet_panel`、`close_pet_window`、`focus_conversation`、`open_pet_window`、`pet_show_context_menu`、`resize_pet_panel`、`toggle_pet_panel`
 
 这些共同的原因是三类：① 能力在独立进程/外部下载链路（ACP 运行时、uv 工具链、智能体整包更新、模型服务）；② 需要外部服务凭据（市场、微信）；③ 单窗口 Tauri 架构里没有独立宠物窗口/原生菜单句柄。

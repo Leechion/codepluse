@@ -1,6 +1,6 @@
 //! Web 服务（本地 HTTP 服务）的状态、配置与端口探测 —— 补全批次。
 //!
-//! 前端 `codeg-ui/src/lib/api.ts` 的 `getWebServerStatus` / `getWebServiceConfig` /
+//! 前端 `codepluse-ui/src/lib/api.ts` 的 `getWebServerStatus` / `getWebServiceConfig` /
 //! `probeWebServicePort` / `startWebServer` / `stopWebServer` /
 //! `updateWebServiceConfig` 已经在调这 6 条命令，但原 Go sidecar 与 Rust 都没有
 //! 实现过它们（Go 最终提交里搜不到这些字面量），所以契约只由调用点和

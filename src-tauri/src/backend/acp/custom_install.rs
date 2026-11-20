@@ -1,4 +1,4 @@
-//! Custom-agent install/launch primitives, ported from `codeg/
+//! Custom-agent install/launch primitives, ported from `codepluse/
 //! {custom_launch,custom_agents,custom_archive}.go`. The three install
 //! commands (`acp_prepare_npx_agent`, `acp_uninstall_agent`,
 //! `acp_clear_binary_cache`) run through `install_command` from the command
@@ -14,7 +14,7 @@ use crate::backend::acp::launch::Launch;
 use crate::backend::store_file;
 
 /// Mirror of Go's `customAgentDef` (custom_agents.go:45), as persisted under
-/// `Store.CustomAgents` in `codeg-workspace.json`.
+/// `Store.CustomAgents` in `codepluse-workspace.json`.
 #[derive(Clone, Debug, Default)]
 pub struct CustomAgentDef {
     pub registry_id: String,
@@ -88,7 +88,7 @@ fn valid_custom_id(id: &str) -> bool {
 /// `custom:` wire name from `Store.CustomAgents`.
 pub fn custom_def(root: &Path, wire: &str) -> Option<CustomAgentDef> {
     let rid = wire.strip_prefix("custom:")?;
-    let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json")).ok()??;
+    let doc = store_file::read_json(&root.join(".data").join("codepluse-workspace.json")).ok()??;
     let raw = doc.get("customAgents")?.get(rid)?.clone();
     Some(def_from_json(&raw))
 }
@@ -881,7 +881,7 @@ pub fn custom_agent_launch(root: &Path, agent: &Agent) -> Result<Option<Launch>,
 
 fn overlay_env_map(root: &Path, agent: &Agent) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
-    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    let Ok(Some(doc)) = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
     else {
         return out;
     };
@@ -998,7 +998,7 @@ mod tests {
     fn custom_def_reads_store_and_launch_roundtrip() {
         let root = temp_root("def");
         std::fs::write(
-            root.join(".data").join("codeg-workspace.json"),
+            root.join(".data").join("codepluse-workspace.json"),
             json!({
                 "customAgents": {
                     "hello": {"registryId": "hello", "name": "Hello", "description": "",

@@ -1,6 +1,6 @@
 //! 会话导入与文件夹大纲 —— 补全批次（4 条）。
 //!
-//! 前端（`codeg-ui/src/lib/api.ts`）已经在调用这些命令，但原 Go sidecar 与
+//! 前端（`codepluse-ui/src/lib/api.ts`）已经在调用这些命令，但原 Go sidecar 与
 //! Rust 都没有实现过它们，契约只由调用点参数名与 `types.ts` 返回结构决定：
 //!
 //! * `scan_importable_sessions` `{}` → `ScanResult { folders, no_folder_count,
@@ -15,7 +15,7 @@
 //!
 //! * L1：真实扫描本地会话源目录（Claude `.claude/projects`、Codex
 //!   `.codex/sessions` 下的 `.jsonl`/`.json`），按 `(external_id, agent_type)`
-//!   与 `.data/codeg-workspace.json` 里既有会话对账，给出 `new / imported /
+//!   与 `.data/codepluse-workspace.json` 里既有会话对账，给出 `new / imported /
 //!   deleted` 状态；扫描清单与导入台账落 `.data/`。
 //! * 测试隔离：会话源优先取 `root/.data/import-sessions/<agent>/` 镜像目录，
 //!   仅当镜像目录不存在时才回退到本机原生主目录；测试夹具都放在临时根目录内，
@@ -23,7 +23,7 @@
 //! * L3（limited）：真正写会话库（建会话、回填消息、重开文件夹）由既有
 //!   `store_writes` / `turn_store` 通道拥有，本模块不跨域写库；导入命令按对账
 //!   结果统计 tallies 并把所选会话记入 `.data/imports/` 台账，不编造会话内容。
-//! * 大纲命令只读 `.data/codeg.db` 里既有轮次，不存在的会话按报错处理。
+//! * 大纲命令只读 `.data/codepluse.db` 里既有轮次，不存在的会话按报错处理。
 
 use std::fs;
 use std::collections::{BTreeMap, HashSet};
@@ -71,7 +71,7 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
 // ── 路径与工作区文档 ──────────────────────────────────────────────────────
 
 fn workspace_path(root: &Path) -> PathBuf {
-    root.join(".data").join("codeg-workspace.json")
+    root.join(".data").join("codepluse-workspace.json")
 }
 
 fn scan_cache_path(root: &Path) -> PathBuf {
@@ -396,7 +396,7 @@ fn build_scan(root: &Path) -> Result<Value, String> {
         folder_rows.push(json!({
             "path": cwd,
             "name": name,
-            "exists_in_codeg": folder.is_some(),
+            "exists_in_codepluse": folder.is_some(),
             "folder_id": folder.and_then(|f| f.get("id")).cloned().unwrap_or(Value::Null),
             "agent_types": agent_types,
             "sessions": session_rows,
@@ -746,7 +746,7 @@ mod tests {
         let folder = &folders[0];
         assert_eq!(folder["path"], "/home/user/proj");
         assert_eq!(folder["folder_id"], 7);
-        assert_eq!(folder["exists_in_codeg"], true);
+        assert_eq!(folder["exists_in_codepluse"], true);
         let sessions = folder["sessions"].as_array().unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0]["external_id"], "sess-1");

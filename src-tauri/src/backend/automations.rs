@@ -1,6 +1,6 @@
-//! 定时任务：`server-go/internal/codeg/automations.go` 的整流迁移（11 条
+//! 定时任务：`server-go/internal/codepluse/automations.go` 的整流迁移（11 条
 //! `automation_*` 命令 + 30 秒调度器）。存储是两个独立 JSON 文件
-//! （`.data/codeg-automations.json` / `codeg-automation-runs.json`），写入
+//! （`.data/codepluse-automations.json` / `codepluse-automation-runs.json`），写入
 //! 走 tmp+rename，字段序按 Go struct 声明序（[`goformat::marshal_preserve`]），
 //! 嵌套 map 值（提示词块 / config_values / label_snapshot）按 Go 的 map
 //! marshal 排序（[`goformat::canon`]）。
@@ -391,10 +391,10 @@ fn state(root: &Path) -> Arc<Mutex<AutoState>> {
 
 impl AutoState {
     fn automations_file(&self) -> PathBuf {
-        self.root.join(".data").join("codeg-automations.json")
+        self.root.join(".data").join("codepluse-automations.json")
     }
     fn runs_file(&self) -> PathBuf {
-        self.root.join(".data").join("codeg-automation-runs.json")
+        self.root.join(".data").join("codepluse-automation-runs.json")
     }
 
     fn load(&mut self) {
@@ -994,7 +994,7 @@ impl Bridge {
 
 /// 读取工作区 JSON 的小工具（只读；写入走 store_writes 的跨进程锁）。
 fn workspace_doc(root: &Path) -> Option<Value> {
-    store_file::read_json(&root.join(".data").join("codeg-workspace.json")).ok()?
+    store_file::read_json(&root.join(".data").join("codepluse-workspace.json")).ok()?
 }
 
 fn automations_enabled(root: &Path) -> bool {
@@ -1812,7 +1812,7 @@ mod tests {
         assert_eq!(list, json!([]));
 
         // 文件落盘（create 后 delete 前写过两次）。
-        let saved = fs::read(root.join(".data").join("codeg-automations.json")).unwrap_or_default();
+        let saved = fs::read(root.join(".data").join("codepluse-automations.json")).unwrap_or_default();
         let _ = saved;
         fs::remove_dir_all(root).ok();
     }

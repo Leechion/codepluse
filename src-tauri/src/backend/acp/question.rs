@@ -1,4 +1,4 @@
-//! Port of Go's `codeg/question.go` registry half: the blocking
+//! Port of Go's `codepluse/question.go` registry half: the blocking
 //! `ask_user_question` cards. The companion MCP process (which parks the tool
 //! call) is still Go-served, but the card lifecycle — the snapshot slot, the
 //! event pair, settling on turn end or disconnect — lives with the connection

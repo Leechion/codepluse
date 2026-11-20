@@ -4,12 +4,12 @@
 // Unlike scripts/parity.mjs (same file, both sides write it, ids drift), this
 // harness gives Go and Rust two identical workspaces and compares, per step:
 //   1. the HTTP responses (deep JSON equality), and
-//   2. the on-disk `codeg-workspace.json` / `codeg-folder-commands.json`,
+//   2. the on-disk `codepluse-workspace.json` / `codepluse-folder-commands.json`,
 //      byte-for-byte after masking timestamps, random ids and absolute paths.
 // A WebSocket client stays attached to the Rust front door and records the
 // injected event frames so ported commands are proven to still feed the UI.
 //
-//   go build -o server-go/serve-codeg.exe ./cmd/serve        (first)
+//   go build -o server-go/serve-codepluse.exe ./cmd/serve        (first)
 //   cargo build                                              (first)
 //   node scripts/parity-store.mjs [--keep] [--go 8840] [--rust 8841]
 //
@@ -37,14 +37,14 @@ const option = (name, fallback) => {
 const keep = args.includes('--keep');
 const GO_PORT = Number(option('go', '8840'));
 const RUST_PORT = Number(option('rust', '8841'));
-const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codeg.exe');
+const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codepluse.exe');
 const RUST_EXE = path.join(repoRoot, 'src-tauri', 'target', 'debug', 'codepluse.exe');
 
 const die = (message) => {
   console.error(`❌ ${message}`);
   process.exit(2);
 };
-if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codeg.exe，先 go build -o server-go/serve-codeg.exe ./cmd/serve');
+if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codepluse.exe，先 go build -o server-go/serve-codepluse.exe ./cmd/serve');
 if (!existsSync(RUST_EXE)) die('缺少 src-tauri/target/debug/codepluse.exe，先 cargo build');
 
 // ── twin workspaces ─────────────────────────────────────────────────────────
@@ -101,12 +101,12 @@ const seedStore = (root) =>
   });
 
 for (const root of [rootA, rootB]) {
-  writeFileSync(path.join(root, '.data', 'codeg-workspace.json'), seedStore(root));
+  writeFileSync(path.join(root, '.data', 'codepluse-workspace.json'), seedStore(root));
 }
 
-// codeg-assets for the office/experts batch (identical bytes on both sides).
+// codepluse-assets for the office/experts batch (identical bytes on both sides).
 const assets = (root) => {
-  const dir = path.join(root, 'codeg-assets');
+  const dir = path.join(root, 'codepluse-assets');
   mkdirSync(path.join(dir, 'experts', 'skills', 'one'), { recursive: true });
   mkdirSync(path.join(dir, 'science', 'skills', 'two'), { recursive: true });
   writeFileSync(path.join(dir, 'office-skill.md'), '# office\n');
@@ -138,7 +138,7 @@ const spawnServer = (exe, cwd, env, label) => {
 };
 
 spawnServer(GO_EXE, rootA, {
-  HARNESS_HUB_CODEG: '1',
+  HARNESS_HUB_CODEPLUSE: '1',
   PORT: String(GO_PORT),
   HARNESS_HUB_ALLOW_ANY_PATH: '1',
   USERPROFILE: homeA,
@@ -171,7 +171,7 @@ const wsFrames = [];
 const connectRecorder = () =>
   new Promise((resolve) => {
     try {
-      const socket = new WebSocket(`ws://127.0.0.1:${RUST_PORT}/ws/events`, 'codeg-events');
+      const socket = new WebSocket(`ws://127.0.0.1:${RUST_PORT}/ws/events`, 'codepluse-events');
       socket.onmessage = (event) => {
         try {
           wsFrames.push(JSON.parse(event.data));
@@ -272,7 +272,7 @@ const readStore = (root, file) => {
 
 // ── steps ───────────────────────────────────────────────────────────────────
 
-const step = (name, command, body, file = 'codeg-workspace.json') => ({ name, command, body, file });
+const step = (name, command, body, file = 'codepluse-workspace.json') => ({ name, command, body, file });
 const steps = [
   // office / experts（待验收批）
   step('office.detect', 'officecli_detect', {}, null),
@@ -365,15 +365,15 @@ const steps = [
 
   // folder commands（独立文件，自己的 id 计数从 1 起）
   step('fc.list', 'list_folder_commands', { folderId: 1 }),
-  step('fc.create', 'create_folder_command', { folderId: 1, name: 'build', command: 'pnpm build' }, 'codeg-folder-commands.json'),
-  step('fc.create2', 'create_folder_command', { folderId: 1, name: 'test', command: 'pnpm test', runLocal: true }, 'codeg-folder-commands.json'),
-  step('fc.create.empty', 'create_folder_command', { folderId: 1, name: ' ', command: 'x' }, 'codeg-folder-commands.json'),
-  step('fc.update', 'update_folder_command', { id: 1, name: 'build all' }, 'codeg-folder-commands.json'),
-  step('fc.reorder', 'reorder_folder_commands', { folderId: 1, ids: [2, 1] }, 'codeg-folder-commands.json'),
-  step('fc.bootstrap', 'bootstrap_folder_commands_from_package_json', { folderId: 2 }, 'codeg-folder-commands.json'),
-  step('fc.bootstrap.again', 'bootstrap_folder_commands_from_package_json', { folderId: 2 }, 'codeg-folder-commands.json'),
-  step('fc.delete', 'delete_folder_command', { id: 1 }, 'codeg-folder-commands.json'),
-  step('fc.delete.again', 'delete_folder_command', { id: 1 }, 'codeg-folder-commands.json'),
+  step('fc.create', 'create_folder_command', { folderId: 1, name: 'build', command: 'pnpm build' }, 'codepluse-folder-commands.json'),
+  step('fc.create2', 'create_folder_command', { folderId: 1, name: 'test', command: 'pnpm test', runLocal: true }, 'codepluse-folder-commands.json'),
+  step('fc.create.empty', 'create_folder_command', { folderId: 1, name: ' ', command: 'x' }, 'codepluse-folder-commands.json'),
+  step('fc.update', 'update_folder_command', { id: 1, name: 'build all' }, 'codepluse-folder-commands.json'),
+  step('fc.reorder', 'reorder_folder_commands', { folderId: 1, ids: [2, 1] }, 'codepluse-folder-commands.json'),
+  step('fc.bootstrap', 'bootstrap_folder_commands_from_package_json', { folderId: 2 }, 'codepluse-folder-commands.json'),
+  step('fc.bootstrap.again', 'bootstrap_folder_commands_from_package_json', { folderId: 2 }, 'codepluse-folder-commands.json'),
+  step('fc.delete', 'delete_folder_command', { id: 1 }, 'codepluse-folder-commands.json'),
+  step('fc.delete.again', 'delete_folder_command', { id: 1 }, 'codepluse-folder-commands.json'),
   step('fc.list.after', 'list_folder_commands', { folderId: 1 }),
 ];
 

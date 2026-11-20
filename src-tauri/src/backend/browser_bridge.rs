@@ -1,6 +1,6 @@
 //! 浏览器扩展桥 —— 补全批次（S8，2 条）。
 //!
-//! 前端 `codeg-ui/src/lib/browser/browser-bridge.ts` 已经在调用这 2 条命令，
+//! 前端 `codepluse-ui/src/lib/browser/browser-bridge.ts` 已经在调用这 2 条命令，
 //! 但原 Go sidecar（提交 76712f5）与 Rust 都没有实现过它们（全树搜不到字面量），
 //! 契约只取自调用点参数名与 `browser-bridge.ts` 的 `BridgeStatus` /
 //! `BridgeGrant` 结构，没有可移植的 Go 原型。
@@ -30,7 +30,7 @@ const PORTS_ENV: &str = "CODEPLUSE_BRIDGE_PORTS";
 const PUBLIC_HOST_ENV: &str = "CODEPLUSE_BRIDGE_PUBLIC_HOST";
 const HOST_PATTERN_ENV: &str = "CODEPLUSE_BRIDGE_HOST_PATTERN";
 /// 桥接入口路径（与前端 `bridgeEntryUrl` 拼的 `entryPath` 对齐）。
-const ENTRY_PATH: &str = "/__codeg_bridge/entry";
+const ENTRY_PATH: &str = "/__codepluse_bridge/entry";
 
 pub fn owns(command: &str) -> bool {
     matches!(command, "browser_bridge_open" | "browser_bridge_status")

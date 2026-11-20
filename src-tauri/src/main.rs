@@ -28,13 +28,13 @@ use tauri::{Manager, RunEvent, State, Url, WebviewUrl, WebviewWindow, WebviewWin
 
 mod backend;
 
-const SHELL_MARKER: &str = "window.__CODEG_SHELL__='tauri-shell';window.__CODEG_TAURI_SHELL__=true;\
-window.__codegGoOpenWindow=function(path){return window.__TAURI_INTERNALS__.invoke('window_open',{path})};\
-window.__codegGoCloseWindow=function(){return window.__TAURI_INTERNALS__.invoke('window_close')};\
-window.__codegGoWindowMinimize=function(){return window.__TAURI_INTERNALS__.invoke('window_minimize')};\
-window.__codegGoWindowToggleMaximize=function(){return window.__TAURI_INTERNALS__.invoke('window_toggle_maximize')};\
-window.__codegGoWindowBeginDrag=function(){return window.__TAURI_INTERNALS__.invoke('window_begin_drag')};\
-window.__codegGoOpenExternal=function(u){return window.__TAURI_INTERNALS__.invoke('open_external',{url:u})};";
+const SHELL_MARKER: &str = "window.__CODEPLUSE_SHELL__='tauri-shell';window.__CODEPLUSE_TAURI_SHELL__=true;\
+window.__codepluseGoOpenWindow=function(path){return window.__TAURI_INTERNALS__.invoke('window_open',{path})};\
+window.__codepluseGoCloseWindow=function(){return window.__TAURI_INTERNALS__.invoke('window_close')};\
+window.__codepluseGoWindowMinimize=function(){return window.__TAURI_INTERNALS__.invoke('window_minimize')};\
+window.__codepluseGoWindowToggleMaximize=function(){return window.__TAURI_INTERNALS__.invoke('window_toggle_maximize')};\
+window.__codepluseGoWindowBeginDrag=function(){return window.__TAURI_INTERNALS__.invoke('window_begin_drag')};\
+window.__codepluseGoOpenExternal=function(u){return window.__TAURI_INTERNALS__.invoke('open_external',{url:u})};";
 const DEFAULT_PORT: u16 = 8840;
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -79,16 +79,21 @@ fn resolve_root(exe_dir: &Path, resource_dir: Option<&Path>) -> PathBuf {
 
 fn ensure_frontend(root: &Path) -> Result<(), String> {
     if root
-        .join("codeg-ui")
+        .join("codepluse-ui")
         .join("out")
         .join("workspace.html")
         .is_file()
+        || root
+            .join("codeg-ui")
+            .join("out")
+            .join("workspace.html")
+            .is_file()
     {
         return Ok(());
     }
     Err(format!(
-        "界面尚未构建：{}\n请先执行 pnpm --dir codeg-ui build（或运行 scripts/build-tauri.ps1）。",
-        root.join("codeg-ui")
+        "界面尚未构建：{}\n请先执行 pnpm --dir codepluse-ui build（或运行 scripts/build-tauri.ps1）。",
+        root.join("codepluse-ui")
             .join("out")
             .join("workspace.html")
             .display()
@@ -258,7 +263,7 @@ fn build_window(
     // Let Windows own the non-client frame and resize hit testing. The web
     // titlebar and resize overlays must be disabled for these framed windows.
     #[cfg(windows)]
-    let builder = builder.initialization_script("window.__CODEG_NATIVE_WINDOW_CHROME__=true;");
+    let builder = builder.initialization_script("window.__CODEPLUSE_NATIVE_WINDOW_CHROME__=true;");
     builder.build().map_err(|e| format!("窗口创建失败：{e}"))?;
     Ok(())
 }
@@ -359,9 +364,9 @@ fn window_open(
 }
 
 fn main() {
-    // The MCP companion the agents spawn: `codepluse mcp-codeg <endpoint> <token>`.
+    // The MCP companion the agents spawn: `codepluse mcp-codepluse <endpoint> <token>`.
     let argv: Vec<String> = std::env::args().collect();
-    if argv.len() > 1 && argv[1] == "mcp-codeg" {
+    if argv.len() > 1 && argv[1] == "mcp-codepluse" {
         std::process::exit(backend::mcp_companion::main_companion(&argv[2..]));
     }
     if std::env::var("CODEPLUSE_HEADLESS").as_deref() == Ok("1") {

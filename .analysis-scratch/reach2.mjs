@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 const ROOT = fs.realpathSync(process.cwd())
-const SRC = ROOT + '/codeg-ui/src'
-const files = execFileSync('git', ['ls-files', 'codeg-ui/src'], { maxBuffer: 1 << 28 })
+const SRC = ROOT + '/codepluse-ui/src'
+const files = execFileSync('git', ['ls-files', 'codepluse-ui/src'], { maxBuffer: 1 << 28 })
   .toString().split('\n').filter(f => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f)).map(f => ROOT + '/' + f)
 const set = new Set(files)
 const lc = f => fs.readFileSync(f, 'utf8').split('\n').length

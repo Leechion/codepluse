@@ -2,7 +2,7 @@
 
 ## Context
 
-`TerminalPanel`（[terminal-panel.tsx](file:///e:/code/codepluse/codeg-ui/src/components/terminal/terminal-panel.tsx)）从未被任何页面渲染（仅测试引用）。`TerminalProvider` 已在 [workspace/layout.tsx](file:///e:/code/codepluse/codeg-ui/src/app/workspace/layout.tsx) 挂载，提供 `isOpen / height(默认300, clamp 150–600) / toggle / setHeight / tabs` 等（[terminal-context.tsx](file:///e:/code/codepluse/codeg-ui/src/contexts/terminal-context.tsx) L42-44, L522-523, L656-667）。目标：在对话区下方挂一条可拖拽调高、可收起的终端条，开关按钮加入现有左上角 dock。
+`TerminalPanel`（[terminal-panel.tsx](file:///e:/code/codepluse/codepluse-ui/src/components/terminal/terminal-panel.tsx)）从未被任何页面渲染（仅测试引用）。`TerminalProvider` 已在 [workspace/layout.tsx](file:///e:/code/codepluse/codepluse-ui/src/app/workspace/layout.tsx) 挂载，提供 `isOpen / height(默认300, clamp 150–600) / toggle / setHeight / tabs` 等（[terminal-context.tsx](file:///e:/code/codepluse/codepluse-ui/src/contexts/terminal-context.tsx) L42-44, L522-523, L656-667）。目标：在对话区下方挂一条可拖拽调高、可收起的终端条，开关按钮加入现有左上角 dock。
 
 行为对齐上游（.data/upstream-workspace-layout.tsx L1346-1352）：
 - 终端在对话路由（`isConversations`）时才渲染；切到自动化/任务等全屏路由自动让位（context 状态保留）。
@@ -10,7 +10,7 @@
 
 ## 改动
 
-### 1. [ZCodeWorkspacePage.tsx](file:///e:/code/codepluse/codeg-ui/src/zcode/pages/ZCodeWorkspacePage.tsx)
+### 1. [ZCodeWorkspacePage.tsx](file:///e:/code/codepluse/codepluse-ui/src/zcode/pages/ZCodeWorkspacePage.tsx)
 
 - 导入：`TerminalPanel`、`useTerminalContext`、lucide `SquareTerminal`。
 - 解构：`const { isOpen: terminalOpen, toggle: toggleTerminal, height: terminalHeight, setHeight: setTerminalHeight } = useTerminalContext()`。
@@ -34,7 +34,7 @@
 
 - dock 增加终端开关按钮（仅 `isConversations` 时显示）：`SquareTerminal` 图标，title 打开/收起终端，onClick `toggleTerminal`。
 
-### 2. [zcode-workspace.css](file:///e:/code/codepluse/codeg-ui/src/app/zcode-workspace.css)
+### 2. [zcode-workspace.css](file:///e:/code/codepluse/codepluse-ui/src/app/zcode-workspace.css)
 
 - `.zw-chat-col`：`display:flex; flex-direction:column; flex:1 1 0; min-width:0; min-height:0;`（原 `.zw-chat` 的 flex:1 保留，在列内生效）。
 - `.zw-term`：`flex:0 0 auto; overflow:hidden; border-top:1px solid var(--zw-border); background:var(--background);`
@@ -43,7 +43,7 @@
 ## 验证
 
 ```powershell
-pnpm --dir codeg-ui build
+pnpm --dir codepluse-ui build
 ```
 
 浏览器（Ctrl+F5）+ 桌面截图：

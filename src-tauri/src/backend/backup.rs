@@ -1,6 +1,6 @@
 //! 备份与恢复 —— 补全批次（11 条）。
 //!
-//! 前端（`codeg-ui/src/lib/api.ts`）已经在调用这些命令，但原 Go sidecar 与
+//! 前端（`codepluse-ui/src/lib/api.ts`）已经在调用这些命令，但原 Go sidecar 与
 //! Rust 都没有实现过它们，契约只由调用点参数名与 `api.ts` 里的返回类型决定：
 //!
 //! * `backup_active_agents` → `string[]`
@@ -226,7 +226,7 @@ fn build_manifest(root: &Path, options: &Value, includes_external: bool) -> Valu
     let passphrase = options.get("passphrase").and_then(Value::as_str);
     json!({
         "formatVersion": MANIFEST_FORMAT_VERSION,
-        "kind": "codeg-backup",
+        "kind": "codepluse-backup",
         "createdAt": goformat::timestamp(),
         "appVersion": APP_VERSION,
         "latestMigration": "",
@@ -358,7 +358,7 @@ fn create_ticket(root: &Path, args: &Value) -> Result<Value, String> {
         .chars()
         .take(14)
         .collect::<String>();
-    let filename = format!("codeg-backup-{stamp}.codeg.zip");
+    let filename = format!("codepluse-backup-{stamp}.codepluse.zip");
     let record = json!({
         "ticketId": ticket_id,
         "filename": filename,
@@ -704,7 +704,7 @@ mod tests {
             "backup_create",
             json!({
                 "options": { "includeExternalTranscripts": true, "passphrase": null },
-                "destPath": "codeg-backup-test.codeg.zip",
+                "destPath": "codepluse-backup-test.codepluse.zip",
             }),
         )
         .unwrap();
@@ -785,7 +785,7 @@ mod tests {
         )
         .unwrap();
         assert!(ticket["url"].as_str().unwrap().starts_with("/api/backup_ticket/"));
-        assert!(ticket["filename"].as_str().unwrap().ends_with(".codeg.zip"));
+        assert!(ticket["filename"].as_str().unwrap().ends_with(".codepluse.zip"));
         assert_eq!(ticket["degradedSqlite"].as_array().unwrap().len(), 0);
         assert!(tickets_dir(&root).is_dir());
     }
@@ -808,7 +808,7 @@ mod tests {
         let preview = call(
             &root,
             "backup_prepare_source",
-            json!({ "srcPath": backups_dir(&root).join("nope.codeg.zip").to_string_lossy(), "passphrase": null }),
+            json!({ "srcPath": backups_dir(&root).join("nope.codepluse.zip").to_string_lossy(), "passphrase": null }),
         )
         .unwrap();
         assert!(preview["sourceId"].is_null());
@@ -819,12 +819,12 @@ mod tests {
     #[test]
     fn prepare_stage_release_roundtrip_inside_backups_dir() {
         let root = temp_root("roundtrip");
-        let source_file = backups_dir(&root).join("samples").join("a.codeg.zip");
+        let source_file = backups_dir(&root).join("samples").join("a.codepluse.zip");
         fs::create_dir_all(source_file.parent().unwrap()).unwrap();
         fs::write(&source_file, b"archive-bytes").unwrap();
         fs::write(
             source_file.with_extension("manifest.json"),
-            serde_json::to_vec_pretty(&json!({ "kind": "codeg-backup", "entries": [] })).unwrap(),
+            serde_json::to_vec_pretty(&json!({ "kind": "codepluse-backup", "entries": [] })).unwrap(),
         )
         .unwrap();
 
@@ -925,7 +925,7 @@ mod tests {
         fs::create_dir_all(sources_dir(&root)).unwrap();
         write_meta(
             &sources_dir(&root).join(format!("{source_id}.json")),
-            &json!({ "sourceId": source_id, "path": backups_dir(&root).join("samples").join("a.codeg.zip").to_string_lossy(), "manifest": manifest }),
+            &json!({ "sourceId": source_id, "path": backups_dir(&root).join("samples").join("a.codepluse.zip").to_string_lossy(), "manifest": manifest }),
         )
         .unwrap();
         // 只在镜像目录里放一个已存在目标。

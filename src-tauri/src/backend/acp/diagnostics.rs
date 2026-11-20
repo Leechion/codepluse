@@ -146,7 +146,7 @@ fn diagnose(root: &Path, args: &Value) -> Value {
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "unknown".into());
     let plain_text = format!(
-        "===== Codeg environment diagnostics =====\nverdict [{verdict_code}] {verdict_summary}\nnode: {}\nnpm: {}",
+        "===== Codepluse environment diagnostics =====\nverdict [{verdict_code}] {verdict_summary}\nnode: {}\nnpm: {}",
         node.as_ref().map(|(version, path)| format!("{version} ({path})")).unwrap_or_else(|| "NOT RESOLVED".into()),
         npm.as_ref().map(|(version, path)| format!("{version} ({path})")).unwrap_or_else(|| "NOT RESOLVED".into()),
     );

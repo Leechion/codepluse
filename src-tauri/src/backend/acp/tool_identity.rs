@@ -1,9 +1,9 @@
-//! Port of Go's `codeg/tool_identity.go` and the `ToolDefinitions` table in
-//! `codeg/companion.go`: which MCP tool names belong to the workbench's own
+//! Port of Go's `codepluse/tool_identity.go` and the `ToolDefinitions` table in
+//! `codepluse/companion.go`: which MCP tool names belong to the workbench's own
 //! collaboration server, and whether a runtime session currently has a caller
 //! that may auto-allow them.
 //!
-//! Port of `acp/delegation/mod.rs::is_codeg_mcp_tool` upstream: namespace and
+//! Port of `acp/delegation/mod.rs::is_codepluse_mcp_tool` upstream: namespace and
 //! tool boundaries are significant; near matches must keep their permission
 //! card.
 
@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 use crate::backend::acp::wire::text;
 
-/// Go `ToolDefinitions` (companion.go:15): the codeg-mcp tool table, used by
+/// Go `ToolDefinitions` (companion.go:15): the codepluse-mcp tool table, used by
 /// the companion MCP server (still Go-served) and by the internal-tool allow
 /// list here.
 pub fn tool_definitions() -> Vec<Value> {
@@ -105,7 +105,7 @@ pub fn tool_definitions() -> Vec<Value> {
     ]
 }
 
-/// Go `internalToolName` (tool_identity.go:8): resolve the codeg-mcp tool
+/// Go `internalToolName` (tool_identity.go:8): resolve the codepluse-mcp tool
 /// behind a permission-card title, honouring namespace separators.
 pub fn internal_tool_name(name: &str) -> String {
     let mut name = name.trim().to_lowercase();
@@ -128,7 +128,7 @@ pub fn internal_tool_name(name: &str) -> String {
     let Some(at) = at else { return String::new() };
     let server = name[..at].trim().to_string();
     let tool = name[at + boundary.len()..].trim().to_string();
-    if server != "codeg-mcp" && server != "codeg_mcp" {
+    if server != "codepluse-mcp" && server != "codepluse_mcp" {
         return String::new();
     }
     for definition in tool_definitions() {
@@ -190,25 +190,25 @@ mod tests {
     #[test]
     fn internal_tool_name_matches_boundaries() {
         assert_eq!(
-            internal_tool_name("mcp__codeg-mcp__list_agents"),
+            internal_tool_name("mcp__codepluse-mcp__list_agents"),
             "list_agents"
         );
-        assert_eq!(internal_tool_name("mcp__codeg_mcp__fetch_url"), "fetch_url");
-        assert_eq!(internal_tool_name("codeg-mcp/fetch_url"), "fetch_url");
-        assert_eq!(internal_tool_name("codeg-mcp:fetch_url"), "fetch_url");
+        assert_eq!(internal_tool_name("mcp__codepluse_mcp__fetch_url"), "fetch_url");
+        assert_eq!(internal_tool_name("codepluse-mcp/fetch_url"), "fetch_url");
+        assert_eq!(internal_tool_name("codepluse-mcp:fetch_url"), "fetch_url");
         assert_eq!(
             internal_tool_name("mcp__other__list_agents"),
             "",
             "foreign server"
         );
         assert_eq!(
-            internal_tool_name("mcp__codeg-mcp__not_a_tool"),
+            internal_tool_name("mcp__codepluse-mcp__not_a_tool"),
             "",
             "unknown tool"
         );
         assert_eq!(internal_tool_name("list_agents"), "", "no namespace");
         // near matches keep their permission card
-        assert_eq!(internal_tool_name("mcp__codeg-mcp__list_agents_extra"), "");
+        assert_eq!(internal_tool_name("mcp__codepluse-mcp__list_agents_extra"), "");
     }
 
     #[test]
@@ -224,7 +224,7 @@ mod tests {
             },
         );
         let conns = vec![("c1".to_string(), "session_x".to_string())];
-        let tool = json!({"title": "mcp__codeg-mcp__list_agents"});
+        let tool = json!({"title": "mcp__codepluse-mcp__list_agents"});
         assert!(allow_internal_tool(&callers, &conns, "session_x", &tool));
         assert!(!allow_internal_tool(&callers, &conns, "session_y", &tool));
         let native = json!({"title": "Edit file"});

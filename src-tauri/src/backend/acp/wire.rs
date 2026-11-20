@@ -1,6 +1,6 @@
-//! Row helpers and wire transformations, ported from Go's `codeg/wire.go`,
-//! `codeg/history.go` (persistedBlocks/toolStateWire/toolOutputText) and the
-//! small coercions in `codeg/store.go`. HTTP responses are canonicalised by
+//! Row helpers and wire transformations, ported from Go's `codepluse/wire.go`,
+//! `codepluse/history.go` (persistedBlocks/toolStateWire/toolOutputText) and the
+//! small coercions in `codepluse/store.go`. HTTP responses are canonicalised by
 //! the front door (`go_json`), so construction order here is irrelevant —
 //! the shapes and the coercions are what must match Go.
 

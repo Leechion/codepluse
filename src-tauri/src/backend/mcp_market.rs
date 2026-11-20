@@ -1,6 +1,6 @@
 //! MCP 市场与本地服务 —— 补全批次。
 //!
-//! 前端（`codeg-ui/src/lib/api.ts`）已经在调用这 10 条命令，但 Rust 与已删除的
+//! 前端（`codepluse-ui/src/lib/api.ts`）已经在调用这 10 条命令，但 Rust 与已删除的
 //! Go sidecar 都没有实现过它们（在 `server-go` 只读副本里搜不到命令字面量），
 //! 所以契约只由调用点（`api.ts` 的参数名）与 `types.ts` 的返回结构决定：
 //!
@@ -23,10 +23,10 @@
 //!   `CODEPLUSE_MCP_MARKETPLACE_BASE` 覆盖（测试桩走这个 seam）。本仓库没有内置
 //!   上游目录，也没有可移植的 Go 契约；未配置地址或请求失败时返回中文 `Err`，
 //!   不编造市场条目。
-//! * **伴生服务（L3）**：`/api/codeg_mcp` 协作端点随主进程内联绑定，没有独立的
-//!   broker 进程需要拉起，`start_codeg_mcp_service` 幂等空转返回。
+//! * **伴生服务（L3）**：`/api/codepluse_mcp` 协作端点随主进程内联绑定，没有独立的
+//!   broker 进程需要拉起，`start_codepluse_mcp_service` 幂等空转返回。
 //!
-//! 注意：本模块与 `/api/codeg_mcp` 协议端点（`mcp_companion.rs`）不是一回事，
+//! 注意：本模块与 `/api/codepluse_mcp` 协议端点（`mcp_companion.rs`）不是一回事，
 //! 后者只读参考，本文件不改动它。
 
 use std::path::{Path, PathBuf};
@@ -99,8 +99,8 @@ pub fn owns(command: &str) -> bool {
             | "mcp_search_marketplace"
             | "mcp_set_server_apps"
             | "mcp_upsert_local_server"
-            | "set_codeg_mcp_tool_group"
-            | "start_codeg_mcp_service"
+            | "set_codepluse_mcp_tool_group"
+            | "start_codepluse_mcp_service"
     )
 }
 
@@ -121,8 +121,8 @@ fn run(root: &Path, command: &str, args: &Value) -> Result<Value, String> {
         "mcp_upsert_local_server" => upsert_local_server(root, args),
         "mcp_set_server_apps" => set_server_apps(root, args),
         "mcp_remove_server" => remove_server(root, args),
-        "set_codeg_mcp_tool_group" => set_tool_group(root, args),
-        "start_codeg_mcp_service" => start_service(),
+        "set_codepluse_mcp_tool_group" => set_tool_group(root, args),
+        "start_codepluse_mcp_service" => start_service(),
         _ => Err(format!("未知的 MCP 命令：{command}")),
     }
 }
@@ -893,7 +893,7 @@ fn set_tool_group(root: &Path, args: &Value) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-/// 本工作台的 `/api/codeg_mcp` 协作端点随主进程内联绑定，没有独立 broker 进程
+/// 本工作台的 `/api/codepluse_mcp` 协作端点随主进程内联绑定，没有独立 broker 进程
 /// 要拉起；前端语义是“未应答就绑定，幂等”，这里等价于确认端点已在本进程监听。
 fn start_service() -> Result<Value, String> {
     Ok(Value::Null)
@@ -962,12 +962,12 @@ mod tests {
             "mcp_search_marketplace",
             "mcp_set_server_apps",
             "mcp_upsert_local_server",
-            "set_codeg_mcp_tool_group",
-            "start_codeg_mcp_service",
+            "set_codepluse_mcp_tool_group",
+            "start_codepluse_mcp_service",
         ] {
             assert!(owns(command), "{command} should be owned");
         }
-        assert!(!owns("get_codeg_mcp_service_status"));
+        assert!(!owns("get_codepluse_mcp_service_status"));
         assert!(!owns("mcp_companion_dispatch"));
         assert!(!owns("MCP_UPSERT_LOCAL_SERVER"));
     }
@@ -1271,7 +1271,7 @@ mod tests {
         let root = temp_root("tool-group");
         call(
             &root,
-            "set_codeg_mcp_tool_group",
+            "set_codepluse_mcp_tool_group",
             json!({ "key": "delegation", "enabled": true }),
         )
         .unwrap();
@@ -1282,19 +1282,19 @@ mod tests {
 
         assert!(call(
             &root,
-            "set_codeg_mcp_tool_group",
+            "set_codepluse_mcp_tool_group",
             json!({ "key": "not_a_group", "enabled": true })
         )
         .unwrap_err()
         .contains("非法的工具组"));
         assert!(call(
             &root,
-            "set_codeg_mcp_tool_group",
+            "set_codepluse_mcp_tool_group",
             json!({ "key": "ask", "enabled": "yes" })
         )
         .unwrap_err()
         .contains("enabled 必须是布尔值"));
-        assert!(call(&root, "set_codeg_mcp_tool_group", json!({}))
+        assert!(call(&root, "set_codepluse_mcp_tool_group", json!({}))
             .unwrap_err()
             .contains("缺少 key"));
     }
@@ -1302,9 +1302,9 @@ mod tests {
     #[test]
     fn start_service_is_an_idempotent_noop() {
         let root = temp_root("start-service");
-        let first = call(&root, "start_codeg_mcp_service", json!({})).unwrap();
+        let first = call(&root, "start_codepluse_mcp_service", json!({})).unwrap();
         assert!(first.is_null());
-        let second = call(&root, "start_codeg_mcp_service", json!({})).unwrap();
+        let second = call(&root, "start_codepluse_mcp_service", json!({})).unwrap();
         assert!(second.is_null());
     }
 

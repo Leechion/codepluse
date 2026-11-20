@@ -3,7 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 
 const repo = "E:/code/codepluse"
-const ui = path.join(repo, "codeg-ui")
+const ui = path.join(repo, "codepluse-ui")
 const zc = path.join(ui, "src/zcode")
 
 function list(dir, out = []) {

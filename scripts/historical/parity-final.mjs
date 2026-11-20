@@ -2,7 +2,7 @@
 // 收尾批（R1–R5，28 条）双跑：instances / custom-agents 写 / 安装状态 /
 // connection / mcp status / turn 库与 token usage / 任务引擎。
 //
-// 孪生 workspace + 孪生 codeg.db（SQLite 由各自服务进程建）；turn 数据在两侧
+// 孪生 workspace + 孪生 codepluse.db（SQLite 由各自服务进程建）；turn 数据在两侧
 // 以 SQL 直插同一 schema，确保读路径对同一输入。
 //
 //   node scripts/parity-final.mjs [--go 28970] [--rust 28971] [--keep]
@@ -30,9 +30,9 @@ const option = (name, fallback) => {
 const keep = args.includes('--keep');
 const GO_PORT = Number(option('go', '28970'));
 const RUST_PORT = Number(option('rust', '28971'));
-const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codeg.exe');
+const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codepluse.exe');
 const RUST_EXE = path.join(repoRoot, 'src-tauri', 'target', 'debug', 'codepluse.exe');
-if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codeg.exe');
+if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codepluse.exe');
 if (!existsSync(RUST_EXE)) die('缺少 src-tauri/target/debug/codepluse.exe');
 
 function die(message) {
@@ -47,24 +47,24 @@ const twin = (tag) => {
   const root = path.join(base, tag);
   mkdirSync(path.join(root, '.data'), { recursive: true });
   // 技能资产（安装状态命令读 manifest + central copy）
-  const skills = path.join(root, 'codeg-assets', 'experts', 'skills', 'one');
+  const skills = path.join(root, 'codepluse-assets', 'experts', 'skills', 'one');
   mkdirSync(skills, { recursive: true });
   writeFileSync(path.join(skills, 'SKILL.md'), '# one\n');
   const hash = crypto.createHash('sha256').update('# one\n').digest('hex');
   writeFileSync(
-    path.join(root, 'codeg-assets', 'experts', 'manifest.json'),
+    path.join(root, 'codepluse-assets', 'experts', 'manifest.json'),
     JSON.stringify([{ id: 'one', display_name: { en: 'One' }, bundled_hash: hash }]),
   );
-  const science = path.join(root, 'codeg-assets', 'science', 'skills', 'two');
+  const science = path.join(root, 'codepluse-assets', 'science', 'skills', 'two');
   mkdirSync(science, { recursive: true });
   writeFileSync(path.join(science, 'SKILL.md'), '# two\n');
   const shash = crypto.createHash('sha256').update('# two\n').digest('hex');
   writeFileSync(
-    path.join(root, 'codeg-assets', 'science', 'manifest.json'),
+    path.join(root, 'codepluse-assets', 'science', 'manifest.json'),
     JSON.stringify([{ id: 'two', display_name: { en: 'Two' }, bundled_hash: shash }]),
   );
   writeFileSync(
-    path.join(root, '.data', 'codeg-workspace.json'),
+    path.join(root, '.data', 'codepluse-workspace.json'),
     JSON.stringify({
       next: 10,
       folders: [
@@ -98,7 +98,7 @@ const twin = (tag) => {
     }, null, 2),
   );
   writeFileSync(
-    path.join(root, '.data', 'codeg-worktasks.json'),
+    path.join(root, '.data', 'codepluse-worktasks.json'),
     JSON.stringify({
       next: 3, nextEvent: 1, nextTemplate: 1,
       tasks: [
@@ -132,7 +132,7 @@ const turnRows = [
 function seedDb(root) {
   // 用 node 的 sqlite（node 22+ 自带 node:sqlite）建库；不可用时退回 rusqlite
   // 通过 Rust 服务自身建表后再插（此处直接写 SQL 文件用 sqlite3 CLI 更稳）。
-  const db = new DatabaseSync(path.join(root, '.data', 'codeg.db'));
+  const db = new DatabaseSync(path.join(root, '.data', 'codepluse.db'));
   db.exec(`CREATE TABLE IF NOT EXISTS turns (
     conversation_id INTEGER NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL,
     role TEXT NOT NULL, timestamp TEXT NOT NULL, hash_after TEXT NOT NULL,
@@ -178,7 +178,7 @@ const spawnServer = (exe, cwd, env, label) => {
   return child;
 };
 spawnServer(GO_EXE, goRoot, {
-  HARNESS_HUB_CODEG: '1', PORT: String(GO_PORT),
+  HARNESS_HUB_CODEPLUSE: '1', PORT: String(GO_PORT),
   HARNESS_HUB_ALLOW_ANY_PATH: '1', HARNESS_HUB_WARM: '0',
 }, 'go');
 spawnServer(RUST_EXE, rustRoot, {
@@ -265,21 +265,21 @@ const steps = [
   { name: 'experts.status.missing', command: 'science_get_install_status', body: { expertId: 'nope' } },
   { name: 'science.statuses', command: 'science_list_all_install_statuses', body: {} },
   // custom agents 写
-  { name: 'custom.save', command: 'acp_save_custom_agent', body: { params: { registryId: 'demo-a', name: 'Demo', spec: { npx: { package: '@demo/a', args: [] } }, source: 'manual' } }, file: 'codeg-workspace.json' },
+  { name: 'custom.save', command: 'acp_save_custom_agent', body: { params: { registryId: 'demo-a', name: 'Demo', spec: { npx: { package: '@demo/a', args: [] } }, source: 'manual' } }, file: 'codepluse-workspace.json' },
   { name: 'custom.save.dup', command: 'acp_save_custom_agent', body: { params: { registryId: 'codex-acp', spec: { npx: { package: 'p' } } } } },
   { name: 'custom.list', command: 'acp_list_custom_agents', body: {} },
-  { name: 'custom.delete', command: 'acp_delete_custom_agent', body: { registryId: 'demo-a' }, file: 'codeg-workspace.json' },
+  { name: 'custom.delete', command: 'acp_delete_custom_agent', body: { registryId: 'demo-a' }, file: 'codepluse-workspace.json' },
   { name: 'custom.delete.again', command: 'acp_delete_custom_agent', body: { registryId: 'demo-a' } },
   // connection / mcp
   { name: 'conn.catalog', command: 'codepluse_connection_catalog', body: {} },
   { name: 'conn.save.bad', command: 'codepluse_connection_save', body: { agentType: 'nope', authMode: 'api' } },
-  { name: 'mcp.status', command: 'get_codeg_mcp_service_status', body: {} },
+  { name: 'mcp.status', command: 'get_codepluse_mcp_service_status', body: {} },
   // instances
   { name: 'inst.list', command: 'codepluse_instance_list', body: {} },
   { name: 'inst.create.bad', command: 'codepluse_instance_create', body: { name: 'x', realTool: 'qoder-not-installed' } },
   { name: 'inst.update.missing', command: 'codepluse_instance_update', body: { agentId: 'agt_inst_nope', name: 'x' } },
   { name: 'inst.delete.missing', command: 'codepluse_instance_delete', body: { agentId: 'agt_inst_nope' } },
-  { name: 'mainbot.save', command: 'update_main_bot_settings', body: { settings: { agent_type: 'codex' } }, file: 'codeg-workspace.json' },
+  { name: 'mainbot.save', command: 'update_main_bot_settings', body: { settings: { agent_type: 'codex' } }, file: 'codepluse-workspace.json' },
   { name: 'mainbot.bad', command: 'update_main_bot_settings', body: { settings: 'nope' } },
   // turn 库
   { name: 'conv.get', command: 'get_conversation', body: { conversationId: 2 } },

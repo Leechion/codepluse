@@ -1,6 +1,6 @@
 //! Office 监视续期与关窗请求 —— 补全批次（S8，2 条）。
 //!
-//! 前端 `codeg-ui/src/lib/api.ts` 已经在调用这 2 条命令，但原 Go sidecar
+//! 前端 `codepluse-ui/src/lib/api.ts` 已经在调用这 2 条命令，但原 Go sidecar
 //! （提交 76712f5）与 Rust 都没有实现过它们（全树搜不到字面量），契约只取自
 //! 调用点参数名与 `types.ts` 的返回结构。
 //!

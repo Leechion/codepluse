@@ -17,7 +17,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$webRoot = Join-Path $root "codeg-ui"
+$webRoot = Join-Path $root "codepluse-ui"
 
 # Kill the whole tree: Stop-Process only ends the named process, which leaves
 # pnpm/next children holding the dev port.
@@ -30,7 +30,7 @@ Get-Process -Name codepluse -ErrorAction SilentlyContinue |
   ForEach-Object { Stop-ProcessTree $_.Id }
 Start-Sleep -Seconds 1
 
-$env:HARNESS_HUB_CODEG = "1"
+$env:HARNESS_HUB_CODEPLUSE = "1"
 $env:CODEPLUSE_PORT = "$Port"
 $env:HOST = "127.0.0.1"
 $env:HARNESS_HUB_WARM = "0"
@@ -38,7 +38,7 @@ $env:HARNESS_HUB_DEV_FRONTEND = "http://127.0.0.1:$WebPort"
 
 # Frontend dev server (HMR).
 $web = Start-Process -FilePath "cmd.exe" `
-  -ArgumentList "/c", "pnpm --dir codeg-ui dev --port $WebPort" `
+  -ArgumentList "/c", "pnpm --dir codepluse-ui dev --port $WebPort" `
   -WorkingDirectory $root -PassThru -WindowStyle Hidden
 Write-Host "[dev] next dev -> http://127.0.0.1:$WebPort (HMR)"
 

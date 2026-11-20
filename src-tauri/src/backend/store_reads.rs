@@ -1,4 +1,4 @@
-//! Read-only commands served straight from `codeg-workspace.json`.
+//! Read-only commands served straight from `codepluse-workspace.json`.
 //!
 //! Why reads can move before writes: the Go side flushes the whole store on
 //! every mutation (`saveLocked`), so the file on disk is always the same state
@@ -23,7 +23,7 @@ use std::path::Path;
 
 use serde_json::{json, Map, Value};
 
-const FILE: &str = "codeg-workspace.json";
+const FILE: &str = "codepluse-workspace.json";
 
 pub fn owns(command: &str) -> bool {
     matches!(

@@ -72,7 +72,7 @@ pub mod worktask_engine;
 // ── 补全批次（2026-11-15）：前端已调用、后端从未实现的命令 ──────────────
 // 原 Go sidecar（tag `go-sidecar-final`）里这些命令同样不存在，只有
 // `codepluse_provider_delete` 有原型，所以契约一律取自前端调用点
-// （`codeg-ui/src/lib/api.ts` 的参数名 + `types.ts` 的返回结构）。
+// （`codepluse-ui/src/lib/api.ts` 的参数名 + `types.ts` 的返回结构）。
 // 每个模块只暴露 `owns(command) -> bool` 与 `handle(root, command, args)`，
 // 由下面的 `EXT_MODULES` 表统一派发。
 pub mod acp_ext;
@@ -276,7 +276,7 @@ fn app_router(state: Arc<ProxyState>) -> Router {
         // event socket. A GET-only route strands connected agents in the UI.
         .route("/api/health", get(health).post(health))
         .route("/api/upload_attachment", any(upload_attachment))
-        .route("/api/codeg_mcp", any(companion))
+        .route("/api/codepluse_mcp", any(companion))
         .route("/api/{command}", any(api_dispatch))
         .route("/ws", get(ws_events))
         .route("/ws/events", get(ws_events))
@@ -932,7 +932,7 @@ async fn api_dispatch(
             Err(join) => fail(format!("定时任务执行失败：{join}")),
         };
     }
-    // Work tasks own `.data/codeg-worktasks.json`; the run engine stays in the
+    // Work tasks own `.data/codepluse-worktasks.json`; the run engine stays in the
     // sidecar, reached through internal trigger commands (see worktask.rs).
     // File I/O, git and the blocking trigger POSTs run on the blocking pool.
     // Responses are Go struct field order — go_json_struct, not go_json.

@@ -1,4 +1,4 @@
-//! Update surface, ported from `server-go/internal/codeg/updater.go`.
+//! Update surface, ported from `server-go/internal/codepluse/updater.go`.
 //!
 //! Ported: `app_update_status`, `app_update_state`, `perform_app_update`,
 //! `rollback_app`, `restart_app` (constant answers) and `check_app_update`

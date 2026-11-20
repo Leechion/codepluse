@@ -1,8 +1,8 @@
 //! Codex 目录与设备授权 —— 补全批次（S4，9 条）。
 //!
-//! 前端 `codeg-ui/src/lib/api.ts` 已经在调用这 9 条命令，但原 Go sidecar
+//! 前端 `codepluse-ui/src/lib/api.ts` 已经在调用这 9 条命令，但原 Go sidecar
 //! （提交 76712f5）与 Rust 都没有实现过它们（全树搜不到字面量）；契约只
-//! 取自调用点参数名与 `codeg-ui/src/lib/types.ts` 的返回结构，没有可移植
+//! 取自调用点参数名与 `codepluse-ui/src/lib/types.ts` 的返回结构，没有可移植
 //! 的 Go 原型。
 //!
 //! 命令清单：
@@ -24,7 +24,7 @@
 //!    回 `pending`/`success`/`error`。
 //!
 //! 限制（L3，能力在本产品中不存在）：
-//! * 仓库 `fixtures/`、`codeg-assets/` 下没有随附的 Codex 模型快照，bundled
+//! * 仓库 `fixtures/`、`codepluse-assets/` 下没有随附的 Codex 模型快照，bundled
 //!   目录在没有本地快照时返回空数组，不编造官方模型。
 //! * 本产品没有接入真实 Codex/OAuth 上游：设备码 `success` 里的令牌只从已落盘
 //!   记录透传，模块本身绝不生成 id/access/refresh token。
@@ -730,7 +730,7 @@ fn read_model_array(path: &Path) -> Option<Vec<Value>> {
 fn bundled(root: &Path, args: &Value) -> Result<Value, String> {
     // `forceRefresh` 接受但暂不生效：本产品没有可重跑的 codex CLI 上游（L3）。
     let _ = args.get("forceRefresh");
-    let asset = root.join("codeg-assets").join("codex-models.json");
+    let asset = root.join("codepluse-assets").join("codex-models.json");
     let cache = data_dir(root).join("codex-bundled-models.json");
     let rows = read_model_array(&asset).or_else(|| read_model_array(&cache)).unwrap_or_default();
     Ok(Value::Array(rows))
@@ -961,7 +961,7 @@ mod tests {
     #[test]
     fn bundled_catalog_reads_a_local_snapshot_when_present() {
         let root = temp_root("bundled-snapshot");
-        let asset_dir = root.join("codeg-assets");
+        let asset_dir = root.join("codepluse-assets");
         fs::create_dir_all(&asset_dir).unwrap();
         fs::write(
             asset_dir.join("codex-models.json"),

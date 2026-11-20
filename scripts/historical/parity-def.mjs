@@ -17,7 +17,7 @@
 //     Go 引擎代码，最终落盘一致；孪生仓库的 commit SHA 不同（时间戳），
 //     40 位十六进制一律归一。
 //
-//   go build -o server-go/serve-codeg.exe ./cmd/serve        （先构建）
+//   go build -o server-go/serve-codepluse.exe ./cmd/serve        （先构建）
 //   cargo build                                              （先构建）
 //   node scripts/parity-def.mjs [--keep] [--go 18840] [--rust 18841]
 //
@@ -47,7 +47,7 @@ const keep = args.includes('--keep');
 const GO_PORT = Number(option('go', '18840'));
 const GO_PORT_B = Number(option('go-b', '18842'));
 const RUST_PORT = Number(option('rust', '18841'));
-const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codeg.exe');
+const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codepluse.exe');
 // Rust 二进制默认取主仓库 target；也可以 --rust-exe 指到 worktree 里构建的
 // 隔离副本（避免与主仓库的 cargo 互锁）。
 const RUST_EXE = option('rust-exe', path.join(repoRoot, 'src-tauri', 'target', 'debug', 'codepluse.exe'));
@@ -56,10 +56,10 @@ const die = (message) => {
   console.error(`❌ ${message}`);
   process.exit(2);
 };
-if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codeg.exe，先 go build -o server-go/serve-codeg.exe ./cmd/serve');
+if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codepluse.exe，先 go build -o server-go/serve-codepluse.exe ./cmd/serve');
 if (!existsSync(RUST_EXE)) die(`缺少 ${RUST_EXE}，先 cargo build（或 --rust-exe 指向已构建副本）`);
-const agentBundle = path.join(repoRoot, 'codeg-ui', 'browser-agent', 'agent.bundle.js');
-if (!existsSync(agentBundle)) die('缺少 codeg-ui/browser-agent/agent.bundle.js（先构建 browser-agent）');
+const agentBundle = path.join(repoRoot, 'codepluse-ui', 'browser-agent', 'agent.bundle.js');
+if (!existsSync(agentBundle)) die('缺少 codepluse-ui/browser-agent/agent.bundle.js（先构建 browser-agent）');
 
 // ── twin workspaces（放系统临时目录：清理浏览器时以此为判据，绝不波及
 //    真实工作区的 CDP 浏览器）────────────────────────────────────────────
@@ -88,10 +88,10 @@ seedGit(rootA);
 seedGit(rootB);
 
 // browser-agent bundle 拷进孪生根，两边读到的注入脚本逐字节一致。
-mkdirSync(path.join(rootA, 'codeg-ui', 'browser-agent'), { recursive: true });
-mkdirSync(path.join(rootB, 'codeg-ui', 'browser-agent'), { recursive: true });
-copyFileSync(agentBundle, path.join(rootA, 'codeg-ui', 'browser-agent', 'agent.bundle.js'));
-copyFileSync(agentBundle, path.join(rootB, 'codeg-ui', 'browser-agent', 'agent.bundle.js'));
+mkdirSync(path.join(rootA, 'codepluse-ui', 'browser-agent'), { recursive: true });
+mkdirSync(path.join(rootB, 'codepluse-ui', 'browser-agent'), { recursive: true });
+copyFileSync(agentBundle, path.join(rootA, 'codepluse-ui', 'browser-agent', 'agent.bundle.js'));
+copyFileSync(agentBundle, path.join(rootB, 'codepluse-ui', 'browser-agent', 'agent.bundle.js'));
 
 const seedStore = (root) =>
   JSON.stringify({
@@ -113,7 +113,7 @@ const seedStore = (root) =>
   });
 
 for (const root of [rootA, rootB]) {
-  writeFileSync(path.join(root, '.data', 'codeg-workspace.json'), seedStore(root));
+  writeFileSync(path.join(root, '.data', 'codepluse-workspace.json'), seedStore(root));
 }
 
 // ── servers ─────────────────────────────────────────────────────────────────
@@ -132,13 +132,13 @@ const spawnServer = (exe, cwd, env, label) => {
 // 两个 sidecar + 一个 Rust 前门：触发命令（work_task_engine_*）必须落在
 // rootB 的 sidecar 上，所以 Rust 前门不能像 ghi 那样借用 go-twin。
 spawnServer(GO_EXE, rootA, {
-  HARNESS_HUB_CODEG: '1',
+  HARNESS_HUB_CODEPLUSE: '1',
   PORT: String(GO_PORT),
   HARNESS_HUB_ALLOW_ANY_PATH: '1',
   HARNESS_HUB_WARM: '0',
 }, 'go-twin');
 spawnServer(GO_EXE, rootB, {
-  HARNESS_HUB_CODEG: '1',
+  HARNESS_HUB_CODEPLUSE: '1',
   PORT: String(GO_PORT_B),
   HARNESS_HUB_ALLOW_ANY_PATH: '1',
   HARNESS_HUB_WARM: '0',
@@ -191,7 +191,7 @@ let wsSocket = null;
 const connectRecorder = () =>
   new Promise((resolve) => {
     try {
-      const socket = new WebSocket(`ws://127.0.0.1:${RUST_PORT}/ws/events`, 'codeg-events');
+      const socket = new WebSocket(`ws://127.0.0.1:${RUST_PORT}/ws/events`, 'codepluse-events');
       socket.onmessage = (event) => {
         try {
           wsFrames.push(JSON.parse(event.data));
@@ -369,56 +369,56 @@ const worktaskSteps = [
       config_values: { depth: 3.9, flag: true, model: 'gpt-x' },
       label_snapshot: { agent: 'Codex' },
     },
-  } }, { files: ['codeg-worktasks.json'] }),
+  } }, { files: ['codepluse-worktasks.json'] }),
   step('wt.create.fallback', 'work_task_create', { draft: {
     folder_id: 1,
     config: { prompt_blocks: [{ type: 'text', text: '  第一行  ' }, { type: 'text', text: '第二行' }] },
-  } }, { files: ['codeg-worktasks.json'] }),
+  } }, { files: ['codepluse-worktasks.json'] }),
   step('wt.create.no_folder', 'work_task_create', { draft: { folder_id: 999, title: 'x' } }),
   step('wt.create.empty', 'work_task_create', { draft: { folder_id: 1 } }),
   step('wt.list', 'work_task_list', { folderId: 1 }),
   step('wt.get', 'work_task_get', { id: 1 }),
-  step('wt.update', 'work_task_update', { id: 1, draft: { title: '改题', config: { display_text: 'v2' } } }, { files: ['codeg-worktasks.json'] }),
-  step('wt.update.keep_config', 'work_task_update', { id: 1, draft: { title: '改题2' } }, { files: ['codeg-worktasks.json'] }),
-  step('wt.update.null_config', 'work_task_update', { id: 1, draft: { config: null } }, { files: ['codeg-worktasks.json'] }),
-  step('wt.reorder', 'work_task_reorder', { folderId: 1, orderedIds: [2, 1] }, { files: ['codeg-worktasks.json'] }),
+  step('wt.update', 'work_task_update', { id: 1, draft: { title: '改题', config: { display_text: 'v2' } } }, { files: ['codepluse-worktasks.json'] }),
+  step('wt.update.keep_config', 'work_task_update', { id: 1, draft: { title: '改题2' } }, { files: ['codepluse-worktasks.json'] }),
+  step('wt.update.null_config', 'work_task_update', { id: 1, draft: { config: null } }, { files: ['codepluse-worktasks.json'] }),
+  step('wt.reorder', 'work_task_reorder', { folderId: 1, orderedIds: [2, 1] }, { files: ['codepluse-worktasks.json'] }),
   step('wt.list.sorted', 'work_task_list', { folderId: 1 }),
   step('wt.events', 'work_task_events', { taskId: 1, limit: 5 }),
   step('wt.events.missing', 'work_task_events', { taskId: 999 }),
-  step('wt.settings.set', 'work_task_settings_set', { folderId: 1, settings: { default_agent_type: 'codex', max_concurrent: 3.9, merge_strategy: 'squash', auto_merge: true, config_values: { k: 12 } } }, { files: ['codeg-worktasks.json'] }),
+  step('wt.settings.set', 'work_task_settings_set', { folderId: 1, settings: { default_agent_type: 'codex', max_concurrent: 3.9, merge_strategy: 'squash', auto_merge: true, config_values: { k: 12 } } }, { files: ['codepluse-worktasks.json'] }),
   step('wt.settings.own', 'work_task_settings_get_own', { folderId: 1 }),
   step('wt.settings.effective', 'work_task_settings_effective', { folderId: 1 }),
-  step('wt.settings.bad_strategy', 'work_task_settings_set', { folderId: 1, settings: { merge_strategy: 'rebase' } }, { files: ['codeg-worktasks.json'] }),
+  step('wt.settings.bad_strategy', 'work_task_settings_set', { folderId: 1, settings: { merge_strategy: 'rebase' } }, { files: ['codepluse-worktasks.json'] }),
   step('wt.settings.effective.reset', 'work_task_settings_effective', { folderId: 1 }),
-  step('wt.settings.delete', 'work_task_settings_delete', { folderId: 1 }, { files: ['codeg-worktasks.json'] }),
+  step('wt.settings.delete', 'work_task_settings_delete', { folderId: 1 }, { files: ['codepluse-worktasks.json'] }),
   step('wt.settings.own.gone', 'work_task_settings_get_own', { folderId: 1 }),
-  step('wt.template.save', 'work_task_template_save', { draft: { name: ' 日常 ', title: ' T ', config: { display_text: 'd', config_values: { a: 1 } } } }, { files: ['codeg-worktasks.json'] }),
-  step('wt.template.update', 'work_task_template_save', { draft: { name: '日常', title: 'T2' } }, { files: ['codeg-worktasks.json'] }),
+  step('wt.template.save', 'work_task_template_save', { draft: { name: ' 日常 ', title: ' T ', config: { display_text: 'd', config_values: { a: 1 } } } }, { files: ['codepluse-worktasks.json'] }),
+  step('wt.template.update', 'work_task_template_save', { draft: { name: '日常', title: 'T2' } }, { files: ['codepluse-worktasks.json'] }),
   step('wt.template.list', 'work_task_template_list', {}),
   step('wt.template.save.empty_name', 'work_task_template_save', { draft: { name: '  ' } }),
-  step('wt.template.delete', 'work_task_template_delete', { id: 1 }, { files: ['codeg-worktasks.json'] }),
+  step('wt.template.delete', 'work_task_template_delete', { id: 1 }, { files: ['codepluse-worktasks.json'] }),
   step('wt.template.list.after', 'work_task_template_list', {}),
   step('wt.forge.create', 'work_task_create_from_forge', { draft: {
     folder_id: 1,
     source: { kind: 'issue', provider: 'github', server_host: 'github.com', owner_repo: 'acme/app', number: 42 },
     snapshot: { title: '按钮坏了', body: '点哪儿都没反应', url: 'https://github.com/acme/app/issues/42' },
-  } }, { files: ['codeg-worktasks.json'] }),
+  } }, { files: ['codepluse-worktasks.json'] }),
   step('wt.forge.no_source', 'work_task_create_from_forge', { draft: { folder_id: 1, snapshot: {} } }),
   step('wt.lookup', 'work_task_lookup_by_source', { sourceKeys: ['github:github.com:acme/app:issue:42', 'github:github.com:acme/app:issue:43'] }),
-  step('wt.schedule', 'work_task_schedule', { id: 2, scheduledAt: '2027-01-01T09:00:00Z' }, { files: ['codeg-worktasks.json'] }),
-  step('wt.schedule.clear', 'work_task_schedule', { id: 2, scheduledAt: '' }, { files: ['codeg-worktasks.json'] }),
-  step('wt.defer', 'work_task_defer', { id: 2, deferred: true }, { files: ['codeg-worktasks.json'] }),
-  step('wt.defer.off', 'work_task_defer', { id: 2, deferred: false }, { files: ['codeg-worktasks.json'] }),
-  step('wt.archive', 'work_task_archive', { id: 2, archived: true }, { files: ['codeg-worktasks.json'] }),
-  step('wt.archive.off', 'work_task_archive', { id: 2, archived: false }, { files: ['codeg-worktasks.json'] }),
-  step('wt.merge_unqueue', 'work_task_merge_unqueue', { id: 2 }, { files: ['codeg-worktasks.json'] }),
+  step('wt.schedule', 'work_task_schedule', { id: 2, scheduledAt: '2027-01-01T09:00:00Z' }, { files: ['codepluse-worktasks.json'] }),
+  step('wt.schedule.clear', 'work_task_schedule', { id: 2, scheduledAt: '' }, { files: ['codepluse-worktasks.json'] }),
+  step('wt.defer', 'work_task_defer', { id: 2, deferred: true }, { files: ['codepluse-worktasks.json'] }),
+  step('wt.defer.off', 'work_task_defer', { id: 2, deferred: false }, { files: ['codepluse-worktasks.json'] }),
+  step('wt.archive', 'work_task_archive', { id: 2, archived: true }, { files: ['codepluse-worktasks.json'] }),
+  step('wt.archive.off', 'work_task_archive', { id: 2, archived: false }, { files: ['codepluse-worktasks.json'] }),
+  step('wt.merge_unqueue', 'work_task_merge_unqueue', { id: 2 }, { files: ['codepluse-worktasks.json'] }),
   step('wt.get.missing', 'work_task_get', { id: 999 }),
   step('wt.complete.todo', 'work_task_complete', { id: 2 }),
   step('wt.merge.todo', 'work_task_merge', { id: 2, message: 'm' }),
-  step('wt.cancel', 'work_task_cancel', { id: 2, reason: '改需求' }, { files: ['codeg-worktasks.json'] }),
+  step('wt.cancel', 'work_task_cancel', { id: 2, reason: '改需求' }, { files: ['codepluse-worktasks.json'] }),
   step('wt.cancel.again', 'work_task_cancel', { id: 2 }),
   step('wt.update.canceled', 'work_task_update', { id: 2, draft: { title: 'x' } }),
-  step('wt.requeue', 'work_task_requeue', { id: 2, note: '再来一次' }, { files: ['codeg-worktasks.json'] }),
+  step('wt.requeue', 'work_task_requeue', { id: 2, note: '再来一次' }, { files: ['codepluse-worktasks.json'] }),
   step('wt.retry.not_failed', 'work_task_retry', { id: 2 }),
   step('wt.return.not_review', 'work_task_return', { id: 2, feedback: '补个测试' }),
   step('wt.cleanup.none', 'work_task_cleanup', { id: 2 }),
@@ -429,20 +429,20 @@ const worktaskSteps = [
   // 引擎路径：task1 config.agent_type = parity-no-such-agent → 连接快速失败。
   // start 不比落盘（引擎异步写，两边节奏不同），settle 后两边都到终态再比。
   step('wt.start', 'work_task_start', { id: 1 }),
-  step('wt.settle', 'work_task_get', { id: 1 }, { settleTask: 1, files: ['codeg-worktasks.json'] }),
+  step('wt.settle', 'work_task_get', { id: 1 }, { settleTask: 1, files: ['codepluse-worktasks.json'] }),
   // 引擎已建好隔离工作树（两边同样步骤），脏化后比对 diff/changed_files。
-  step('wt.diff', 'work_task_diff', { id: 1 }, { prepare: dirtyWorktree, files: ['codeg-worktasks.json'] }),
+  step('wt.diff', 'work_task_diff', { id: 1 }, { prepare: dirtyWorktree, files: ['codepluse-worktasks.json'] }),
   step('wt.diff.file', 'work_task_diff', { id: 1, file: 'b.txt' }),
   step('wt.changed', 'work_task_changed_files', { id: 1 }),
   step('wt.complete.dirty', 'work_task_complete', { id: 1 }),
-  step('wt.complete.ok', 'work_task_complete', { id: 1 }, { prepare: cleanWorktree, files: ['codeg-worktasks.json'] }),
+  step('wt.complete.ok', 'work_task_complete', { id: 1 }, { prepare: cleanWorktree, files: ['codepluse-worktasks.json'] }),
   step('wt.complete.again', 'work_task_complete', { id: 1 }),
-  step('wt.cleanup', 'work_task_cleanup', { id: 1 }, { files: ['codeg-worktasks.json'] }),
+  step('wt.cleanup', 'work_task_cleanup', { id: 1 }, { files: ['codepluse-worktasks.json'] }),
   step('wt.cleanup.again', 'work_task_cleanup', { id: 1 }),
   step('wt.diff.gone', 'work_task_diff', { id: 1 }),
-  step('wt.delete', 'work_task_delete', { id: 2, deleteWorktree: false }, { files: ['codeg-worktasks.json'] }),
+  step('wt.delete', 'work_task_delete', { id: 2, deleteWorktree: false }, { files: ['codepluse-worktasks.json'] }),
   step('wt.delete.missing', 'work_task_delete', { id: 999 }),
-  step('wt.list.final', 'work_task_list', { folderId: 1 }, { files: ['codeg-worktasks.json'] }),
+  step('wt.list.final', 'work_task_list', { folderId: 1 }, { files: ['codepluse-worktasks.json'] }),
 ];
 
 const DATA_URL =

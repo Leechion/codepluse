@@ -1,8 +1,8 @@
 //! 桌面宠物数据与素材 —— 补全批次（14 条）。
 //!
-//! 前端（`codeg-ui/src/lib/pet/api.ts`）已经在调用这些命令，但原 Go sidecar 与
+//! 前端（`codepluse-ui/src/lib/pet/api.ts`）已经在调用这些命令，但原 Go sidecar 与
 //! Rust 都没有实现过它们（在 `server-go` 只读副本里搜不到命令字面量），所以契约
-//! 只由调用点参数名与 `codeg-ui/src/lib/pet/types.ts` 的返回结构决定：
+//! 只由调用点参数名与 `codepluse-ui/src/lib/pet/types.ts` 的返回结构决定：
 //!
 //! * `PetSummary` / `PetDetail` = `{ id, displayName, description, spritesheetPath }`。
 //! * `PetSpriteAsset` = `{ mime, dataBase64 }`（标准 base64，不含 `data:` 前缀）。
@@ -479,7 +479,7 @@ fn active_sessions(root: &Path) -> Result<Value, String> {
         // 协议层还没起来：诚实返回空快照，不编造会话。
         return Ok(empty_sessions_payload());
     };
-    let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    let doc = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
         .ok()
         .flatten()
         .unwrap_or(Value::Null);

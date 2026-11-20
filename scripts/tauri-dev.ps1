@@ -13,7 +13,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$ui = Join-Path $root 'codeg-ui'
+$ui = Join-Path $root 'codepluse-ui'
 
 # Rust may live outside the default location (this machine installs it to
 # E:\rust); resolve it explicitly and export the home variables.

@@ -6,7 +6,7 @@
 // sides then receive the same `codepluse_provider_save` call and the harness
 // compares the response and every touched file.
 //
-//   go build -o server-go/serve-codeg.exe ./cmd/serve
+//   go build -o server-go/serve-codepluse.exe ./cmd/serve
 //   cargo build
 //   node scripts/parity-provider.mjs [--go 8860] [--rust 8861]
 
@@ -23,14 +23,14 @@ const option = (name, fallback) => {
 };
 const GO_PORT = Number(option('go', '8860'));
 const RUST_PORT = Number(option('rust', '8861'));
-const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codeg.exe');
+const GO_EXE = path.join(repoRoot, 'server-go', 'serve-codepluse.exe');
 const RUST_EXE = path.join(repoRoot, 'src-tauri', 'target', 'debug', 'codepluse.exe');
 
 const die = (message) => {
   console.error(`❌ ${message}`);
   process.exit(2);
 };
-if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codeg.exe');
+if (!existsSync(GO_EXE)) die('缺少 server-go/serve-codepluse.exe');
 if (!existsSync(RUST_EXE)) die('缺少 src-tauri/target/debug/codepluse.exe');
 
 const base = mkdtempSync(path.join(repoRoot, '.superpowers', 'sdd', 'parity-provider-'));
@@ -92,7 +92,7 @@ const spawnServer = (exe, cwd, env, label) => {
 };
 
 spawnServer(GO_EXE, goTwin.root, {
-  HARNESS_HUB_CODEG: '1',
+  HARNESS_HUB_CODEPLUSE: '1',
   PORT: String(GO_PORT),
   HARNESS_HUB_ALLOW_ANY_PATH: '1',
   USERPROFILE: goTwin.home,

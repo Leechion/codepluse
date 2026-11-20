@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use crate::backend::store_file;
 
 const MAX_BG_BYTES: usize = 64 * 1024 * 1024;
-const FILE: &str = "codeg-workspace-background.json";
+const FILE: &str = "codepluse-workspace-background.json";
 
 pub fn owns(command: &str) -> bool {
     matches!(

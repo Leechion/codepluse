@@ -1,5 +1,5 @@
 //! Work-task execution engine, ported from
-//! `server-go/internal/codeg/worktask_run.go`.
+//! `server-go/internal/codepluse/worktask_run.go`.
 //!
 //! The board itself is Rust-owned (`worktask.rs`); this module is the engine
 //! that was deliberately left in Go until the ACP runtime arrived: claim →
@@ -56,7 +56,7 @@ fn merge_lock(folder_id: i64) -> Arc<tokio::sync::Mutex<()>> {
 
 /// Go 的任务板文件名。
 fn tasks_file(root: &Path) -> PathBuf {
-    root.join(".data").join("codeg-worktasks.json")
+    root.join(".data").join("codepluse-worktasks.json")
 }
 
 fn load_board(root: &Path) -> Value {
@@ -180,7 +180,7 @@ fn number(value: Option<&Value>) -> i64 {
 }
 
 fn folder_path(root: &Path, folder_id: i64) -> Option<String> {
-    crate::backend::store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    crate::backend::store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
         .ok()
         .flatten()
         .and_then(|doc| {
@@ -197,7 +197,7 @@ fn folder_path(root: &Path, folder_id: i64) -> Option<String> {
 }
 
 fn folder_row(root: &Path, folder_id: i64) -> Value {
-    crate::backend::store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    crate::backend::store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
         .ok()
         .flatten()
         .and_then(|doc| {

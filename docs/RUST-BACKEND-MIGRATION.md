@@ -10,10 +10,10 @@
 | Go 生产代码 | **26,443 行** | `server-go/`，11 个包 |
 | Go 测试代码 | **5,883 行** | 这些测试就是现有行为的契约 |
 | HTTP/WS 命令 | **334 个**（389 处 `case`） | 清单见 `rust-backend-command-inventory.tsv` |
-| 前端 API 面 | **6,817 行** | `codeg-ui/src/lib/api.ts` |
+| 前端 API 面 | **6,817 行** | `codepluse-ui/src/lib/api.ts` |
 | 后端二进制 | 22 MB | 含 ACP 运行时、SQLite、PTY、CDP |
 
-命令分布：`internal/codeg` 360 处、`providers` 9、`acp` 8、`mcpserver` 4、`cmd` 8。
+命令分布：`internal/codepluse` 360 处、`providers` 9、`acp` 8、`mcpserver` 4、`cmd` 8。
 
 ## 二、为什么不能一次性重写
 
@@ -32,10 +32,10 @@
 | Go 包 | 职责 | Rust 方案 | 风险 |
 |---|---|---|---|
 | `internal/acp` | ACP 协议运行时，stdio JSON-RPC，进程池 | `tokio` + 自写 codec；进程树用 `jobobject` | 中：协议细节多，但有 Go 实现可对照 |
-| `internal/codeg` | 334 个命令、HTTP/WS、静态资源 | `axum` + `tower` + `tokio-tungstenite` | 高：体量最大，需按命令分批 |
-| `internal/codeg/turnstore.go` | 会话历史（SQLite） | `rusqlite`（bundled），**复用现有 .db 文件与 schema** | 低：schema 不变即可原地读写 |
-| `internal/codeg/terminal.go` | ConPTY 终端 | `portable-pty`（wezterm） | 中：Windows 下行为需逐项对齐 |
-| `internal/codeg/browser.go` | CDP 内置浏览器 | `chromiumoxide` 或裸 CDP over `tokio-tungstenite` | 高：截图/注入/多标签语义多 |
+| `internal/codepluse` | 334 个命令、HTTP/WS、静态资源 | `axum` + `tower` + `tokio-tungstenite` | 高：体量最大，需按命令分批 |
+| `internal/codepluse/turnstore.go` | 会话历史（SQLite） | `rusqlite`（bundled），**复用现有 .db 文件与 schema** | 低：schema 不变即可原地读写 |
+| `internal/codepluse/terminal.go` | ConPTY 终端 | `portable-pty`（wezterm） | 中：Windows 下行为需逐项对齐 |
+| `internal/codepluse/browser.go` | CDP 内置浏览器 | `chromiumoxide` 或裸 CDP over `tokio-tungstenite` | 高：截图/注入/多标签语义多 |
 | `internal/extra` | worktree、skills、通知、handoff | 调 `git` CLI（与现状一致）或 `git2` | 低 |
 | `internal/orch` | 编排器、定时任务 | 纯逻辑移植 | 低 |
 | `internal/hub` | Agent 注册表 | 纯逻辑移植 | 低 |
@@ -64,7 +64,7 @@
   - `/api/health` → `{"backend":"go","ok":true,"proxy":"rust","upstream":true}`
   - `GET /workspace` → 200，441,601 B（与直连一致）
   - `POST /api/acp_current_platform` → 与直连返回完全相同
-  - WebSocket → 协商 `codeg-events`，收到上游首帧 `__ready__`
+  - WebSocket → 协商 `codepluse-events`，收到上游首帧 `__ready__`
 
 > 这一阶段看起来"没重写业务"，但它是唯一能让后续 334 个命令逐个迁移、
 > 且应用始终可运行的前提。没有它，只能等全部写完再切换——那是不可验收的。
@@ -72,7 +72,7 @@
 ### Phase 2 — 按子系统移植（进行中）
 
 顺序按依赖与风险从低到高：`providers` → `hub` → `orch` → `extra` →
-`turnstore` → `mcpserver` → `acp` → `terminal` → `browser` → `codeg` 剩余命令。
+`turnstore` → `mcpserver` → `acp` → `terminal` → `browser` → `codepluse` 剩余命令。
 
 **基础设施：`store_file`（已完成）**
 
@@ -111,13 +111,13 @@ pnpm parity --command health --method GET
 
 ```
 ❌ GET /api/health 响应 JSON
-   $.codeg_version: 仅 Go 有
+   $.codepluse_version: 仅 Go 有
 ```
 
 实测三类场景：已移植命令 MATCH、错误路径 MATCH（400 + 同文案）、故意不同的接口能准确
 定位到字段。`--path` 形式在某些终端会被 MSYS 改写，建议用 `--command`。
 
-> 顺带修掉一个真实漂移：`/api/health` 原本是 Rust 手拼响应，缺 `codeg_version`/`data`，
+> 顺带修掉一个真实漂移：`/api/health` 原本是 Rust 手拼响应，缺 `codepluse_version`/`data`，
 > 一旦有调用方读这些字段就会出问题。现在改为**透传上游响应体**，只在响应头加
 > `x-codepluse-proxy: rust` 作为标记——body 与 Go 逐字节一致。
 
@@ -216,8 +216,8 @@ Hub 注册表、`settings.json` overlay、`AgentAvailability` 二进制探测与
   4. 在 `rust-backend-command-inventory.tsv` 的 `ported` 列标为 `rust`。
 
 ### Phase 3 — 数据层与静态资源（2–3 人日）
-- 直接读写现有 `codeg.db` / `settings.json`，保证新旧版本可互操作（降级回滚可行）
-- Rust 直接服务 `codeg-ui/out`，去掉对 Go 静态服务的依赖
+- 直接读写现有 `codepluse.db` / `settings.json`，保证新旧版本可互操作（降级回滚可行）
+- Rust 直接服务 `codepluse-ui/out`，去掉对 Go 静态服务的依赖
 
 ### Phase 4 — 移除 sidecar（1 人日）
 - 删除 `server-go/`、`build-tauri.ps1` 中的 Go 构建步骤、`externalBin`
@@ -251,7 +251,7 @@ Hub 注册表、`settings.json` overlay、`AgentAvailability` 二进制探测与
 | 唯一命令 | 334 个（389 处 case） |
 | 已切 Rust | **6 个**（providers 4 + exec_providers 2） |
 | 待迁移 | **328 个（约 98%）** |
-| Go 生产代码 | ~26k 行（internal/codeg 独占 20,247 行 / 89 文件） |
+| Go 生产代码 | ~26k 行（internal/codepluse 独占 20,247 行 / 89 文件） |
 
 ### 7.2 按难度分级（依据：对 Server 状态字段的引用数 + 切片准则）
 
@@ -323,7 +323,7 @@ disk`），`git_is_tracked` 取不存在的文件会返回 `true`。Rust 已逐�
 
 **为什么只读可以先迁**：Go 每次改动都会 `saveLocked()` 整文件落盘，磁盘即 Go 内存的镜像。
 Rust 每次调用重读文件，结果与 Go 内存一致；而 Rust **写**会被 Go 下一次整文件保存覆盖。
-所以读命令可逐条切，写命令必须等「所有会写 codeg-workspace.json 的命令」一起翻。
+所以读命令可逐条切，写命令必须等「所有会写 codepluse-workspace.json 的命令」一起翻。
 
 - `store_reads.rs`（21 条）：`get_sidebar_data`、`get_stats`、`list_open_folder_details`、
   `load_folder_history`、`list_all_folder_details`、`list_folders`、`get_folder`、
@@ -371,7 +371,7 @@ Rust 每次调用重读文件，结果与 Go 内存一致；而 Rust **写**会�
 
 #### 批次 5 — Store 写盘整批翻转（2026-11-13，已验收）
 
-**解锁前提**：Go 侧 `Store.reloadIfChangedLocked()`（`server-go/internal/codeg/store.go`）
+**解锁前提**：Go 侧 `Store.reloadIfChangedLocked()`（`server-go/internal/codepluse/store.go`）
 —— 每个请求入口 stat 文件，mtime/size 变化则重读 JSON。双写场景下 Go 能看到 Rust
 的写入、Rust 每次调用重读文件，旧约束「写命令必须一次切完否则丢更新」由
 「Go 每请求先重读」兜底化解。
@@ -381,7 +381,7 @@ Rust 每次调用重读文件，结果与 Go 内存一致；而 Rust **写**会�
   CAS）、system settings、folder 属性）、canvas 12（boards/nodes/region/detach）、
   git_settings 2；写盘走 `goformat.rs`——逐字节复刻 Go `json.Marshal`
   （顶层字段序、嵌套键排序、HTML 转义、RFC3339Nano、整 f64 塌缩）
-- `folder_commands.rs`（6 条）：独立文件 `codeg-folder-commands.json`，id 计数独立
+- `folder_commands.rs`（6 条）：独立文件 `codepluse-folder-commands.json`，id 计数独立
 - WS 事件注入：`conversation://changed`、`canvas://changed`、
   `canvas-board://changed`、`audit://folder_open` 由 Rust 直接喂给前端；
   canvas 删除时 `terminal_kill` 转发回 Go（终端未移植）
@@ -436,7 +436,7 @@ C ACP 28、D worktask 32、E 浏览器 19、F 桌面 21、G 终端 8、H 自动�
 | 时间 | `time.RFC3339Nano`（尾零裁剪） | 手拼 `[Y]-[M]-[D]T[h]:[m]:[s]` + 去尾零小数 + `Z` |
 | 控制字符 | `\b`/`\f` 也走 `\u0008`/`\u000c` | 重载 `write_char_escape`（评审发现，已修） |
 
-格式假设全部用真实 serve-codeg.exe 冒烟验证过（紧凑无换行、`1e1`→`48`、tab `1.0`→`1`、
+格式假设全部用真实 serve-codepluse.exe 冒烟验证过（紧凑无换行、`1e1`→`48`、tab `1.0`→`1`、
 `member_ids:[]`）。HTTP 响应与 WS 注入帧同样先 `canon()` 再序列化（`go_json`），
 与 Go 的 `respond(json.Marshal(map))` 同形；响应体 2MB 上限（`MaxBytesReader` 语义）同步。
 评审还发现并修掉：tags 去重偏差、tabs 标量数组语义、folder_commands 浮点 id 与重复 id
@@ -485,7 +485,7 @@ Windows 上是纯 schannel FFI，不需要 ring 的 NASM/C 工具链。crates.io
 
 **forge 全组 21 条一次翻转**（forge.go + forge_github.go + validate_github_token）：
 - accounts（token）**只在进程内存**，与 Go 同寿命（重启要求重输）；settings 落盘
-  `.data/codeg-forge.json`（无 token，canon 格式与 Go `atomicWrite` 同字节）。
+  `.data/codepluse-forge.json`（无 token，canon 格式与 Go `atomicWrite` 同字节）。
 - `validate_github_token` 在 Go 是**死路径**（forgeCommand 无 case，永远 fall-through
   到仓库解析报错）——Rust 逐字节复刻错误链，单测钉死，禁止"修好"。
 - `github_request`：30s 超时、8MB 限读、状态码 ≥300 → `GitHub %s %s 返回 %d：%s`
@@ -499,7 +499,7 @@ Windows 上是纯 schannel FFI，不需要 ring 的 NASM/C 工具链。crates.io
 
 **双跑 `scripts/parity-net.mjs`**：孪生 workspace（git 仓库种子，origin 指向
 github.com）+ 本地 manifest HTTP 服务器 + **mock GitHub**——Go 侧用
-`go build -ldflags "-X harnesshub/internal/codeg.githubAPI=<mock>"` 重定向测试专用
+`go build -ldflags "-X harnesshub/internal/codepluse.githubAPI=<mock>"` 重定向测试专用
 var，Rust 侧读 `CODEPLUSE_GITHUB_API` env；26 步（含 401/200 两分支、12 条 REST、
 settings 文件字节）**EXIT=0 全一致**。
 
@@ -558,7 +558,7 @@ mcp 状态 1、feedback 1、turn 库 4、token 用量 4、任务引擎 4。
 
 **关键结构变化：会话历史正式落到 SQLite。** C 组移植时 prompt/completion/fork
 写的是 JSON 文档里的 turns map，而 Go 现行实现（turnstore.go）早已迁到
-`.data/codeg.db`（WAL、每行携带累积前缀指纹）。本批：
+`.data/codepluse.db`（WAL、每行携带累积前缀指纹）。本批：
 
 - 新增 `turn_store.rs`：schema 与 Go 完全一致（conversation_id/seq/data/role/
   timestamp/hash_after/assistant_upto/user_upto/max_ts），FNV-1a 前缀指纹
@@ -602,7 +602,7 @@ tokio 异步锁；定时器 15s（Go 在主循环内）。
 | 静态资源 | `webapp.rs::static_asset`（Go `static()` 的查找顺序 + Content-Type/ETag/Last-Modified/Range/304） | 6/6 MATCH |
 | `/api/health` | `webapp.rs::health`（本地合成，`backend` 翻成 `rust`） | 字段一致 |
 | 附件上传 | `webapp.rs::upload_attachment`（手写 multipart，独占创建 + 半成品清理） | 2/2 MATCH |
-| `/api/codeg_mcp` | `webapp.rs` + `mcp_companion.rs`（token 校验 + 工具分派 + stdio MCP 服务） | 4/4 帧一致 |
+| `/api/codepluse_mcp` | `webapp.rs` + `mcp_companion.rs`（token 校验 + 工具分派 + stdio MCP 服务） | 4/4 帧一致 |
 | 本地请求防护 | `webapp.rs::guard`（Host/Origin 白名单 + Sec-Fetch-Site + Content-Type 契约） | 3/3 MATCH |
 | 事件 WebSocket | `events_ws.rs`（ready/ping/attach/detach/snapshot/replay/event/detached） | 协议帧一致 |
 | dev 热更新代理 | `webapp.rs` + `mod.rs::dev_proxy` | — |
@@ -621,8 +621,8 @@ tokio 异步锁；定时器 15s（Go 在主循环内）。
    `native:` / `ccswitch:` / `store:` 的 id 原先直接落回 Go 转发，删 Go 后必坏。
    现已写回 CC Switch 的 SQLite / `~/.codex/config.toml` / DSH 的 YAML /
    `.data/model-providers.json`；双跑一致（TOML/YAML 仅序列化格式不同，语义一致）。
-2. **companion MCP**（`mcp_companion.rs`）：Rust 仍在向 agent 广告 `codeg-mcp`，
-   而它指向的 `mcp-codeg` 子命令在 Rust 二进制里并不存在——工具一调用就失败。
+2. **companion MCP**（`mcp_companion.rs`）：Rust 仍在向 agent 广告 `codepluse-mcp`，
+   而它指向的 `mcp-codepluse` 子命令在 Rust 二进制里并不存在——工具一调用就失败。
    现已补齐 stdio JSON-RPC 服务与 10 个工具定义，与 Go 逐帧对拍一致。
 3. **协作域 delegation**（`acp/delegation.rs`）：委派注册表 + 派发/状态/取消/续跑/
    消息与反馈工具落地；`propose_task_split` 与 `ask_user_question` 两个工具变体
@@ -653,26 +653,26 @@ and Qoder agents`、`9e42280 fix: show independent account agents in settings`�
 | 文件 | 改动 |
 |---|---|
 | `internal/accountchannels/`（新增） | 管理本地协议进程：随机密钥、共享实例（`runtime.json`）、Bearer 调用 |
-| `internal/codeg/account_channels.go`（新增） | 5 条 `codepluse_channel_*` 命令的转发 |
-| `internal/codeg/harness_connections.go` | 连接目录里的账号块（managed / source / configured / models） |
-| `internal/codeg/main_bot.go` | 主智能体实例 id 的 `toolKey`（`:` → `_`） |
+| `internal/codepluse/account_channels.go`（新增） | 5 条 `codepluse_channel_*` 命令的转发 |
+| `internal/codepluse/harness_connections.go` | 连接目录里的账号块（managed / source / configured / models） |
+| `internal/codepluse/main_bot.go` | 主智能体实例 id 的 `toolKey`（`:` → `_`） |
 | `internal/acp/runtime.go` | `account:<id>` 的公开名 `account_<id>` |
 | `internal/providers/auth.go` | `SupportsSubscription("account:<id>")` |
 | `cmd/serve/wiring.go` | 播种四个账号智能体 + `account:<id>` 的启动链 |
-| `cmd/desktop/main_windows.go` | `__codegGoOpenExternal`（只允许 https） |
+| `cmd/desktop/main_windows.go` | `__codepluseGoOpenExternal`（只允许 https） |
 
 ### Rust 侧对应实现
 
 | 上游 | 本仓 |
 |---|---|
 | `internal/accountchannels/channels.go` | `src-tauri/src/backend/account_channels.rs`（`supported` / `available` / `ensure` / `call` / `list`） |
-| `internal/codeg/account_channels.go` | `backend/mod.rs` 的 `codepluse_channel_*` 分支（响应保持协议进程自己的键序） |
+| `internal/codepluse/account_channels.go` | `backend/mod.rs` 的 `codepluse_channel_*` 分支（响应保持协议进程自己的键序） |
 | `cmd/serve/wiring.go` 的播种 | `acp/agents.rs::account_agents` + `registry` |
 | `cmd/serve/wiring.go` 的启动链 | `acp/launch.rs::launch_fn` 的 `account:<id>` 分支（`acp-agent.mjs` + `CODEPLUSE_CHANNEL_*` 环境） |
 | `internal/providers/auth.go` | `acp/providers_core.rs::supports_subscription` + `acp/launch.rs::clear_api_environment` |
-| `internal/codeg/harness_connections.go` | `harness_connections.rs::connection_catalog` 的账号块 |
-| `internal/codeg/main_bot.go` | `harness_instances.rs` 的 `tool_key` |
-| `cmd/desktop/main_windows.go` | `main.rs` 的 `open_external` 命令 + 初始化脚本注入 `window.__codegGoOpenExternal` |
+| `internal/codepluse/harness_connections.go` | `harness_connections.rs::connection_catalog` 的账号块 |
+| `internal/codepluse/main_bot.go` | `harness_instances.rs` 的 `tool_key` |
+| `cmd/desktop/main_windows.go` | `main.rs` 的 `open_external` 命令 + 初始化脚本注入 `window.__codepluseGoOpenExternal` |
 
 协议进程契约与上游一致：数据目录 `.data/account-channels`、随机 32 字节密钥经
 `CODEPLUSE_CHANNEL_KEY` 传入、首行 stdout 是 `{"url":"http://127.0.0.1:PORT"}`、
@@ -686,7 +686,7 @@ and Qoder agents`、`9e42280 fix: show independent account agents in settings`�
 |---|---|
 | `components/settings/account-channel-panel.tsx` | 管理面板：发起登录 → 把登录地址交给系统浏览器 → 每 2s 轮询状态（可取消）→ 刷新；已登录时列出账号并可逐个退出 |
 | `components/settings/connection-fields.tsx` | 账号类执行端（`tool` 以 `account:` 开头）渲染该面板 |
-| `lib/open-external.ts` | 外链打开：桌面壳注入的 `__codegGoOpenExternal` 优先，浏览器标签页回退 `window.open` |
+| `lib/open-external.ts` | 外链打开：桌面壳注入的 `__codepluseGoOpenExternal` 优先，浏览器标签页回退 `window.open` |
 | `lib/api.ts` | 5 条 `codepluse_channel_*` 的接口与类型 |
 | `i18n/messages/*.json` | 10 种语言补齐 9 个新文案（`en.json` 为准，键位一致性测试强制对齐） |
 

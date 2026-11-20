@@ -1,10 +1,10 @@
 //! Conversation/turn store primitives the ACP flow writes through, ported
-//! from Go's `codeg/store.go` (folder/conversation/turn helpers) and the
+//! from Go's `codepluse/store.go` (folder/conversation/turn helpers) and the
 //! store sections of `connections.go` (prompt + completion) and `fork.go`
 //! (the fork transaction).
 //!
 //! Contract (batch-5 convention): every entry point takes the cross-process
-//! file lock, re-reads `codeg-workspace.json`, mutates an in-memory copy and
+//! file lock, re-reads `codepluse-workspace.json`, mutates an in-memory copy and
 //! persists once via `goformat::marshal_store` — Go's
 //! `Store.reloadIfChangedLocked` picks the change up on its side. Errors leave
 //! the file untouched, which matches Go's in-memory rollback.
@@ -17,7 +17,7 @@ use serde_json::{json, Map, Value};
 use crate::backend::goformat;
 use crate::backend::store_file;
 
-const FILE: &str = "codeg-workspace.json";
+const FILE: &str = "codepluse-workspace.json";
 
 /// 工作台文档的落盘位置。这里收到的 `root` 是工作区根目录（与
 /// `store_reads` / `store_writes` / `turn_store` 一致），文档在 `.data/` 下。
@@ -604,7 +604,7 @@ mod tests {
 
     /// Regression for the new-conversation send failure: the front door's
     /// `create_conversation` persists the row into
-    /// `<root>/.data/codeg-workspace.json`. If the ACP prompt half ever drifts
+    /// `<root>/.data/codepluse-workspace.json`. If the ACP prompt half ever drifts
     /// back to a different path, the first message of a brand-new conversation
     /// dies with 「会话不存在」. Keep both halves on the same document.
     #[test]

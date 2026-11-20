@@ -1,6 +1,6 @@
 //! Git 提交消息生成与工作树移除 —— 补全批次（3 条）。
 //!
-//! 前端（`codeg-ui/src/lib/api.ts`）已经在调用这些命令，但原 Go sidecar 与
+//! 前端（`codepluse-ui/src/lib/api.ts`）已经在调用这些命令，但原 Go sidecar 与
 //! Rust 都没有实现过它们，契约只由调用点参数名与 `types.ts` 返回结构决定：
 //!
 //! * `git_generate_commit_message` `{ requestId, path, folderId, files, draft, fallbackAgent }`

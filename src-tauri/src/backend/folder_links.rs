@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use crate::backend::store_file;
 
-const STORE: &str = "codeg-folder-links.json";
+const STORE: &str = "codepluse-folder-links.json";
 
 pub fn owns(command: &str) -> bool {
     matches!(
@@ -59,7 +59,7 @@ fn write_rows(root: &Path, rows: &[Value]) -> Result<(), String> {
 }
 
 fn folder_path(root: &Path, id: i64) -> Result<PathBuf, String> {
-    let doc_path = root.join(".data").join("codeg-workspace.json");
+    let doc_path = root.join(".data").join("codepluse-workspace.json");
     let doc = store_file::read_json(&doc_path)?.ok_or("工作区不存在")?;
     let folder = doc
         .get("folders")

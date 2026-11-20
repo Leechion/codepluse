@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const ROOT = 'E:/code/codepluse'
-const UI = path.join(ROOT, 'codeg-ui')
+const UI = path.join(ROOT, 'codepluse-ui')
 const p = path.join(UI, 'src/app/workspace/page.tsx')
 console.log('page:', p)
 console.log('exists:', fs.existsSync(p))

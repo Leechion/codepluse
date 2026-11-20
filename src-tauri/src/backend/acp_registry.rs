@@ -1,4 +1,4 @@
-//! ACP registry catalog, ported from `server-go/internal/codeg/custom_agents.go`
+//! ACP registry catalog, ported from `server-go/internal/codepluse/custom_agents.go`
 //! (`fetchRegistryEntries` + `registryCatalog` + the spec-kind helpers).
 //!
 //! Ported (1): `acp_fetch_registry_catalog`. The sibling install commands
@@ -224,7 +224,7 @@ fn registry_catalog(root: &Path) -> Result<Value, String> {
 fn registry_catalog_with_url(registry: &str, root: &Path) -> Result<Value, String> {
     let entries = fetch_registry_entries(registry)?;
     let installed: Vec<String> =
-        store_file::read_json(&root.join(".data").join("codeg-workspace.json"))?
+        store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))?
             .and_then(|doc| {
                 doc.get("customAgents")
                     .and_then(|v| v.as_object())
@@ -316,7 +316,7 @@ mod tests {
         let url = serve_registry(payload);
         let root = temp_root("catalog");
         std::fs::write(
-            root.join(".data").join("codeg-workspace.json"),
+            root.join(".data").join("codepluse-workspace.json"),
             json!({"next": 1, "customAgents": {"claude-acp": {"registryId": "claude-acp"}}})
                 .to_string(),
         )

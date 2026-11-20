@@ -2,8 +2,8 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 
 const ROOT = fs.realpathSync(process.cwd())
-const ZC = ROOT + '/codeg-ui/src/zcode'
-const files = execFileSync('git', ['ls-files', 'codeg-ui/src/zcode'], { maxBuffer: 1 << 28 })
+const ZC = ROOT + '/codepluse-ui/src/zcode'
+const files = execFileSync('git', ['ls-files', 'codepluse-ui/src/zcode'], { maxBuffer: 1 << 28 })
   .toString()
   .split('\n')
   .filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f))
@@ -14,7 +14,7 @@ console.log('zcode 源文件', files.length, '总行', files.reduce((a, f) => a 
 
 function resolve(spec, fromFile) {
   let base
-  if (spec.startsWith('@/')) base = ROOT + '/codeg-ui/src/' + spec.slice(2)
+  if (spec.startsWith('@/')) base = ROOT + '/codepluse-ui/src/' + spec.slice(2)
   else if (spec.startsWith('./') || spec.startsWith('../')) {
     const parts = (fromFile.slice(0, fromFile.lastIndexOf('/')) + '/' + spec).split('/')
     const st = []

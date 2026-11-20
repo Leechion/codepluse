@@ -1,5 +1,5 @@
 //! The group-C command surface: dispatch + the `acp_*` handlers, ported from
-//! Go's `codeg/server.go` dispatch, `connections.go`, `preflight.go`,
+//! Go's `codepluse/server.go` dispatch, `connections.go`, `preflight.go`,
 //! `agentconfig.go`, `custom_launch.go` (install commands) and `agents()`
 //! (server.go:148).
 //!
@@ -308,7 +308,7 @@ fn merge_agent_overlay(overlay: &Value, wire: &str, row: &mut Value) {
 
 /// Go `agents()` (server.go:148): the settings-page agent list, overlay-merged.
 pub fn agents_rows(root: &Path) -> Vec<Value> {
-    let doc = store_file::read_json(&root.join(".data").join("codeg-workspace.json"))
+    let doc = store_file::read_json(&root.join(".data").join("codepluse-workspace.json"))
         .ok()
         .flatten()
         .unwrap_or(Value::Null);
@@ -416,7 +416,7 @@ fn reorder_agents(root: &Path, args: &Value) -> Result<(), String> {
         }
         order.push(value.to_string());
     }
-    let path = root.join(".data").join("codeg-workspace.json");
+    let path = root.join(".data").join("codepluse-workspace.json");
     let _guard = store_file::lock(&path)?;
     let mut doc = store_file::read_json(&path)?.unwrap_or_else(|| json!({}));
     let object = doc.as_object_mut().ok_or("工作区存储格式无效")?;
@@ -626,7 +626,7 @@ fn update_agent_settings(
         .ok_or_else(|| format!("智能体不存在：{agent_type}"))?;
     let wire = agents::wire_agent(&ag);
 
-    let path = root.join(".data").join("codeg-workspace.json");
+    let path = root.join(".data").join("codepluse-workspace.json");
     let guard = store_file::lock(&path)?;
     let mut doc = store_file::read_json(&path)?.unwrap_or(json!({}));
     let agents_map = doc
