@@ -4371,3 +4371,16 @@ div.monaco-diff-editor.side-by-side .editor.modified {
 [data-settings-shell] *::-webkit-scrollbar-thumb:hover {
   background-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
 }
+
+/* Settings shell aesthetic polish: subtle depth & card hierarchy */
+[data-settings-shell] {
+  background-color: color-mix(in oklab, var(--background) 97%, var(--muted) 3%);
+}
+
+[data-settings-shell] [data-settings-card] {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.025), 0 1px 2px -1px rgba(0, 0, 0, 0.02);
+}
+
+.dark [data-settings-shell] [data-settings-card] {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px -1px rgba(0, 0, 0, 0.2);
+}

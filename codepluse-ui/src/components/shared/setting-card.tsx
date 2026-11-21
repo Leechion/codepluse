@@ -27,7 +27,7 @@ export function SettingCard({
     <div
       data-settings-card=""
       className={cn(
-        "divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70 bg-muted/40",
+        "divide-y divide-border/50 overflow-hidden rounded-2xl border border-border/70 bg-muted/30 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] hover:border-border/90 transition-all duration-200",
         className
       )}
       {...props}
@@ -53,7 +53,7 @@ export function SettingNote({
   return (
     <div
       className={cn(
-        "flex gap-2.5 rounded-xl border border-border/70 bg-muted/40 p-3",
+        "flex gap-3 rounded-xl border border-border/60 bg-muted/25 p-3.5 text-xs text-muted-foreground",
         className
       )}
     >
@@ -61,11 +61,11 @@ export function SettingNote({
           on the first line whatever its own size — a margin nudge would drift
           the moment either the icon or the type scale changes. */}
       {Icon ? (
-        <span className="flex h-5 shrink-0 items-center">
-          <Icon className="size-3.5 text-muted-foreground" aria-hidden="true" />
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground">
+          <Icon className="size-3.5" aria-hidden="true" />
         </span>
       ) : null}
-      <p className="text-xs leading-5 text-muted-foreground">{children}</p>
+      <p className="min-w-0 leading-5 text-muted-foreground/90">{children}</p>
     </div>
   )
 }

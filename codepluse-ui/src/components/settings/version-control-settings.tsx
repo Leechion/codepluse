@@ -153,28 +153,31 @@ function AccountRow({
   t: ReturnType<typeof useTranslations<"VersionControlSettings">>
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border bg-muted/10 px-3 py-2.5">
-      <Avatar>
+    <div className="flex items-center gap-3.5 rounded-xl border border-border/60 bg-muted/15 px-3.5 py-3 hover:bg-muted/25 hover:border-border/80 transition-all duration-150">
+      <Avatar className="size-9 border border-border/40 shadow-2xs">
         {account.avatar_url && (
           <AvatarImage src={account.avatar_url} alt={account.username} />
         )}
-        <AvatarFallback className="text-xs font-medium">
+        <AvatarFallback className="text-xs font-semibold">
           {accountInitial(account.username)}
         </AvatarFallback>
       </Avatar>
 
       <div className="flex-1 min-w-0 space-y-1">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium truncate">
+          <span className="text-sm font-semibold tracking-tight truncate">
             {account.username}
           </span>
           {account.is_default && (
-            <Badge variant="secondary" className="text-3xs px-1.5 py-0">
+            <Badge
+              variant="secondary"
+              className="text-3xs px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-medium"
+            >
               {t("defaultLabel")}
             </Badge>
           )}
         </div>
-        <div className="flex items-center gap-2 text-2xs text-muted-foreground">
+        <div className="flex items-center gap-2 text-2xs text-muted-foreground/80">
           <span className="truncate">{account.server_url}</span>
           {account.scopes.length > 0 && (
             <>
@@ -680,22 +683,28 @@ export function VersionControlSettings() {
     <ScrollArea className="h-full">
       <div className="w-full space-y-6 p-4 md:p-6 max-w-5xl mx-auto">
         {/* Header */}
-        <section className="space-y-1">
-          <div className="flex items-center gap-2">
-            <GitBranch className="h-5 w-5 text-primary" />
-            <h1 className="text-base font-semibold">{t("sectionTitle")}</h1>
+        <section className="relative overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/5 via-card to-card p-5 shadow-xs">
+          <div className="flex items-center gap-3.5">
+            <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-2xs">
+              <GitBranch className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-base font-bold tracking-tight text-foreground">{t("sectionTitle")}</h1>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {t("sectionDescription")}
+              </p>
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {t("sectionDescription")}
-          </p>
         </section>
 
         {/* 1. Git Executable Environment */}
-        <section className="rounded-xl border bg-card p-4 space-y-4 shadow-2xs">
+        <section className="rounded-2xl border border-border/70 bg-card p-5 space-y-4.5 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] hover:border-border/90 transition-all duration-200">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Sliders className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">{t("gitTitle")}</h2>
+            <div className="flex items-center gap-2.5">
+              <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0 transition-colors">
+                <Sliders className="h-3.5 w-3.5" />
+              </span>
+              <h2 className="text-sm font-semibold tracking-tight">{t("gitTitle")}</h2>
             </div>
             <div className="flex items-center gap-2">
               <Button
@@ -703,33 +712,30 @@ export function VersionControlSettings() {
                 variant="ghost"
                 onClick={loadData}
                 disabled={loading}
+                className="rounded-lg h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground"
               >
-                <RefreshCw className="h-3 w-3 mr-1" />
+                <RefreshCw className="h-3 w-3 mr-1.5" />
                 {t("test")}
               </Button>
             </div>
           </div>
 
-          <div className="rounded-lg border bg-muted/20 px-3.5 py-3 text-xs space-y-2">
+          <div className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3.5 text-xs space-y-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {gitInfo?.installed ? (
-                  <>
-                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                    <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                      {t("gitDetected")}
-                    </span>
-                  </>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium text-xs">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                    {t("gitDetected")}
+                  </span>
                 ) : (
-                  <>
-                    <XCircle className="h-4 w-4 text-rose-500" />
-                    <span className="text-rose-600 dark:text-rose-400 font-medium">
-                      {t("gitNotFound")}
-                    </span>
-                  </>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 font-medium text-xs">
+                    <XCircle className="h-3.5 w-3.5 text-rose-500" />
+                    {t("gitNotFound")}
+                  </span>
                 )}
                 {gitInfo?.version && (
-                  <Badge variant="outline" className="text-3xs font-mono">
+                  <Badge variant="outline" className="text-3xs font-mono bg-background/50 border-border/60">
                     {gitInfo.version}
                   </Badge>
                 )}
@@ -739,13 +745,14 @@ export function VersionControlSettings() {
                   size="xs"
                   variant="outline"
                   onClick={() => setEditingPath(true)}
+                  className="rounded-lg h-7 px-2.5 text-xs"
                 >
                   {t("customGitPath")}
                 </Button>
               )}
             </div>
             {gitInfo?.path && (
-              <p className="text-muted-foreground font-mono text-2xs truncate">
+              <p className="text-muted-foreground/80 font-mono text-2xs truncate">
                 {t("gitPath")}: {gitInfo.path}
               </p>
             )}
@@ -788,23 +795,25 @@ export function VersionControlSettings() {
         </section>
 
         {/* 2. Git Commit Identity */}
-        <section className="rounded-xl border bg-card p-4 space-y-4 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <User className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">{t("identityTitle")}</h2>
+        <section className="rounded-2xl border border-border/70 bg-card p-5 space-y-4.5 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] hover:border-border/90 transition-all duration-200">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0 transition-colors">
+              <User className="h-3.5 w-3.5" />
+            </span>
+            <h2 className="text-sm font-semibold tracking-tight">{t("identityTitle")}</h2>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground/90">
             {t("identityDescription")}
           </p>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Global identity */}
-            <div className="rounded-lg border bg-muted/10 p-3.5 space-y-3">
+            <div className="rounded-xl border border-border/60 bg-muted/15 p-4 space-y-3.5 hover:bg-muted/25 transition-colors">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold">
                   {t("globalIdentity")}
                 </span>
-                <Badge variant="secondary" className="text-3xs">
+                <Badge variant="secondary" className="text-3xs font-mono">
                   git config --global
                 </Badge>
               </div>
@@ -817,7 +826,7 @@ export function VersionControlSettings() {
                     value={globalName}
                     onChange={(e) => setGlobalName(e.target.value)}
                     placeholder={t("userNamePlaceholder")}
-                    className="h-8 text-xs"
+                    className="h-8 text-xs rounded-lg"
                   />
                 </div>
                 <div>
@@ -828,7 +837,7 @@ export function VersionControlSettings() {
                     value={globalEmail}
                     onChange={(e) => setGlobalEmail(e.target.value)}
                     placeholder={t("userEmailPlaceholder")}
-                    className="h-8 text-xs"
+                    className="h-8 text-xs rounded-lg"
                   />
                 </div>
               </div>
@@ -837,6 +846,7 @@ export function VersionControlSettings() {
                   size="xs"
                   onClick={handleSaveGlobalIdentity}
                   disabled={savingIdentity}
+                  className="rounded-lg h-7 px-3 text-xs"
                 >
                   {savingIdentity ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -848,13 +858,13 @@ export function VersionControlSettings() {
             </div>
 
             {/* Local workspace identity */}
-            <div className="rounded-lg border bg-muted/10 p-3.5 space-y-3">
+            <div className="rounded-xl border border-border/60 bg-muted/15 p-4 space-y-3.5 hover:bg-muted/25 transition-colors">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold">
                   {t("localIdentity")}
                 </span>
                 {userConfig?.is_repo ? (
-                  <Badge variant="outline" className="text-3xs">
+                  <Badge variant="outline" className="text-3xs font-mono bg-background/50 border-border/60">
                     git config --local
                   </Badge>
                 ) : (
@@ -872,7 +882,7 @@ export function VersionControlSettings() {
                     value={localName}
                     onChange={(e) => setLocalName(e.target.value)}
                     placeholder={globalName || t("userNamePlaceholder")}
-                    className="h-8 text-xs"
+                    className="h-8 text-xs rounded-lg"
                     disabled={!userConfig?.is_repo}
                   />
                 </div>
@@ -884,7 +894,7 @@ export function VersionControlSettings() {
                     value={localEmail}
                     onChange={(e) => setLocalEmail(e.target.value)}
                     placeholder={globalEmail || t("userEmailPlaceholder")}
-                    className="h-8 text-xs"
+                    className="h-8 text-xs rounded-lg"
                     disabled={!userConfig?.is_repo}
                   />
                 </div>
@@ -896,6 +906,7 @@ export function VersionControlSettings() {
                     variant="outline"
                     onClick={handleClearLocalIdentity}
                     disabled={savingIdentity || !userConfig?.is_repo}
+                    className="rounded-lg h-7 px-2.5 text-xs"
                   >
                     {t("clearLocalIdentity")}
                   </Button>
@@ -904,6 +915,7 @@ export function VersionControlSettings() {
                   size="xs"
                   onClick={handleSaveLocalIdentity}
                   disabled={savingIdentity || !userConfig?.is_repo}
+                  className="rounded-lg h-7 px-3 text-xs"
                 >
                   {savingIdentity ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -917,12 +929,14 @@ export function VersionControlSettings() {
         </section>
 
         {/* 3. Preferences & Behavior */}
-        <section className="rounded-xl border bg-card p-4 space-y-4 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <Sliders className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">{t("behaviorTitle")}</h2>
+        <section className="rounded-2xl border border-border/70 bg-card p-5 space-y-4.5 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] hover:border-border/90 transition-all duration-200">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0 transition-colors">
+              <Sliders className="h-3.5 w-3.5" />
+            </span>
+            <h2 className="text-sm font-semibold tracking-tight">{t("behaviorTitle")}</h2>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground/90">
             {t("behaviorDescription")}
           </p>
 
@@ -935,7 +949,7 @@ export function VersionControlSettings() {
                 value={defaultBranch}
                 onChange={(e) => setDefaultBranch(e.target.value)}
                 placeholder={t("defaultBranchPlaceholder")}
-                className="h-8 text-xs"
+                className="h-8 text-xs rounded-lg"
               />
             </div>
 
@@ -944,7 +958,7 @@ export function VersionControlSettings() {
                 {t("autoCrlf")}
               </label>
               <Select value={autoCrlf} onValueChange={setAutoCrlf}>
-                <SelectTrigger className="h-8 text-xs">
+                <SelectTrigger className="h-8 text-xs rounded-lg">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -962,7 +976,7 @@ export function VersionControlSettings() {
             </div>
           </div>
 
-          <div className="rounded-lg border bg-muted/10 p-3.5 space-y-3">
+          <div className="rounded-xl border border-border/60 bg-muted/15 p-4 space-y-3.5">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
                 <span className="text-xs font-medium">{t("autoFetch")}</span>
@@ -974,7 +988,7 @@ export function VersionControlSettings() {
             </div>
 
             {autoFetch && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-3 border-t border-border/50">
                 <div className="space-y-1">
                   <label className="text-2xs font-medium text-muted-foreground">
                     {t("fetchInterval")}
@@ -987,7 +1001,7 @@ export function VersionControlSettings() {
                     onChange={(e) =>
                       setFetchInterval(Number(e.target.value) || 10)
                     }
-                    className="h-8 text-xs"
+                    className="h-8 text-xs rounded-lg"
                   />
                 </div>
                 <div className="flex items-center justify-between pt-4">
@@ -1004,7 +1018,7 @@ export function VersionControlSettings() {
           </div>
 
           {activeFolder?.path && (
-            <div className="rounded-lg border border-dashed bg-muted/5 p-3 flex items-center justify-between gap-3">
+            <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 p-3.5 flex items-center justify-between gap-3">
               <div className="space-y-0.5 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
@@ -1021,6 +1035,7 @@ export function VersionControlSettings() {
                 variant="outline"
                 onClick={handleAddSafeDirectory}
                 disabled={addingSafeDir}
+                className="rounded-lg h-7 px-2.5 text-xs"
               >
                 {addingSafeDir ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
@@ -1039,6 +1054,7 @@ export function VersionControlSettings() {
               size="sm"
               onClick={handleSaveBehavior}
               disabled={savingBehavior}
+              className="rounded-lg h-8 px-3.5 text-xs"
             >
               {savingBehavior ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1050,15 +1066,18 @@ export function VersionControlSettings() {
         </section>
 
         {/* 4. SSH Keys Management */}
-        <section className="rounded-xl border bg-card p-4 space-y-4 shadow-2xs">
+        <section className="rounded-2xl border border-border/70 bg-card p-5 space-y-4.5 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] hover:border-border/90 transition-all duration-200">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Key className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">{t("sshTitle")}</h2>
+            <div className="flex items-center gap-2.5">
+              <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0 transition-colors">
+                <Key className="h-3.5 w-3.5" />
+              </span>
+              <h2 className="text-sm font-semibold tracking-tight">{t("sshTitle")}</h2>
             </div>
             <Button
               size="xs"
               variant="outline"
+              className="rounded-lg h-7 px-2.5 text-xs"
               onClick={() => {
                 setGenerateEmail(globalEmail || "")
                 setGenerateSshOpen(true)
@@ -1068,12 +1087,12 @@ export function VersionControlSettings() {
               {t("generateSshKey")}
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground/90">
             {t("sshDescription")}
           </p>
 
           {sshKeys.length === 0 ? (
-            <div className="rounded-md border border-dashed bg-muted/10 px-4 py-5 text-center text-xs text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-8 text-center text-xs text-muted-foreground">
               {t("noSshKeys")}
             </div>
           ) : (
@@ -1083,7 +1102,7 @@ export function VersionControlSettings() {
                 return (
                   <div
                     key={key.path}
-                    className="flex items-center justify-between gap-3 rounded-lg border bg-muted/10 px-3.5 py-2.5"
+                    className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-muted/15 px-3.5 py-3 hover:bg-muted/25 transition-colors"
                   >
                     <div className="space-y-0.5 min-w-0">
                       <div className="flex items-center gap-2">
@@ -1092,7 +1111,7 @@ export function VersionControlSettings() {
                         </span>
                         <Badge
                           variant="secondary"
-                          className="text-3xs uppercase font-mono"
+                          className="text-3xs uppercase font-mono px-1.5 py-0.5"
                         >
                           {key.key_type.replace(/^ssh-/, "")}
                         </Badge>
@@ -1110,7 +1129,7 @@ export function VersionControlSettings() {
                       size="xs"
                       variant="ghost"
                       onClick={() => handleCopySshKey(key)}
-                      className="shrink-0"
+                      className="shrink-0 rounded-lg h-7 px-2 text-xs"
                     >
                       {isCopied ? (
                         <>
@@ -1134,17 +1153,19 @@ export function VersionControlSettings() {
         </section>
 
         {/* 5. GitHub Accounts */}
-        <section className="rounded-xl border bg-card p-4 space-y-4 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <Github className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">{t("githubTitle")}</h2>
+        <section className="rounded-2xl border border-border/70 bg-card p-5 space-y-4.5 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] hover:border-border/90 transition-all duration-200">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0 transition-colors">
+              <Github className="h-3.5 w-3.5" />
+            </span>
+            <h2 className="text-sm font-semibold tracking-tight">{t("githubTitle")}</h2>
           </div>
-          <p className="text-xs text-muted-foreground leading-5">
+          <p className="text-xs text-muted-foreground/90 leading-5">
             {t("githubDescription")}
           </p>
 
           {githubAccounts.length === 0 ? (
-            <div className="rounded-md border border-dashed bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-8 text-center text-xs text-muted-foreground">
               {t("noAccounts")}
             </div>
           ) : (
@@ -1165,24 +1186,30 @@ export function VersionControlSettings() {
           )}
 
           <div className="flex justify-end">
-            <Button size="sm" onClick={() => setAddGitHubOpen(true)}>
+            <Button
+              size="sm"
+              onClick={() => setAddGitHubOpen(true)}
+              className="rounded-lg h-8 px-3.5 text-xs font-medium"
+            >
               {t("addAccount")}
             </Button>
           </div>
         </section>
 
         {/* 6. GitLab Accounts */}
-        <section className="rounded-xl border bg-card p-4 space-y-4 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <Gitlab className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">{t("gitlabTitle")}</h2>
+        <section className="rounded-2xl border border-border/70 bg-card p-5 space-y-4.5 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] hover:border-border/90 transition-all duration-200">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0 transition-colors">
+              <Gitlab className="h-3.5 w-3.5" />
+            </span>
+            <h2 className="text-sm font-semibold tracking-tight">{t("gitlabTitle")}</h2>
           </div>
-          <p className="text-xs text-muted-foreground leading-5">
+          <p className="text-xs text-muted-foreground/90 leading-5">
             {t("gitlabDescription")}
           </p>
 
           {gitlabAccounts.length === 0 ? (
-            <div className="rounded-md border border-dashed bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-8 text-center text-xs text-muted-foreground">
               {t("gitlabNoAccounts")}
             </div>
           ) : (
@@ -1203,24 +1230,30 @@ export function VersionControlSettings() {
           )}
 
           <div className="flex justify-end">
-            <Button size="sm" onClick={() => setAddGitLabOpen(true)}>
+            <Button
+              size="sm"
+              onClick={() => setAddGitLabOpen(true)}
+              className="rounded-lg h-8 px-3.5 text-xs font-medium"
+            >
               {t("addAccount")}
             </Button>
           </div>
         </section>
 
         {/* 7. Gitea Accounts */}
-        <section className="rounded-xl border bg-card p-4 space-y-4 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <GitFork className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">{t("giteaTitle")}</h2>
+        <section className="rounded-2xl border border-border/70 bg-card p-5 space-y-4.5 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] hover:border-border/90 transition-all duration-200">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0 transition-colors">
+              <GitFork className="h-3.5 w-3.5" />
+            </span>
+            <h2 className="text-sm font-semibold tracking-tight">{t("giteaTitle")}</h2>
           </div>
-          <p className="text-xs text-muted-foreground leading-5">
+          <p className="text-xs text-muted-foreground/90 leading-5">
             {t("giteaDescription")}
           </p>
 
           {giteaAccounts.length === 0 ? (
-            <div className="rounded-md border border-dashed bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-8 text-center text-xs text-muted-foreground">
               {t("giteaNoAccounts")}
             </div>
           ) : (
@@ -1241,24 +1274,30 @@ export function VersionControlSettings() {
           )}
 
           <div className="flex justify-end">
-            <Button size="sm" onClick={() => setAddGiteaOpen(true)}>
+            <Button
+              size="sm"
+              onClick={() => setAddGiteaOpen(true)}
+              className="rounded-lg h-8 px-3.5 text-xs font-medium"
+            >
               {t("addAccount")}
             </Button>
           </div>
         </section>
 
         {/* 8. CNB Accounts */}
-        <section className="rounded-xl border bg-card p-4 space-y-4 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <Cloud className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">{t("cnbTitle")}</h2>
+        <section className="rounded-2xl border border-border/70 bg-card p-5 space-y-4.5 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] hover:border-border/90 transition-all duration-200">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0 transition-colors">
+              <Cloud className="h-3.5 w-3.5" />
+            </span>
+            <h2 className="text-sm font-semibold tracking-tight">{t("cnbTitle")}</h2>
           </div>
-          <p className="text-xs text-muted-foreground leading-5">
+          <p className="text-xs text-muted-foreground/90 leading-5">
             {t("cnbDescription")}
           </p>
 
           {cnbAccounts.length === 0 ? (
-            <div className="rounded-md border border-dashed bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-8 text-center text-xs text-muted-foreground">
               {t("cnbNoAccounts")}
             </div>
           ) : (
@@ -1279,26 +1318,32 @@ export function VersionControlSettings() {
           )}
 
           <div className="flex justify-end">
-            <Button size="sm" onClick={() => setAddCnbOpen(true)}>
+            <Button
+              size="sm"
+              onClick={() => setAddCnbOpen(true)}
+              className="rounded-lg h-8 px-3.5 text-xs font-medium"
+            >
               {t("addAccount")}
             </Button>
           </div>
         </section>
 
         {/* 9. Plain Git Accounts */}
-        <section className="rounded-xl border bg-card p-4 space-y-4 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <Globe className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">
+        <section className="rounded-2xl border border-border/70 bg-card p-5 space-y-4.5 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] hover:border-border/90 transition-all duration-200">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0 transition-colors">
+              <Globe className="h-3.5 w-3.5" />
+            </span>
+            <h2 className="text-sm font-semibold tracking-tight">
               {t("gitAccount.sectionTitle")}
             </h2>
           </div>
-          <p className="text-xs text-muted-foreground leading-5">
+          <p className="text-xs text-muted-foreground/90 leading-5">
             {t("gitAccount.sectionDescription")}
           </p>
 
           {gitAccounts.length === 0 ? (
-            <div className="rounded-md border border-dashed bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-8 text-center text-xs text-muted-foreground">
               {t("gitAccount.noAccounts")}
             </div>
           ) : (
@@ -1318,7 +1363,11 @@ export function VersionControlSettings() {
           )}
 
           <div className="flex justify-end">
-            <Button size="sm" onClick={() => setAddGitOpen(true)}>
+            <Button
+              size="sm"
+              onClick={() => setAddGitOpen(true)}
+              className="rounded-lg h-8 px-3.5 text-xs font-medium"
+            >
               {t("gitAccount.addAccount")}
             </Button>
           </div>

@@ -218,19 +218,19 @@ export function SettingsShell({
           type="button"
           variant="ghost"
           size="sm"
-          className="mb-1 w-full justify-start px-2 text-muted-foreground hover:text-foreground"
+          className="mb-2 w-full justify-start px-2.5 h-8.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
           onClick={() => {
             setNavOpen(false)
             onClose()
           }}
         >
-          <span className="inline-flex items-center gap-1">
+          <span className="inline-flex items-center gap-2">
             <ArrowLeft className="h-3.5 w-3.5" />
             回到工作区
           </span>
         </Button>
       )}
-      <div className="px-2 pb-2 text-2xs font-medium text-muted-foreground">
+      <div className="px-2.5 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 select-none">
         {t("preferences")}
       </div>
       <ScrollArea className="min-h-0 flex-1">
@@ -247,17 +247,22 @@ export function SettingsShell({
                 variant={active ? "secondary" : "ghost"}
                 size="sm"
                 className={cn(
-                  "relative w-full justify-start px-2 transition-colors",
-                  // 激活项：左侧 2px 主色圆角指示条 + 中字重，扫一眼就能定位当前页。
-                  active &&
-                    "font-medium before:absolute before:bottom-1.5 before:left-0 before:top-1.5 before:w-0.5 before:rounded-full before:bg-primary"
+                  "group relative w-full justify-start px-2.5 h-8.5 rounded-lg text-xs font-normal transition-all duration-150",
+                  active
+                    ? "bg-primary/10 text-primary font-medium hover:bg-primary/15 shadow-2xs before:absolute before:bottom-1.5 before:left-1 before:top-1.5 before:w-1 before:rounded-full before:bg-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
                 )}
                 type="button"
                 onClick={() => navigateTo(item.href)}
                 aria-current={active ? "page" : undefined}
               >
-                <span className="inline-flex items-center gap-1">
-                  <Icon className="h-3.5 w-3.5" />
+                <span className="inline-flex items-center gap-2.5">
+                  <Icon
+                    className={cn(
+                      "h-4 w-4 shrink-0 transition-transform duration-150 group-hover:scale-105",
+                      active && "text-primary"
+                    )}
+                  />
                   {item.labelKey === "skills"
                     ? navigation("skills")
                     : t(translationKey)}
@@ -297,7 +302,9 @@ export function SettingsShell({
           }
           center={
             onClose ? undefined : (
-              <div className="text-sm font-bold tracking-tight">{t("title")}</div>
+              <div className="text-xs font-semibold tracking-tight text-foreground/90">
+                {t("title")}
+              </div>
             )
           }
         />
@@ -306,7 +313,7 @@ export function SettingsShell({
       <div className="cp-settings-layout flex-1 min-h-0 flex">
         {/* Desktop sidebar */}
         {!isMobile && (
-          <aside className="cp-settings-sidebar flex min-h-0 w-56 shrink-0 flex-col border-r px-2 py-3">
+          <aside className="cp-settings-sidebar flex min-h-0 w-60 shrink-0 flex-col border-r border-border/60 bg-muted/20 px-2.5 py-3.5">
             {navContent}
           </aside>
         )}
@@ -335,7 +342,7 @@ export function SettingsShell({
         )}
 
         <section
-          className="cp-settings-content flex-1 min-w-0 min-h-0 overflow-hidden"
+          className="cp-settings-content flex-1 min-w-0 min-h-0 overflow-hidden bg-background/50"
         >
           {children}
         </section>

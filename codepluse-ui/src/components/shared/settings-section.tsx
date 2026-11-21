@@ -93,19 +93,21 @@ export function SettingsSection({
   const heading = (
     <>
       {Icon ? (
-        <Icon
-          className="size-4 shrink-0 text-muted-foreground"
-          aria-hidden="true"
-        />
+        <span className="flex size-6.5 items-center justify-center rounded-md bg-primary/10 text-primary shrink-0 transition-colors">
+          <Icon
+            className="size-3.5 shrink-0"
+            aria-hidden="true"
+          />
+        </span>
       ) : null}
-      {title}
+      <span className="tracking-tight">{title}</span>
     </>
   )
 
   const descriptionNode = description ? (
     <p
       data-settings-description=""
-      className="text-xs leading-5 text-muted-foreground"
+      className="text-xs leading-5 text-muted-foreground/90"
     >
       {description}
     </p>
@@ -127,7 +129,7 @@ export function SettingsSection({
       <Collapsible open={expanded} onOpenChange={onOpenChange} asChild>
         <section
           data-settings-card=""
-          className={cn("overflow-hidden rounded-xl border bg-card", className)}
+          className={cn("overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] hover:border-border/90 transition-all duration-200", className)}
         >
           {/* `relative` is the anchor the trigger stretches its hit area to,
               and `has-…:hover` paints the hover state from the trigger rather
@@ -135,9 +137,9 @@ export function SettingsSection({
               plain, because clicking there does not fold anything. */}
           <div
             className={cn(
-              "relative flex justify-between gap-3 border-b border-transparent p-4 transition-colors has-[[data-slot=collapsible-trigger]:hover]:bg-muted/50",
+              "relative flex justify-between gap-3 border-b border-transparent p-4.5 transition-colors has-[[data-slot=collapsible-trigger]:hover]:bg-muted/40",
               description ? "items-start" : "items-center",
-              expanded && "border-border"
+              expanded && "border-border/60"
             )}
           >
             <div className="min-w-0 flex-1 space-y-1">
@@ -153,7 +155,7 @@ export function SettingsSection({
                   <CollapsibleTrigger asChild>
                     <button
                       type="button"
-                      className="group/settings-section flex cursor-pointer items-center gap-2 text-left outline-none before:absolute before:inset-0 focus-visible:before:ring-2 focus-visible:before:ring-ring/50 focus-visible:before:ring-inset"
+                      className="group/settings-section flex cursor-pointer items-center gap-2.5 text-left outline-none before:absolute before:inset-0 focus-visible:before:ring-2 focus-visible:before:ring-ring/50 focus-visible:before:ring-inset"
                     >
                       {heading}
                       <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]/settings-section:rotate-180" />
@@ -164,12 +166,12 @@ export function SettingsSection({
                   // control — the same one-line section it was before.
                   <Label
                     htmlFor={htmlFor}
-                    className="gap-2 text-sm leading-normal font-semibold"
+                    className="gap-2.5 text-sm leading-normal font-semibold cursor-pointer"
                   >
                     {heading}
                   </Label>
                 ) : (
-                  <span className="flex items-center gap-2">{heading}</span>
+                  <span className="flex items-center gap-2.5">{heading}</span>
                 )}
               </h2>
               {descriptionNode}
@@ -180,7 +182,7 @@ export function SettingsSection({
               <div className="relative shrink-0">{control}</div>
             ) : null}
           </div>
-          <CollapsibleContent className="space-y-3 p-4">
+          <CollapsibleContent className="space-y-3.5 p-4.5 pt-2 border-t border-border/40">
             {children}
           </CollapsibleContent>
         </section>
@@ -191,7 +193,7 @@ export function SettingsSection({
   return (
     <section
       data-settings-card=""
-      className={cn("space-y-3 rounded-xl border bg-card p-4", className)}
+      className={cn("space-y-4 rounded-2xl border border-border/70 bg-card p-4.5 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] hover:border-border/90 transition-all duration-200", className)}
     >
       {/* Same alignment rule as `SettingRow`: with an explanation the control
           sits on the heading's line, without one the two center on each other. */}
@@ -208,12 +210,12 @@ export function SettingsSection({
               // control and the heading is still a heading to both roles.
               <Label
                 htmlFor={htmlFor}
-                className="gap-2 text-sm leading-normal font-semibold"
+                className="gap-2.5 text-sm leading-normal font-semibold cursor-pointer"
               >
                 {heading}
               </Label>
             ) : (
-              <span className="flex items-center gap-2">{heading}</span>
+              <span className="flex items-center gap-2.5">{heading}</span>
             )}
           </h2>
           {descriptionNode}
